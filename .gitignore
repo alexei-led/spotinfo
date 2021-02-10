@@ -1,0 +1,20 @@
+# code coverage
+.cover
+
+# git repo
+.git
+
+# IDE customization
+.idea
+.vscode
+
+# binaries
+.bin
+
+# env customization
+.env
+
+# temporary
+**/.DS_Store
+**/debug
+**/debug.test
