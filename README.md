@@ -142,3 +142,8 @@ Please specify the following GitHub secrets:
 1. `CR_PAT` - Current GitHub Personal Access Token (with `write/read` packages permission)
 1. `DOCKER_REGISTRY` - _optional_; Docker Registry name, default to `docker.io`
 1. `DOCKER_REPOSITORY` - _optional_; Docker image repository name, default to `$GITHUB_REPOSITORY` (i.e. `user/repo`)
+
+Additional secret to create GitHub Release:
+
+1. `RELEASE_TOKEN` - GitHub Personal Access Token (with `repo` scope)
+

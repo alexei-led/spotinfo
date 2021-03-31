@@ -8,8 +8,13 @@ PKGS     = $(shell $(GO) list ./...)
 TESTPKGS = $(shell $(GO) list -f \
 			'{{ if or .TestGoFiles .XTestGoFiles }}{{ .ImportPath }}{{ end }}' \
 			$(PKGS))
+LDFLAGS_VERSION = -X main.Version=$(VERSION) -X main.BuildDate=$(DATE) -X main.GitCommit=$(COMMIT) -X main.GitBranch=$(BRANCH)
 LINT_CONFIG = $(CURDIR)/.golangci.yml
 BIN      = $(CURDIR)/.bin
+
+PLATFORMS     = darwin linux windows
+ARCHITECTURES = amd64 arm64
+
 TARGETOS   ?= $(GOOS)
 TARGETARCH ?= $(GOARCH)
 
@@ -27,12 +32,25 @@ export GOPROXY=https://proxy.golang.org
 all: update_data fmt lint test-verbose ; $(info $(M) building $(TARGETOS)/$(TARGETARCH) binary...) @ ## Build program binary
 	$Q env GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) $(GO) build \
 		-tags release \
-		-ldflags '-X main.Version=$(VERSION) -X main.BuildDate=$(DATE) -X main.GitCommit=$(COMMIT) -X main.GitBranch=$(BRANCH)' \
+		-ldflags "$(LDFLAGS_VERSION)" \
 		-o $(BIN)/$(basename $(MODULE)) ./cmd/main.go
+
+# Release for multiple platforms
+
+.PHONY: release
+release: clean ; $(info $(M) building binaries for multiple os/arch...) @ ## Build program binary for platforms and os
+	$(foreach GOOS, $(PLATFORMS),\
+		$(foreach GOARCH, $(ARCHITECTURES), \
+			$(shell \
+				if [ "$(GOARCH)" = "arm64" ] && [ "$(GOOS)" == "windows" ]; then exit 0; fi; \
+				$(GO) build \
+				-tags release \
+				-ldflags "$(LDFLAGS_VERSION)" \
+				-o $(BIN)/$(basename $(MODULE))_$(GOOS)_$(GOARCH) ./cmd/main.go || true)))
 
 # Tools
 
-setup-tools: setup-lint setup-gocov setup-gocov-xml setup-go2xunit setup-mockery
+setup-tools: setup-lint setup-gocov setup-gocov-xml setup-go2xunit setup-mockery setup-ghr
 
 setup-lint:
 	$(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.39
@@ -44,12 +62,15 @@ setup-go2xunit:
 	$(GO) install github.com/tebeka/go2xunit
 setup-mockery:
 	$(GO) install github.com/vektra/mockery/v2/
+setup-ghr:
+	$(GO) install github.com/tcnksm/ghr
 
 GOLINT=golangci-lint
 GOCOV=gocov
 GOCOVXML=gocov-xml
 GO2XUNIT=go2xunit
 GOMOCK=mockery
+GHR=ghr
 
 # upstream data
 SPOT_ADVISOR_DATA_URL := "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json"
@@ -110,6 +131,24 @@ lint: setup-lint; $(info $(M) running golangci-lint...) @ ## Run golangci-lint l
 	# updating path since golangci-lint is looking for go binary and this may lead to
 	# conflict when multiple go versions are installed
 	$Q env PATH=$(shell $(GO) env GOROOT)/bin:$(PATH) $(GOLINT) run -v -c $(LINT_CONFIG) ./...
+
+# generate github draft release
+.PHONY: github-release
+github-release: setup-ghr | release ;$(info $(M) generating github draft release...) @ ## run ghr tool
+ifndef RELEASE_TOKEN
+	$(error RELEASE_TOKEN is undefined)
+endif
+	$Q $(GHR) \
+		-t $(RELEASE_TOKEN) \
+		-u alexei-led \
+		-r spotinfo \
+		-n "v$(RELEASE_TAG)" \
+		-b "Draft Release" \
+		-prerelease \
+		-draft \
+		$(RELEASE_TAG) \
+		$(BIN)/$(dir $(MODULE))
+
 
 # generate test mock for interfaces
 .PHONY: mockgen

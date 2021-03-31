@@ -29,11 +29,27 @@ RUN --mount=type=cache,target=/go/mod go mod download
 # copy sources
 COPY . .
 
-# build
-RUN TARGETOS=${TARGETOS} TARGETARCH=${TARGETARCH} make
+# test and build
+RUN --mount=type=cache,target=/root/.cache/go-build TARGETOS=${TARGETOS} TARGETARCH=${TARGETARCH} make
 
 #
-# ------ gtoken release Docker image ------
+# ------ spotinfo GitHub Release
+#
+FROM --platform=${BUILDPLATFORM} build as github-release
+
+# build argument to secify if to create a GitHub release
+ARG RELEASE=false
+# Release Tag: `RELEASE_TAG=$(git describe --abbrev=0)`
+ARG RELEASE_TAG
+# release to GitHub; pass RELEASE_TOKEN ras build-arg
+ARG RELEASE_TOKEN
+
+# build pumba for all platforms and release to GitHub
+RUN --mount=type=cache,target=/root/.cache/go-build if $RELEASE; then make github-release; fi
+
+
+#
+# ------ spotinfo release Docker image ------
 #
 FROM scratch
 
