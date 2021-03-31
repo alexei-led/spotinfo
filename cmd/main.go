@@ -188,7 +188,7 @@ func main() {
 			},
 			&cli.StringFlag{
 				Name:  "sort",
-				Usage: "sort results by interruption(default)|type|savings",
+				Usage: "sort results by interruption|type|savings",
 				Value: "interruption",
 			},
 		},
