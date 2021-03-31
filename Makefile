@@ -24,7 +24,7 @@ export CGO_ENABLED=0
 export GOPROXY=https://proxy.golang.org
 
 .PHONY: all
-all: fmt lint test ; $(info $(M) building $(TARGETOS)/$(TARGETARCH) binary...) @ ## Build program binary
+all: update_data fmt lint test-verbose ; $(info $(M) building $(TARGETOS)/$(TARGETARCH) binary...) @ ## Build program binary
 	$Q env GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) $(GO) build \
 		-tags release \
 		-ldflags '-X main.Version=$(VERSION) -X main.BuildDate=$(DATE) -X main.GitCommit=$(COMMIT) -X main.GitBranch=$(BRANCH)' \
@@ -35,7 +35,7 @@ all: fmt lint test ; $(info $(M) building $(TARGETOS)/$(TARGETARCH) binary...) @
 setup-tools: setup-lint setup-gocov setup-gocov-xml setup-go2xunit setup-mockery
 
 setup-lint:
-	$(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.36.0
+	$(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.39
 setup-gocov:
 	$(GO) install github.com/axw/gocov/...
 setup-gocov-xml:
@@ -50,6 +50,24 @@ GOCOV=gocov
 GOCOVXML=gocov-xml
 GO2XUNIT=go2xunit
 GOMOCK=mockery
+
+# upstream data
+SPOT_ADVISOR_DATA_URL := "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json"
+DEPS := "wget"
+
+.PHONY: check_deps
+check_deps: ; @ ## Verify the system has all dependencies installed
+	@for DEP in $(shell echo "$(DEPS)"); do \
+		command -v "$$DEP" > /dev/null 2>&1 \
+		|| (echo "Error: dependency '$$DEP' is absent" ; exit 1); \
+	done
+	@echo "all dependencies satisfied: $(DEPS)"
+
+.PHONY: update_data
+update_data: check_deps; @ ## Update Spot Advisor data file
+	@mkdir -p data
+	@wget -nv $(SPOT_ADVISOR_DATA_URL) -O - > public/spot/data/spot-advisor-data.json
+	@echo "spot advisor data updated"
 
 # Tests
 
@@ -88,14 +106,14 @@ test-coverage: fmt test-coverage-tools ; $(info $(M) running coverage tests...) 
 	$Q $(GOCOV) convert $(COVERAGE_PROFILE) | $(GOCOVXML) > $(COVERAGE_XML)
 
 .PHONY: lint
-lint: setup-lint; $(info $(M) running golangci-lint...) @ ## Run golangci-lint
+lint: setup-lint; $(info $(M) running golangci-lint...) @ ## Run golangci-lint linters
 	# updating path since golangci-lint is looking for go binary and this may lead to
 	# conflict when multiple go versions are installed
 	$Q env PATH=$(shell $(GO) env GOROOT)/bin:$(PATH) $(GOLINT) run -v -c $(LINT_CONFIG) ./...
 
 # generate test mock for interfaces
 .PHONY: mockgen
-mockgen: | setup-mockery ; $(info $(M) generating mocks...) @ ## Run mockery
+mockgen: | setup-mockery ; $(info $(M) generating mocks...) @ ## Run mockery to generate mocks for all interfaces
 	$Q $(GOMOCK)  --dir internal --recursive --all
 	$Q $(GOMOCK)  --dir public --recursive --all
 

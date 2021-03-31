@@ -11,12 +11,23 @@ The `spotinfo` uses Docker both as a CI tool and for releasing the final `spotin
 ## Makefile
 
 The `spotinfo` `Makefile` is used for task automation only: compile, lint, test, etc.
-The project requires Go version 1.16.
+The project requires Go version 1.16+.
 
-Specify Go version with `GO` variable:
-
-```sh
-make GO=go1.16rc1
+```text
+> make help
+all              Build program binary
+check_deps       Verify the system has all dependencies installed
+test-bench       Run benchmarks
+test-short       Run only short tests
+test-verbose     Run tests in verbose mode with coverage reporting
+test-race        Run tests with race detector
+check test tests Run tests
+test-xml         Run tests with xUnit output
+test-coverage    Run coverage tests
+lint             Run golangci-lint
+mockgen          Run mockery to re/generate mocks for all interfaces
+fmt              Run gofmt on all source files
+clean            Cleanup everything
 ```
 
 ## Continuous Integration

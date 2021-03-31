@@ -18,3 +18,7 @@
 **/.DS_Store
 **/debug
 **/debug.test
+
+# ignore data file, downloaded during make
+public/spot/data/*.json
+

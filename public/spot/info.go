@@ -4,26 +4,31 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 )
 
 var (
+	doOnce sync.Once
 	//go:embed data/spot-advisor-data.json
 	jsonData string
 	// parsed json raw data
-	data advisorData
+	data *advisorData
 	// min ranges
 	minRange = map[int]int{5: 0, 11: 6, 16: 12, 22: 17, 100: 23}
 )
 
 const (
-	SortByRange    = iota
-	SortByInstance = iota
-	SortBySavings  = iota
+	SortByRange        = iota
+	SortByInstance     = iota
+	SortBySavings      = iota
+	spotAdvisorJsonUrl = "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json"
 )
 
 type interruptionRange struct {
@@ -53,6 +58,7 @@ type advisorData struct {
 	Ranges        []interruptionRange     `json:"ranges"`
 	InstanceTypes map[string]instanceType `json:"instance_types"`
 	Regions       map[string]osTypes      `json:"spot_advisor"`
+	Embedded      bool                    // true if loaded from embedded copy
 }
 
 //---- public types
@@ -96,19 +102,45 @@ func (a BySavings) Len() int           { return len(a) }
 func (a BySavings) Less(i, j int) bool { return a[i].Savings < a[j].Savings }
 func (a BySavings) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 
-func init() {
-	// try to load new data, fallback to embedded
-	parse()
-}
-
-func parse() {
-	err := json.Unmarshal([]byte(jsonData), &data)
+func lazyLoad(url string, timeout time.Duration, fallbackData string) (*advisorData, error) {
+	var result advisorData
+	// try to load new data
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Get(url)
 	if err != nil {
-		panic(err)
+		goto fallback
 	}
+	defer func() {
+		err = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusOK {
+		goto fallback
+	}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	if err != nil {
+		goto fallback
+	}
+	return &result, nil
+
+	// fallback to embedded load
+fallback:
+	err = json.Unmarshal([]byte(fallbackData), &result)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse embedded spot data")
+	}
+	// set embedded loaded flag true
+	result.Embedded = true
+	return &result, nil
 }
 
 func GetSpotSavings(pattern, region, instanceOS string, cpu, memory, sortBy int) ([]Advice, error) {
+	var err error
+	doOnce.Do(func() {
+		data, err = lazyLoad(spotAdvisorJsonUrl, 10*time.Second, jsonData)
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to load spot data")
+	}
 	r, ok := data.Regions[region]
 	if !ok {
 		return nil, fmt.Errorf("no spot price for region %s", region)
