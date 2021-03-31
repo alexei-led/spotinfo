@@ -40,10 +40,17 @@ GLOBAL OPTIONS:
 
 Get all Graviton2 Linux Spot instances in the AWS Oregon (`us-west-2`) region, with CPU cores > 8 and memory > 64gb, sorted by type, and output the result in a table format.
 
+### Run spotinfo CLI
 ```shell
+# run binary
 spotinfo --type="^.(6g)(\S)*" --cpu=8 --memory=64 --region=us-west-2 --os=linux --output=table --sort=type
+
+# OR run Docker image
+docker run -it --rm ghcr.io/alexei-led/spotinfo --type="^.(6g)(\S)*" --cpu=8 --memory=64 --region=us-west-2 --os=linux --output=table --sort=type
 ```
 
+
+#### Output:
 ```text
 ┌───────────────┬──────┬────────────┬────────────────────────┬───────────────────────────┐
 │ INSTANCE INFO │ VCPU │ MEMORY GIB │ SAVINGS OVER ON-DEMAND │ FREQUENCY OF INTERRUPTION │
@@ -83,6 +90,12 @@ spotinfo --type="^.(6g)(\S)*" --cpu=8 --memory=64 --region=us-west-2 --os=linux 
 ## Docker Image
 
 The `spotinfo` uses Docker both as a CI tool and for releasing the final `spotinfo` Multi-Architecture Docker image (`scratch` with updated `ca-credentials` package).
+
+Public Docker Image [ghcr.io/alexei-led/spotinfo](https://github.com/users/alexei-led/packages/container/package/spotinfo)
+
+```shell
+docker pull ghcr.io/alexei-led/spotinfo:latest
+```
 
 ## Build Instructions
 
