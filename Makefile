@@ -65,7 +65,7 @@ check_deps: ; @ ## Verify the system has all dependencies installed
 
 .PHONY: update_data
 update_data: check_deps; @ ## Update Spot Advisor data file
-	@mkdir -p data
+	@mkdir -p public/spot/data
 	@wget -nv $(SPOT_ADVISOR_DATA_URL) -O - > public/spot/data/spot-advisor-data.json
 	@echo "spot advisor data updated"
 
