@@ -63,7 +63,7 @@ setup-go2xunit:
 setup-mockery:
 	$(GO) install github.com/vektra/mockery/v2/
 setup-ghr:
-	$(GO) install github.com/tcnksm/ghr
+	$(GO) install github.com/tcnksm/ghr@v0.13.0
 
 GOLINT=golangci-lint
 GOCOV=gocov
