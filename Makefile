@@ -29,7 +29,7 @@ export CGO_ENABLED=0
 export GOPROXY=https://proxy.golang.org
 
 .PHONY: all
-all: update_data fmt lint test-verbose ; $(info $(M) building $(TARGETOS)/$(TARGETARCH) binary...) @ ## Build program binary
+all: update_data update_price fmt lint test-verbose ; $(info $(M) building $(TARGETOS)/$(TARGETARCH) binary...) @ ## Build program binary
 	$Q env GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) $(GO) build \
 		-tags release \
 		-ldflags "$(LDFLAGS_VERSION)" \
@@ -74,6 +74,7 @@ GHR=ghr
 
 # upstream data
 SPOT_ADVISOR_DATA_URL := "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json"
+SPOT_PRICE_DATA_URL := "http://spot-price.s3.amazonaws.com/spot.js"
 DEPS := "wget"
 
 .PHONY: check_deps
@@ -90,6 +91,13 @@ update_data: check_deps; @ ## Update Spot Advisor data file
 	@wget -nv $(SPOT_ADVISOR_DATA_URL) -O - > public/spot/data/spot-advisor-data.json
 	@echo "spot advisor data updated"
 
+.PHONY: update_price
+update_price: check_deps; @ ## Update Spot pricing data file
+	@mkdir -p public/spot/data
+	@wget -nv $(SPOT_PRICE_DATA_URL) -O - > public/spot/data/spot-price-data.json
+	@sed -i'' -e "s/callback(//g" public/spot/data/spot-price-data.json
+	@sed -i'' -e "s/);//g" public/spot/data/spot-price-data.json
+
 # Tests
 
 TEST_TARGETS := test-default test-bench test-short test-verbose test-race
@@ -97,7 +105,7 @@ TEST_TARGETS := test-default test-bench test-short test-verbose test-race
 test-bench:   ARGS=-run=__absolutelynothing__ -bench=. ## Run benchmarks
 test-short:   ARGS=-short        ## Run only short tests
 test-verbose: ARGS=-v            ## Run tests in verbose mode with coverage reporting
-test-race:    ARGS=-race         ## Run tests with race detector
+test-race:    ARGS=-race         ## Run tests with race detectorß
 $(TEST_TARGETS): NAME=$(MAKECMDGOALS:test-%=%)
 $(TEST_TARGETS): test
 check test tests: fmt ; $(info $(M) running $(NAME:%=% )tests...) @ ## Run tests

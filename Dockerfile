@@ -6,7 +6,7 @@
 FROM --platform=${BUILDPLATFORM} golang:1.16-alpine AS builder
 
 # curl git bash
-RUN apk add --no-cache curl git bash make ca-certificates
+RUN apk add --no-cache curl git bash make sed ca-certificates
 
 #
 # ----- Build and Test Image -----
@@ -17,7 +17,7 @@ FROM --platform=${BUILDPLATFORM} builder AS build
 ARG TARGETOS
 ARG TARGETARCH
 
-# set working directorydoc
+# set working directory
 RUN mkdir -p /go/src/app
 WORKDIR /go/src/app
 
