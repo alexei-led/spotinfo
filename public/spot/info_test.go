@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func Test_lazyLoad(t *testing.T) {
+func Test_dataLazyLoad(t *testing.T) {
 	type args struct {
 		url      string
 		timeout  time.Duration
@@ -24,22 +24,22 @@ func Test_lazyLoad(t *testing.T) {
 	}{
 		{
 			name: "load embedded on timeout",
-			args: args{"http://www.google.com:81/", 1 * time.Second, jsonData},
+			args: args{"http://www.google.com:81/", 1 * time.Second, embeddedSpotData},
 			want: want{embedded: true, rangesLen: 5},
 		},
 		{
 			name: "load embedded on not found",
-			args: args{"http://notfound", 1 * time.Second, jsonData},
+			args: args{"http://notfound", 1 * time.Second, embeddedSpotData},
 			want: want{embedded: true, rangesLen: 5},
 		},
 		{
 			name: "load embedded on unexpected response",
-			args: args{"https://www.example.com", 1 * time.Second, jsonData},
+			args: args{"https://www.example.com", 1 * time.Second, embeddedSpotData},
 			want: want{embedded: true, rangesLen: 5},
 		},
 		{
 			name: "load data from spot advisor",
-			args: args{spotAdvisorJsonUrl, 10 * time.Second, jsonData},
+			args: args{spotAdvisorJsonUrl, 10 * time.Second, embeddedSpotData},
 			want: want{embedded: false, rangesLen: 5},
 		},
 		{
@@ -50,17 +50,17 @@ func Test_lazyLoad(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := lazyLoad(tt.args.url, tt.args.timeout, tt.args.fallback)
+			got, err := dataLazyLoad(tt.args.url, tt.args.timeout, tt.args.fallback)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("lazyLoad() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("dataLazyLoad() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if got != nil {
 				if got.Embedded != tt.want.embedded {
-					t.Errorf("lazyLoad() got.Embedded = %v, want %v", got.Embedded, tt.want.embedded)
+					t.Errorf("dataLazyLoad() got.Embedded = %v, want %v", got.Embedded, tt.want.embedded)
 				}
 				if len(got.Ranges) != tt.want.rangesLen {
-					t.Errorf("lazyLoad() len(got.Ranges) = %v, want %v", len(got.Ranges), tt.want.rangesLen)
+					t.Errorf("dataLazyLoad() len(got.Ranges) = %v, want %v", len(got.Ranges), tt.want.rangesLen)
 				}
 			}
 		})

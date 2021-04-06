@@ -138,7 +138,7 @@ test-coverage: fmt test-coverage-tools ; $(info $(M) running coverage tests...) 
 lint: setup-lint; $(info $(M) running golangci-lint...) @ ## Run golangci-lint linters
 	# updating path since golangci-lint is looking for go binary and this may lead to
 	# conflict when multiple go versions are installed
-	$Q env PATH=$(shell $(GO) env GOROOT)/bin:$(PATH) $(GOLINT) run -v -c $(LINT_CONFIG) ./...
+	$Q env $(GOLINT) run -v -c $(LINT_CONFIG) ./...
 
 # generate github draft release
 .PHONY: github-release

@@ -15,9 +15,9 @@ import (
 )
 
 var (
-	doOnce sync.Once
+	loadDataOnce sync.Once
 	//go:embed data/spot-advisor-data.json
-	jsonData string
+	embeddedSpotData string
 	// parsed json raw data
 	data *advisorData
 	// min ranges
@@ -102,7 +102,7 @@ func (a BySavings) Len() int           { return len(a) }
 func (a BySavings) Less(i, j int) bool { return a[i].Savings < a[j].Savings }
 func (a BySavings) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 
-func lazyLoad(url string, timeout time.Duration, fallbackData string) (*advisorData, error) {
+func dataLazyLoad(url string, timeout time.Duration, fallbackData string) (*advisorData, error) {
 	var result advisorData
 	// try to load new data
 	client := &http.Client{Timeout: timeout}
@@ -135,8 +135,8 @@ fallback:
 
 func GetSpotSavings(pattern, region, instanceOS string, cpu, memory, sortBy int) ([]Advice, error) {
 	var err error
-	doOnce.Do(func() {
-		data, err = lazyLoad(spotAdvisorJsonUrl, 10*time.Second, jsonData)
+	loadDataOnce.Do(func() {
+		data, err = dataLazyLoad(spotAdvisorJsonUrl, 10*time.Second, embeddedSpotData)
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load spot data")
