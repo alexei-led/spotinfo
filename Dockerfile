@@ -6,7 +6,7 @@
 FROM --platform=${BUILDPLATFORM} golang:1.16-alpine AS builder
 
 # curl git bash
-RUN apk add --no-cache curl git bash make sed ca-certificates
+RUN apk add --no-cache curl git bash make sed ca-certificates file
 
 #
 # ----- Build and Test Image -----
@@ -44,7 +44,7 @@ ARG RELEASE_TAG
 # release to GitHub; pass RELEASE_TOKEN ras build-arg
 ARG RELEASE_TOKEN
 
-# build pumba for all platforms and release to GitHub
+# build spotinfo for all platforms and release to GitHub
 RUN --mount=type=cache,target=/root/.cache/go-build if $RELEASE; then make github-release; fi
 
 

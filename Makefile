@@ -29,7 +29,7 @@ export CGO_ENABLED=0
 export GOPROXY=https://proxy.golang.org
 
 .PHONY: all
-all: update_data update_price fmt lint test-verbose ; $(info $(M) building $(TARGETOS)/$(TARGETARCH) binary...) @ ## Build program binary
+all: update-data update_price fmt lint test-verbose ; $(info $(M) building $(TARGETOS)/$(TARGETARCH) binary...) @ ## Build program binary
 	$Q env GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) $(GO) build \
 		-tags release \
 		-ldflags "$(LDFLAGS_VERSION)" \
@@ -84,22 +84,22 @@ SPOT_ADVISOR_DATA_URL := "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor
 SPOT_PRICE_DATA_URL := "http://spot-price.s3.amazonaws.com/spot.js"
 DEPS := "wget"
 
-.PHONY: check_deps
-check_deps: ; @ ## Verify the system has all dependencies installed
+.PHONY: check-deps
+check-deps: ; @ ## Verify the system has all dependencies installed
 	@for DEP in $(shell echo "$(DEPS)"); do \
 		command -v "$$DEP" > /dev/null 2>&1 \
 		|| (echo "Error: dependency '$$DEP' is absent" ; exit 1); \
 	done
 	@echo "all dependencies satisfied: $(DEPS)"
 
-.PHONY: update_data
-update_data: check_deps; @ ## Update Spot Advisor data file
+.PHONY: update-data
+update-data: check-deps; @ ## Update Spot Advisor data file
 	@mkdir -p public/spot/data
 	@wget -nv $(SPOT_ADVISOR_DATA_URL) -O - > public/spot/data/spot-advisor-data.json
 	@echo "spot advisor data updated"
 
 .PHONY: update_price
-update_price: check_deps; @ ## Update Spot pricing data file
+update_price: check-deps; @ ## Update Spot pricing data file
 	@mkdir -p public/spot/data
 	@wget -nv $(SPOT_PRICE_DATA_URL) -O - > public/spot/data/spot-price-data.json
 	@sed -i'' -e "s/callback(//g" public/spot/data/spot-price-data.json
