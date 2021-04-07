@@ -149,7 +149,7 @@ lint: setup-lint; $(info $(M) running golangci-lint...) @ ## Run golangci-lint l
 
 # generate github draft release
 .PHONY: github-release
-github-release: setup-ghr release | check_file_types; $(info $(M) generating github draft release...) @ ## run ghr tool
+github-release: setup-ghr | release check_file_types; $(info $(M) generating github draft release...) @ ## run ghr tool
 ifndef RELEASE_TOKEN
 	$(error RELEASE_TOKEN is undefined)
 endif
