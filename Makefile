@@ -49,6 +49,12 @@ release: clean ; $(info $(M) building binaries for multiple os/arch...) @ ## Bui
 				-ldflags "$(LDFLAGS_VERSION)" \
 				-o $(BIN)/$(basename $(MODULE))_$(GOOS)_$(GOARCH) ./cmd/main.go || true)))
 
+.PHONY: check_file_types
+check_file_types: $(BIN)/* ; $(info $(M) check file type os/arch...) @ ## Check file types for release
+	@for f in $^ ; do \
+        file $${f} ; \
+    done
+
 # Tools
 
 setup-tools: setup-lint setup-gocov setup-gocov-xml setup-go2xunit setup-mockery setup-ghr
@@ -143,7 +149,7 @@ lint: setup-lint; $(info $(M) running golangci-lint...) @ ## Run golangci-lint l
 
 # generate github draft release
 .PHONY: github-release
-github-release: setup-ghr | release ;$(info $(M) generating github draft release...) @ ## run ghr tool
+github-release: setup-ghr release check_file_types; $(info $(M) generating github draft release...) @ ## run ghr tool
 ifndef RELEASE_TOKEN
 	$(error RELEASE_TOKEN is undefined)
 endif
