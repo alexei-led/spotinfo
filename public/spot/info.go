@@ -28,6 +28,7 @@ const (
 	SortByRange        = iota
 	SortByInstance     = iota
 	SortBySavings      = iota
+	SortByPrice        = iota
 	spotAdvisorJsonUrl = "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json"
 )
 
@@ -79,6 +80,7 @@ type Advice struct {
 	Range    Range
 	Savings  int
 	Info     TypeInfo
+	Price    float64
 }
 
 // ByRange implements sort.Interface based on the Range.Min field
@@ -101,6 +103,13 @@ type BySavings []Advice
 func (a BySavings) Len() int           { return len(a) }
 func (a BySavings) Less(i, j int) bool { return a[i].Savings < a[j].Savings }
 func (a BySavings) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+
+// By implements sort.Interface based on the Price field
+type ByPrice []Advice
+
+func (a ByPrice) Len() int           { return len(a) }
+func (a ByPrice) Less(i, j int) bool { return a[i].Price < a[j].Price }
+func (a ByPrice) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 
 func dataLazyLoad(url string, timeout time.Duration, fallbackData string) (*advisorData, error) {
 	var result advisorData
@@ -133,7 +142,7 @@ fallback:
 	return &result, nil
 }
 
-func GetSpotSavings(pattern, region, instanceOS string, cpu, memory, sortBy int) ([]Advice, error) {
+func GetSpotSavings(pattern, region, instanceOS string, cpu, memory int, price float64, sortBy int) ([]Advice, error) {
 	var err error
 	loadDataOnce.Do(func() {
 		data, err = dataLazyLoad(spotAdvisorJsonUrl, 10*time.Second, embeddedSpotData)
@@ -170,18 +179,22 @@ func GetSpotSavings(pattern, region, instanceOS string, cpu, memory, sortBy int)
 		if (cpu != 0 && info.Cores < cpu) || (memory != 0 && info.Ram < float32(memory)) {
 			continue
 		}
+		// get price details
+		spotPrice, err := getSpotInstancePrice(instance, region, instanceOS, false)
+		if err != nil {
+			// skip this error
+		}
+		// filter by max price
+		if price != 0 && spotPrice > price {
+			continue
+		}
 		// prepare record
 		rng := Range{
 			Label: data.Ranges[adv.Range].Label,
 			Max:   data.Ranges[adv.Range].Max,
 			Min:   minRange[data.Ranges[adv.Range].Max],
 		}
-		result = append(result, Advice{
-			instance,
-			rng,
-			adv.Savings,
-			TypeInfo(info),
-		})
+		result = append(result, Advice{instance, rng, adv.Savings, TypeInfo(info), spotPrice})
 	}
 	// sort by - range (default)
 	switch sortBy {
@@ -191,6 +204,8 @@ func GetSpotSavings(pattern, region, instanceOS string, cpu, memory, sortBy int)
 		sort.Sort(ByInstance(result))
 	case SortBySavings:
 		sort.Sort(BySavings(result))
+	case SortByPrice:
+		sort.Sort(ByPrice(result))
 	default:
 		sort.Sort(ByRange(result))
 	}

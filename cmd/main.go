@@ -38,6 +38,7 @@ const (
 	memoryColumn       = "Memory GiB"
 	savingsColumn      = "Savings over On-Demand"
 	interruptionColumn = "Frequency of interruption"
+	priceColumn        = "USD/Hour"
 )
 
 func mainCmd(c *cli.Context) error {
@@ -49,6 +50,7 @@ func mainCmd(c *cli.Context) error {
 	instance := c.String("type")
 	cpu := c.Int("cpu")
 	memory := c.Int("memory")
+	maxPrice := c.Float64("price")
 	sortBy := c.String("sort")
 	sort := spot.SortByRange
 	switch sortBy {
@@ -58,11 +60,13 @@ func mainCmd(c *cli.Context) error {
 		sort = spot.SortByRange
 	case "savings":
 		sort = spot.SortBySavings
+	case "price":
+		sort = spot.SortByPrice
 	default:
 		sort = spot.SortByRange
 	}
 	// get spot savings
-	advices, err := spot.GetSpotSavings(instance, region, instanceOS, cpu, memory, sort)
+	advices, err := spot.GetSpotSavings(instance, region, instanceOS, cpu, memory, maxPrice, sort)
 	if err != nil {
 		return err
 	}
@@ -114,9 +118,9 @@ func printAdvicesJson(advices interface{}) {
 func printAdvicesTable(advices []spot.Advice, csv bool) {
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
-	t.AppendHeader(table.Row{instanceTypeColumn, vCpuColumn, memoryColumn, savingsColumn, interruptionColumn})
+	t.AppendHeader(table.Row{instanceTypeColumn, vCpuColumn, memoryColumn, savingsColumn, interruptionColumn, priceColumn})
 	for _, advice := range advices {
-		t.AppendRow([]interface{}{advice.Instance, advice.Info.Cores, advice.Info.Ram, advice.Savings, advice.Range.Label})
+		t.AppendRow([]interface{}{advice.Instance, advice.Info.Cores, advice.Info.Ram, advice.Savings, advice.Range.Label, advice.Price})
 	}
 	// render as CSV
 	if csv {
@@ -186,14 +190,18 @@ func main() {
 				Name:  "memory",
 				Usage: "filter: minimal memory GiB",
 			},
+			&cli.Float64Flag{
+				Name:  "price",
+				Usage: "filter: maximum price per hour",
+			},
 			&cli.StringFlag{
 				Name:  "sort",
-				Usage: "sort results by interruption|type|savings",
+				Usage: "sort results by interruption|type|savings|price",
 				Value: "interruption",
 			},
 		},
 		Name:    "spotinfo",
-		Usage:   "spotinfo CLI",
+		Usage:   "explore AWS EC2 Spot instances",
 		Action:  mainCmd,
 		Version: Version,
 	}

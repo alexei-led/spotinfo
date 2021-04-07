@@ -74,11 +74,13 @@ func TestGetSpotSavings(t *testing.T) {
 		instanceOS string
 		cpu        int
 		memory     int
+		price      float64
 		sortBy     int
 	}
 	type want struct {
 		minCpu    int
 		minMemory float32
+		maxPrice  float64
 	}
 	tests := []struct {
 		name    string
@@ -94,6 +96,11 @@ func TestGetSpotSavings(t *testing.T) {
 			name: "get advice by pattern min.cpu=64 and min.memory=128",
 			args: args{pattern: "^(m5)(\\S)*", region: "us-east-1", instanceOS: "linux", cpu: 64, memory: 128},
 			want: want{minCpu: 64, minMemory: 128},
+		},
+		{
+			name: "get advice by pattern min.cpu=4, min.memory=16 and max.price $1.00/hour",
+			args: args{pattern: "^(m5)(\\S)*", region: "us-east-1", instanceOS: "linux", cpu: 4, memory: 16, price: 1.0},
+			want: want{minCpu: 4, minMemory: 16, maxPrice: 1.0},
 		},
 		{
 			name:    "fail on bad regexp pattern",
@@ -113,7 +120,7 @@ func TestGetSpotSavings(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := GetSpotSavings(tt.args.pattern, tt.args.region, tt.args.instanceOS, tt.args.cpu, tt.args.memory, tt.args.sortBy)
+			got, err := GetSpotSavings(tt.args.pattern, tt.args.region, tt.args.instanceOS, tt.args.cpu, tt.args.memory, tt.args.price, tt.args.sortBy)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetSpotSavings() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -125,10 +132,13 @@ func TestGetSpotSavings(t *testing.T) {
 						t.Errorf("GetSpotSavings() advice.Instance does not match '%v'", &tt.args.pattern)
 					}
 					if advice.Info.Cores < tt.want.minCpu {
-						t.Errorf("GetSpotSavings() advice.Cores = %v > min %v", advice.Info.Cores, tt.want.minCpu)
+						t.Errorf("GetSpotSavings() advice.Cores = %v < min %v", advice.Info.Cores, tt.want.minCpu)
 					}
 					if advice.Info.Ram < tt.want.minMemory {
-						t.Errorf("GetSpotSavings() advice.Cores = %v > min %v", advice.Info.Ram, tt.want.minMemory)
+						t.Errorf("GetSpotSavings() advice.Ram = %v < min %v", advice.Info.Ram, tt.want.minMemory)
+					}
+					if tt.want.maxPrice != 0 && advice.Price > tt.want.maxPrice {
+						t.Errorf("GetSpotSavings() advice.Price = %v > max %v", advice.Price, tt.want.maxPrice)
 					}
 				}
 			}
