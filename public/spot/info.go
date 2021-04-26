@@ -142,7 +142,7 @@ fallback:
 	return &result, nil
 }
 
-func GetSpotSavings(pattern, region, instanceOS string, cpu, memory int, price float64, sortBy int) ([]Advice, error) {
+func GetSpotSavings(pattern, region, instanceOS string, cpu, memory int, price float64, sortBy int, sortDesc bool) ([]Advice, error) {
 	var err error
 	loadDataOnce.Do(func() {
 		data, err = dataLazyLoad(spotAdvisorJsonUrl, 10*time.Second, embeddedSpotData)
@@ -197,17 +197,22 @@ func GetSpotSavings(pattern, region, instanceOS string, cpu, memory int, price f
 		result = append(result, Advice{instance, rng, adv.Savings, TypeInfo(info), spotPrice})
 	}
 	// sort by - range (default)
+	var data sort.Interface
 	switch sortBy {
 	case SortByRange:
-		sort.Sort(ByRange(result))
+		data = ByRange(result)
 	case SortByInstance:
-		sort.Sort(ByInstance(result))
+		data = ByInstance(result)
 	case SortBySavings:
-		sort.Sort(BySavings(result))
+		data = BySavings(result)
 	case SortByPrice:
-		sort.Sort(ByPrice(result))
+		data = ByPrice(result)
 	default:
-		sort.Sort(ByRange(result))
+		data = ByRange(result)
 	}
+	if sortDesc {
+		data = sort.Reverse(data)
+	}
+	sort.Sort(data)
 	return result, nil
 }

@@ -76,6 +76,7 @@ func TestGetSpotSavings(t *testing.T) {
 		memory     int
 		price      float64
 		sortBy     int
+		sortDesc   bool
 	}
 	type want struct {
 		minCpu    int
@@ -120,7 +121,7 @@ func TestGetSpotSavings(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := GetSpotSavings(tt.args.pattern, tt.args.region, tt.args.instanceOS, tt.args.cpu, tt.args.memory, tt.args.price, tt.args.sortBy)
+			got, err := GetSpotSavings(tt.args.pattern, tt.args.region, tt.args.instanceOS, tt.args.cpu, tt.args.memory, tt.args.price, tt.args.sortBy, tt.args.sortDesc)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetSpotSavings() error = %v, wantErr %v", err, tt.wantErr)
 				return

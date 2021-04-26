@@ -53,6 +53,8 @@ func mainCmd(c *cli.Context) error {
 	maxPrice := c.Float64("price")
 	sortBy := c.String("sort")
 	sort := spot.SortByRange
+	order := c.String("order")
+	sortDesc := strings.ToLower(order) == "desc"
 	switch sortBy {
 	case "type":
 		sort = spot.SortByInstance
@@ -66,7 +68,7 @@ func mainCmd(c *cli.Context) error {
 		sort = spot.SortByRange
 	}
 	// get spot savings
-	advices, err := spot.GetSpotSavings(instance, region, instanceOS, cpu, memory, maxPrice, sort)
+	advices, err := spot.GetSpotSavings(instance, region, instanceOS, cpu, memory, maxPrice, sort, sortDesc)
 	if err != nil {
 		return err
 	}
@@ -198,6 +200,11 @@ func main() {
 				Name:  "sort",
 				Usage: "sort results by interruption|type|savings|price",
 				Value: "interruption",
+			},
+			&cli.StringFlag{
+				Name:  "order",
+				Usage: "sort order asc|desc",
+				Value: "asc",
 			},
 		},
 		Name:    "spotinfo",
