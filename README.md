@@ -8,7 +8,7 @@ You should weigh your application’s tolerance for interruption and your cost s
 
 ## Usage
 
-With `spotinfo` command you can get a filtered and sorted list of Spot instance types as a plain text, json, pretty table or CSV format.
+With `spotinfo` command you can get a filtered and sorted list of Spot instance types as a plain text, `JSON`, pretty table or `CSV` format.
 
 ```shell
 spotinfo --help
@@ -27,12 +27,13 @@ COMMANDS:
 GLOBAL OPTIONS:
    --type value    EC2 instance type (can be RE2 regexp patten)
    --os value      instance operating system (windows/linux) (default: "linux")
-   --region value  AWS region (default: "us-east-1")
+   --region value  set one or more AWS regions, use "all" for all AWS regions (default: "us-east-1")
    --output value  format output: number|text|json|table|csv (default: "table")
    --cpu value     filter: minimal vCPU cores (default: 0)
    --memory value  filter: minimal memory GiB (default: 0)
    --price value   filter: maximum price per hour (default: 0)
-   --sort value    sort results by interruption|type|savings|price (default: "interruption")
+   --sort value    sort results by interruption|type|savings|price|region (default: "interruption")
+   --order value   sort order asc|desc (default: "asc")
    --help, -h      show help (default: false)
    --version, -v   print the version (default: false)
 ```
@@ -46,11 +47,12 @@ The `spotinfo` uses the following data sources to get updated information about 
 
 The `spotinfo` also includes **embedded** (during the build) copies of the above files, and thus can continue to work, even if there is no network connectivity, or these files are not available, for any reason.
 
-### Example
+### Examples
+
+#### Use Case 1
 
 Get all Graviton2 Linux Spot instances in the AWS Oregon (`us-west-2`) region, with CPU cores > 8 and memory > 64gb, sorted by type, and output the result in a table format.
 
-### Run spotinfo CLI
 ```shell
 # run binary
 spotinfo --type="^.(6g)(\S)*" --cpu=8 --memory=64 --region=us-west-2 --os=linux --output=table --sort=type
@@ -59,7 +61,7 @@ spotinfo --type="^.(6g)(\S)*" --cpu=8 --memory=64 --region=us-west-2 --os=linux 
 docker run -it --rm ghcr.io/alexei-led/spotinfo --type="^.(6g)(\S)*" --cpu=8 --memory=64 --region=us-west-2 --os=linux --output=table --sort=type
 ```
 
-#### Output:
+#### Output
 ```text
 ┌───────────────┬──────┬────────────┬────────────────────────┬───────────────────────────┬──────────┐
 │ INSTANCE INFO │ VCPU │ MEMORY GIB │ SAVINGS OVER ON-DEMAND │ FREQUENCY OF INTERRUPTION │ USD/HOUR │
@@ -94,6 +96,68 @@ docker run -it --rm ghcr.io/alexei-led/spotinfo --type="^.(6g)(\S)*" --cpu=8 --m
 ├───────────────┼──────┼────────────┼────────────────────────┼───────────────────────────┼──────────┤
 │ r6gd.4xlarge  │   16 │        128 │                    68% │ 15-20%                    │   0.2975 │
 └───────────────┴──────┴────────────┴────────────────────────┴───────────────────────────┴──────────┘
+```
+#### Use Case 2 
+
+Compare `m5a.xlarge` Linux Spot instances across 3 AWS regions, sorted by price. Output the result in a `JSON` format.
+
+```shell
+spotinfo --type="m5a.xlarge" --output=json --sort=price --order=asc --region=us-west-1 --region=us-east-1 --region=ap-south-1
+```
+
+#### Output
+
+```json
+[
+  {
+    "Region": "ap-south-1",
+    "Instance": "m5a.xlarge",
+    "Range": {
+      "label": "<5%",
+      "min": 0,
+      "max": 5
+    },
+    "Savings": 50,
+    "Info": {
+      "cores": 4,
+      "emr": true,
+      "ram_gb": 16
+    },
+    "Price": 0.0554
+  },
+  {
+    "Region": "us-west-1",
+    "Instance": "m5a.xlarge",
+    "Range": {
+      "label": "<5%",
+      "min": 0,
+      "max": 5
+    },
+    "Savings": 65,
+    "Info": {
+      "cores": 4,
+      "emr": true,
+      "ram_gb": 16
+    },
+    "Price": 0.0715
+  },
+  {
+    "Region": "us-east-1",
+    "Instance": "m5a.xlarge",
+    "Range": {
+      "label": "<5%",
+      "min": 0,
+      "max": 5
+    },
+    "Savings": 56,
+    "Info": {
+      "cores": 4,
+      "emr": true,
+      "ram_gb": 16
+    },
+    "Price": 0.0759
+  }
+]
 ```
 
 ## Docker Image
