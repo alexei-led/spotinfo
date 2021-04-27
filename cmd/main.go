@@ -33,6 +33,7 @@ var (
 )
 
 const (
+	regionColumn       = "Region"
 	instanceTypeColumn = "Instance Info"
 	vCpuColumn         = "vCPU"
 	memoryColumn       = "Memory GiB"
@@ -45,7 +46,7 @@ func mainCmd(c *cli.Context) error {
 	if v := mainCtx.Value("key"); v != nil {
 		log.Printf("context value = %v", v)
 	}
-	region := c.String("region")
+	regions := c.StringSlice("region")
 	instanceOS := c.String("os")
 	instance := c.String("type")
 	cpu := c.Int("cpu")
@@ -64,45 +65,58 @@ func mainCmd(c *cli.Context) error {
 		sort = spot.SortBySavings
 	case "price":
 		sort = spot.SortByPrice
+	case "region":
+		sort = spot.SortByRegion
 	default:
 		sort = spot.SortByRange
 	}
 	// get spot savings
-	advices, err := spot.GetSpotSavings(instance, region, instanceOS, cpu, memory, maxPrice, sort, sortDesc)
+	advices, err := spot.GetSpotSavings(regions, instance, instanceOS, cpu, memory, maxPrice, sort, sortDesc)
+	// decide if region should be printed
+	printRegion := len(regions) > 1 || (len(regions) == 1 && regions[0] == "all")
 	if err != nil {
 		return err
 	}
 	switch c.String("output") {
 	case "number":
-		printAdvicesNumber(advices)
+		printAdvicesNumber(advices, printRegion)
 	case "text":
-		printAdvicesText(advices)
+		printAdvicesText(advices, printRegion)
 	case "json":
 		printAdvicesJson(advices)
 	case "table":
-		printAdvicesTable(advices, false)
+		printAdvicesTable(advices, false, printRegion)
 	case "csv":
-		printAdvicesTable(advices, true)
+		printAdvicesTable(advices, true, printRegion)
 	default:
-		printAdvicesNumber(advices)
+		printAdvicesNumber(advices, printRegion)
 	}
 	return nil
 }
 
-func printAdvicesText(advices []spot.Advice) {
+func printAdvicesText(advices []spot.Advice, region bool) {
 	for _, advice := range advices {
-		fmt.Printf("%s vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s'\n",
-			advice.Instance, advice.Info.Cores, advice.Info.Ram, advice.Savings, advice.Range.Label)
+		if region {
+			fmt.Printf("region=%s, type=%s, vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s', price=%.2f\n",
+				advice.Region, advice.Instance, advice.Info.Cores, advice.Info.Ram, advice.Savings, advice.Range.Label, advice.Price)
+		} else {
+			fmt.Printf("type=%s, vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s', price=%.2f\n",
+				advice.Instance, advice.Info.Cores, advice.Info.Ram, advice.Savings, advice.Range.Label, advice.Price)
+		}
 	}
 }
 
-func printAdvicesNumber(advices []spot.Advice) {
+func printAdvicesNumber(advices []spot.Advice, region bool) {
 	if len(advices) == 1 {
 		fmt.Println(advices[0].Savings)
 		return
 	}
 	for _, advice := range advices {
-		fmt.Printf("%s: %d\n", advice.Instance, advice.Savings)
+		if region {
+			fmt.Printf("%s/%s: %d\n", advice.Region, advice.Instance, advice.Savings)
+		} else {
+			fmt.Printf("%s: %d\n", advice.Instance, advice.Savings)
+		}
 	}
 }
 
@@ -117,12 +131,20 @@ func printAdvicesJson(advices interface{}) {
 	fmt.Println(txt)
 }
 
-func printAdvicesTable(advices []spot.Advice, csv bool) {
+func printAdvicesTable(advices []spot.Advice, csv, region bool) {
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
-	t.AppendHeader(table.Row{instanceTypeColumn, vCpuColumn, memoryColumn, savingsColumn, interruptionColumn, priceColumn})
+	header := table.Row{instanceTypeColumn, vCpuColumn, memoryColumn, savingsColumn, interruptionColumn, priceColumn}
+	if region {
+		header = append(table.Row{regionColumn}, header...)
+	}
+	t.AppendHeader(header)
 	for _, advice := range advices {
-		t.AppendRow([]interface{}{advice.Instance, advice.Info.Cores, advice.Info.Ram, advice.Savings, advice.Range.Label, advice.Price})
+		row := table.Row{advice.Instance, advice.Info.Cores, advice.Info.Ram, advice.Savings, advice.Range.Label, advice.Price}
+		if region {
+			row = append(table.Row{advice.Region}, row...)
+		}
+		t.AppendRow(row)
 	}
 	// render as CSV
 	if csv {
@@ -174,10 +196,10 @@ func main() {
 				Usage: "instance operating system (windows/linux)",
 				Value: "linux",
 			},
-			&cli.StringFlag{
+			&cli.StringSliceFlag{
 				Name:  "region",
-				Usage: "AWS region",
-				Value: "us-east-1",
+				Usage: "set one or more AWS regions, use \"all\" for all AWS regions",
+				Value: cli.NewStringSlice("us-east-1"),
 			},
 			&cli.StringFlag{
 				Name:  "output",
@@ -198,7 +220,7 @@ func main() {
 			},
 			&cli.StringFlag{
 				Name:  "sort",
-				Usage: "sort results by interruption|type|savings|price",
+				Usage: "sort results by interruption|type|savings|price|region",
 				Value: "interruption",
 			},
 			&cli.StringFlag{
