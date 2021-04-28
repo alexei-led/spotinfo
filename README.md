@@ -6,6 +6,22 @@ The `spotinfo` is a command-line tool that helps you determine AWS Spot instance
 
 You should weigh your application’s tolerance for interruption and your cost saving goals when selecting a Spot instance. The lower your interruption rate, the longer your Spot instances are likely to run.
 
+## Install
+
+### OS X with Homebrew
+
+```sh
+brew tap alexei-led/spotinfo
+brew install spotinfo
+```
+
+### Download platform binary
+
+Download OS/platform specific binary from the [Releases](https://github.com/alexei-led/spotinfo/releases) page and add it to the `PATH`.
+
+- Supported OS: OS X, Windows, Linux
+- Supported Platforms: Intel (`amd64`) and ARM (`arm64`)
+
 ## Usage
 
 With `spotinfo` command you can get a filtered and sorted list of Spot instance types as a plain text, `JSON`, pretty table or `CSV` format.
