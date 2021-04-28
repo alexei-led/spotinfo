@@ -29,7 +29,14 @@ export CGO_ENABLED=0
 export GOPROXY=https://proxy.golang.org
 
 .PHONY: all
-all: update-data update_price fmt lint test-verbose ; $(info $(M) building $(TARGETOS)/$(TARGETARCH) binary...) @ ## Build program binary
+all: update-data update-price fmt lint test-verbose ; $(info $(M) building $(TARGETOS)/$(TARGETARCH) binary...) @ ## Build program binary
+	$Q env GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) $(GO) build \
+		-tags release \
+		-ldflags "$(LDFLAGS_VERSION)" \
+		-o $(BIN)/$(basename $(MODULE)) ./cmd/main.go
+
+.PHONY: build
+build: update-data update-price ; $(info $(M) building $(TARGETOS)/$(TARGETARCH) binary...) @ ## Build program binary
 	$Q env GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) $(GO) build \
 		-tags release \
 		-ldflags "$(LDFLAGS_VERSION)" \
@@ -98,8 +105,8 @@ update-data: check-deps; @ ## Update Spot Advisor data file
 	@wget -nv $(SPOT_ADVISOR_DATA_URL) -O - > public/spot/data/spot-advisor-data.json
 	@echo "spot advisor data updated"
 
-.PHONY: update_price
-update_price: check-deps; @ ## Update Spot pricing data file
+.PHONY: update-price
+update-price: check-deps; @ ## Update Spot pricing data file
 	@mkdir -p public/spot/data
 	@wget -nv $(SPOT_PRICE_DATA_URL) -O - > public/spot/data/spot-price-data.json
 	@sed -i'' -e "s/callback(//g" public/spot/data/spot-price-data.json

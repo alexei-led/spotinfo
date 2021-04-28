@@ -236,9 +236,15 @@ func main() {
 	}
 	cli.VersionPrinter = func(c *cli.Context) {
 		fmt.Printf("spotinfo %s\n", Version)
-		fmt.Printf("  Build date: %s\n", BuildDate)
-		fmt.Printf("  Git commit: %s\n", GitCommit)
-		fmt.Printf("  Git branch: %s\n", GitBranch)
+		if BuildDate != "" && BuildDate != "unknown" {
+			fmt.Printf("  Build date: %s\n", BuildDate)
+		}
+		if GitCommit != "" {
+			fmt.Printf("  Git commit: %s\n", GitCommit)
+		}
+		if GitBranch != "" {
+			fmt.Printf("  Git branch: %s\n", GitBranch)
+		}
 		fmt.Printf("  Built with: %s\n", runtime.Version())
 	}
 
