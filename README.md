@@ -130,7 +130,7 @@ spotinfo --type="^.(6g)(\S)*" --cpu=8 --memory=64 --region=us-west-2 --os=linux 
 docker run -it --rm ghcr.io/alexei-led/spotinfo --type="^.(6g)(\S)*" --cpu=8 --memory=64 --region=us-west-2 --os=linux --output=table --sort=type
 ```
 
-#### Output
+##### Output
 
 ```text
 ┌───────────────┬──────┬────────────┬────────────────────────┬───────────────────────────┬──────────┐
@@ -168,7 +168,7 @@ docker run -it --rm ghcr.io/alexei-led/spotinfo --type="^.(6g)(\S)*" --cpu=8 --m
 └───────────────┴──────┴────────────┴────────────────────────┴───────────────────────────┴──────────┘
 ```
 
-#### Use Case 2 
+#### Use Case 2
 
 Compare `m5a.xlarge` Linux Spot instances across 3 AWS regions, sorted by price. Output the result in a `JSON` format.
 
@@ -176,7 +176,7 @@ Compare `m5a.xlarge` Linux Spot instances across 3 AWS regions, sorted by price.
 spotinfo --type="m5a.xlarge" --output=json --sort=price --order=asc --region=us-west-1 --region=us-east-1 --region=ap-south-1
 ```
 
-#### Output
+##### Output
 
 ```json
 [
