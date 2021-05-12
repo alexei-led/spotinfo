@@ -1,7 +1,7 @@
 package spot
 
 import (
-	_ "embed"
+	_ "embed" //nolint:gci
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
@@ -33,7 +33,7 @@ var (
 const (
 	responsePrefix = "callback("
 	responseSuffix = ");"
-	spotPriceJsUrl = "http://spot-price.s3.amazonaws.com/spot.js"
+	spotPriceJsURL = "https://spot-price.s3.amazonaws.com/spot.js"
 )
 
 type rawPriceData struct {
@@ -51,7 +51,7 @@ type rawPriceData struct {
 					ValueColumns []struct {
 						Name   string `json:"name"`
 						Prices struct {
-							USD string `json:"USD"`
+							USD string `json:"USD"` //nolint:tagliatelle
 						} `json:"prices"`
 					} `json:"valueColumns"`
 				} `json:"sizes"`
@@ -72,33 +72,40 @@ type spotPriceData struct {
 }
 
 func pricingLazyLoad(url string, timeout time.Duration, fallbackData string, embedded bool) (*rawPriceData, error) {
-	var result rawPriceData
-	var bodyBytes []byte
-	var bodyString string
-	var client *http.Client
-	var resp *http.Response
-	var err error
+	var (
+		result     rawPriceData
+		bodyBytes  []byte
+		bodyString string
+		client     *http.Client
+		resp       *http.Response
+		err        error
+	)
 	// load embedded data if asked explicitly
 	if embedded {
 		goto fallback
 	}
 	// try to load new data
 	client = &http.Client{Timeout: timeout}
+
 	resp, err = client.Get(url)
 	if err != nil {
 		goto fallback
 	}
+
 	defer func() {
 		err = resp.Body.Close()
 	}()
+
 	if resp.StatusCode != http.StatusOK {
 		goto fallback
 	}
+
 	// get response as text and trim JS code
 	bodyBytes, err = ioutil.ReadAll(resp.Body)
 	if err != nil {
 		goto fallback
 	}
+
 	bodyString = strings.TrimPrefix(string(bodyBytes), responsePrefix)
 	bodyString = strings.TrimSuffix(bodyString, responseSuffix)
 
@@ -106,13 +113,15 @@ func pricingLazyLoad(url string, timeout time.Duration, fallbackData string, emb
 	if err != nil {
 		goto fallback
 	}
+
 	goto process
 
 fallback: // fallback to embedded load
-	err = json.Unmarshal([]byte(fallbackData), &result)
-	if err != nil {
+
+	if err = json.Unmarshal([]byte(fallbackData), &result); err != nil {
 		return nil, errors.Wrapf(err, "failed to parse embedded spot price data")
 	}
+
 	// set embedded loaded flag true
 	result.Embedded = true
 
@@ -123,59 +132,75 @@ process: // process loaded result
 			result.Config.Regions[index].Region = awsRegion
 		}
 	}
+
 	return &result, nil
 }
 
 func convertRawData(raw *rawPriceData) *spotPriceData {
 	// fill priceData from rawPriceData
 	var pricing spotPriceData
-	pricing.region = make(map[string]regionPrice, 0)
+	pricing.region = make(map[string]regionPrice)
+
 	for _, region := range raw.Config.Regions {
 		var rp regionPrice
-		rp.instance = make(map[string]instancePrice, 0)
+		rp.instance = make(map[string]instancePrice)
+
 		for _, it := range region.InstanceTypes {
 			for _, size := range it.Sizes {
 				var ip instancePrice
+
 				for _, os := range size.ValueColumns {
 					price, err := strconv.ParseFloat(os.Prices.USD, 64)
 					if err != nil {
 						price = 0
 					}
+
 					if os.Name == "mswin" {
 						ip.windows = price
 					} else {
 						ip.linux = price
 					}
-
 				}
+
 				rp.instance[size.Size] = ip
 			}
 		}
+
 		pricing.region[region.Region] = rp
 	}
+
 	return &pricing
 }
 
 func getSpotInstancePrice(instance, region, os string, embedded bool) (float64, error) {
-	var err error
-	var data *rawPriceData
+	var (
+		err  error
+		data *rawPriceData
+	)
+
 	loadPriceOnce.Do(func() {
-		data, err = pricingLazyLoad(spotPriceJsUrl, 10*time.Second, embeddedPriceData, embedded)
+		const timeout = 10
+		data, err = pricingLazyLoad(spotPriceJsURL, timeout*time.Second, embeddedPriceData, embedded)
 		spotPrice = convertRawData(data)
 	})
+
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to load spot instance pricing")
 	}
+
 	rp, ok := spotPrice.region[region]
 	if !ok {
 		return 0, errors.Errorf("no pricind fata for region: %v", region)
 	}
+
 	price, ok := rp.instance[instance]
 	if !ok {
 		return 0, errors.Errorf("no pricind fata for instance: %v", instance)
 	}
+
 	if os == "windows" {
 		return price.windows, nil
 	}
+
 	return price.linux, nil
 }

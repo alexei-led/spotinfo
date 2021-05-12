@@ -14,16 +14,16 @@ var (
 
 func Test_pricingLazyLoad(t *testing.T) {
 	const awsRegionsCount = 22
-	type args struct {
+	type args struct { //nolint:wsl
 		url          string
 		timeout      time.Duration
 		fallbackData string
 		embedded     bool
 	}
-	type want struct {
+	type want struct { //nolint:wsl
 		embedded bool
 	}
-	var tests = []struct {
+	var tests = []struct { //nolint:wsl
 		name    string
 		args    args
 		want    want
@@ -31,12 +31,12 @@ func Test_pricingLazyLoad(t *testing.T) {
 	}{
 		{
 			name: "load embedded pricing on timeout",
-			args: args{url: "http://www.google.com:81/", timeout: 1 * time.Second, fallbackData: embeddedPriceData},
+			args: args{url: "https://www.google.com:81/", timeout: 1 * time.Second, fallbackData: embeddedPriceData},
 			want: want{embedded: true},
 		},
 		{
 			name: "load embedded pricing on not found",
-			args: args{url: "http://notfound", timeout: 1 * time.Second, fallbackData: embeddedPriceData},
+			args: args{url: "https://notfound", timeout: 1 * time.Second, fallbackData: embeddedPriceData},
 			want: want{embedded: true},
 		},
 		{
@@ -51,7 +51,7 @@ func Test_pricingLazyLoad(t *testing.T) {
 		},
 		{
 			name: "load pricing from spot pricing S3 bucket",
-			args: args{url: spotPriceJsUrl, timeout: 10 * time.Second, fallbackData: embeddedPriceData},
+			args: args{url: spotPriceJsURL, timeout: 10 * time.Second, fallbackData: embeddedPriceData},
 			want: want{embedded: false},
 		},
 		{
@@ -60,12 +60,13 @@ func Test_pricingLazyLoad(t *testing.T) {
 			wantErr: true,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := pricingLazyLoad(tt.args.url, tt.args.timeout, tt.args.fallbackData, tt.args.embedded)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("pricingLazyLoad() error = %v, wantErr %v", err, tt.wantErr)
-				return
+				return //nolint:nlreturn
 			}
 			if got != nil {
 				if got.Embedded != tt.want.embedded {
@@ -74,8 +75,9 @@ func Test_pricingLazyLoad(t *testing.T) {
 				if len(got.Config.Regions) != awsRegionsCount {
 					t.Errorf("pricingLazyLoad() len(got.Ranges) = %v, want %v", len(got.Config.Regions), awsRegionsCount)
 				}
+
 				// validate Spot pricing codes replaced
-				for nonStandardCode, _ := range awsSpotPricingRegions {
+				for nonStandardCode := range awsSpotPricingRegions { //nolint:gofmt
 					for _, r := range got.Config.Regions {
 						if nonStandardCode == r.Region {
 							t.Errorf("pricingLazyLoad() non-standard region code: %v", nonStandardCode)
@@ -91,10 +93,10 @@ func Test_convertRawData(t *testing.T) {
 	type args struct {
 		priceData string
 	}
-	type want struct {
+	type want struct { //nolint:wsl
 		regionsLen int
 	}
-	tests := []struct {
+	tests := []struct { //nolint:wsl
 		name string
 		args args
 		want want
@@ -105,6 +107,7 @@ func Test_convertRawData(t *testing.T) {
 			want: want{5},
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var result rawPriceData
@@ -124,7 +127,7 @@ func Test_getSpotInstancePrice(t *testing.T) {
 		os       string
 		embedded bool
 	}
-	tests := []struct {
+	tests := []struct { //nolint:wsl
 		name    string
 		args    args
 		wantErr bool
@@ -159,12 +162,13 @@ func Test_getSpotInstancePrice(t *testing.T) {
 			wantErr: true,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := getSpotInstancePrice(tt.args.instance, tt.args.region, tt.args.os, tt.args.embedded)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("getSpotInstancePrice() error = %v, wantErr %v", err, tt.wantErr)
-				return
+				return //nolint:nlreturn
 			}
 			if !tt.wantErr && got == 0 {
 				t.Errorf("getSpotInstancePrice() got = %v, want > 0", got)

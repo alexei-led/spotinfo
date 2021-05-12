@@ -15,7 +15,7 @@ linters-settings:
   misspell:
     locale: US
   goimports:
-    local-prefixes: github.com/golangci/golangci-lint
+    local-prefixes: spotinfo
   gocritic:
     enabled-tags:
       - diagnostic
@@ -32,7 +32,7 @@ linters-settings:
       - whyNoLint
       - wrapperFunc
   funlen:
-    lines: 100
+    lines: 120
     statements: 50
 
 linters:
@@ -41,36 +41,54 @@ linters:
   disable-all: true
   enable:
     - rowserrcheck
-#    - bodyclose
-#    - deadcode
-#    - depguard
-#    - dogsled
-#    - dupl
-#    - errcheck
-#    - funlen
-#    - goconst
-#    - gocritic
-#    - gocyclo
-#    - gofmt
-#    - goimports
-#    - golint
-#    - gosec
-#    - gosimple
-#    - govet
-#    - ineffassign
-#    - interfacer
-#    - misspell
-#    - nakedret
-#    - scopelint
-#    - staticcheck
-#    - structcheck
-#    - stylecheck
-#    - typecheck
-#    - unconvert
-#    - unparam
-#    - unused
-#    - varcheck
-#    - whitespace
+    - bodyclose
+    - deadcode
+    - depguard
+    - dogsled
+    - dupl
+    - errcheck
+    - errorlint
+    - exportloopref
+    - funlen
+    - gci
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - goerr113
+    - gofmt
+    - goimports
+    - golint
+    - gomnd
+    - gosec
+    - gosimple
+    - govet
+    - goprintffuncname
+    - ifshort
+    - importas
+    - ineffassign
+    - makezero
+    - maligned
+    - misspell
+    - nakedret
+    - nestif
+    - nilerr
+    - nlreturn
+    - revive
+    - scopelint
+    - staticcheck
+    - structcheck
+    - stylecheck
+    - tagliatelle
+    - typecheck
+    - unconvert
+    - unparam
+    - unused
+    - varcheck
+    - wastedassign
+    - whitespace
+    - wrapcheck
+    - wsl
 
   # don't enable:
   # - gochecknoglobals

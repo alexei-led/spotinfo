@@ -9,14 +9,15 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"spotinfo/public/spot"
 	"strings"
 	"syscall"
 
-	"github.com/jedib0t/go-pretty/v6/text"
+	"spotinfo/public/spot" //nolint:gci
 
 	"github.com/jedib0t/go-pretty/v6/table"
-	"github.com/urfave/cli/v2"
+	"github.com/jedib0t/go-pretty/v6/text"
+	"github.com/pkg/errors"
+	"github.com/urfave/cli/v2" //nolint:gci
 )
 
 var (
@@ -35,17 +36,19 @@ var (
 const (
 	regionColumn       = "Region"
 	instanceTypeColumn = "Instance Info"
-	vCpuColumn         = "vCPU"
+	vCPUColumn         = "vCPU"
 	memoryColumn       = "Memory GiB"
 	savingsColumn      = "Savings over On-Demand"
 	interruptionColumn = "Frequency of interruption"
 	priceColumn        = "USD/Hour"
 )
 
+//nolint:cyclop
 func mainCmd(c *cli.Context) error {
 	if v := mainCtx.Value("key"); v != nil {
 		log.Printf("context value = %v", v)
 	}
+
 	regions := c.StringSlice("region")
 	instanceOS := c.String("os")
 	instance := c.String("type")
@@ -53,9 +56,11 @@ func mainCmd(c *cli.Context) error {
 	memory := c.Int("memory")
 	maxPrice := c.Float64("price")
 	sortBy := c.String("sort")
-	sort := spot.SortByRange
 	order := c.String("order")
-	sortDesc := strings.ToLower(order) == "desc"
+	sortDesc := strings.EqualFold(order, "desc")
+
+	var sort int
+
 	switch sortBy {
 	case "type":
 		sort = spot.SortByInstance
@@ -70,20 +75,23 @@ func mainCmd(c *cli.Context) error {
 	default:
 		sort = spot.SortByRange
 	}
+
 	// get spot savings
 	advices, err := spot.GetSpotSavings(regions, instance, instanceOS, cpu, memory, maxPrice, sort, sortDesc)
+	if err != nil {
+		return errors.Wrap(err, "failed to get spot savings")
+	}
+
 	// decide if region should be printed
 	printRegion := len(regions) > 1 || (len(regions) == 1 && regions[0] == "all")
-	if err != nil {
-		return err
-	}
+
 	switch c.String("output") {
 	case "number":
 		printAdvicesNumber(advices, printRegion)
 	case "text":
 		printAdvicesText(advices, printRegion)
 	case "json":
-		printAdvicesJson(advices)
+		printAdvicesJSON(advices)
 	case "table":
 		printAdvicesTable(advices, false, printRegion)
 	case "csv":
@@ -91,6 +99,7 @@ func mainCmd(c *cli.Context) error {
 	default:
 		printAdvicesNumber(advices, printRegion)
 	}
+
 	return nil
 }
 
@@ -98,10 +107,10 @@ func printAdvicesText(advices []spot.Advice, region bool) {
 	for _, advice := range advices {
 		if region {
 			fmt.Printf("region=%s, type=%s, vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s', price=%.2f\n",
-				advice.Region, advice.Instance, advice.Info.Cores, advice.Info.Ram, advice.Savings, advice.Range.Label, advice.Price)
+				advice.Region, advice.Instance, advice.Info.Cores, advice.Info.RAM, advice.Savings, advice.Range.Label, advice.Price)
 		} else {
 			fmt.Printf("type=%s, vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s', price=%.2f\n",
-				advice.Instance, advice.Info.Cores, advice.Info.Ram, advice.Savings, advice.Range.Label, advice.Price)
+				advice.Instance, advice.Info.Cores, advice.Info.RAM, advice.Savings, advice.Range.Label, advice.Price)
 		}
 	}
 }
@@ -109,8 +118,10 @@ func printAdvicesText(advices []spot.Advice, region bool) {
 func printAdvicesNumber(advices []spot.Advice, region bool) {
 	if len(advices) == 1 {
 		fmt.Println(advices[0].Savings)
+
 		return
 	}
+
 	for _, advice := range advices {
 		if region {
 			fmt.Printf("%s/%s: %d\n", advice.Region, advice.Instance, advice.Savings)
@@ -120,11 +131,12 @@ func printAdvicesNumber(advices []spot.Advice, region bool) {
 	}
 }
 
-func printAdvicesJson(advices interface{}) {
+func printAdvicesJSON(advices interface{}) {
 	bytes, err := json.MarshalIndent(advices, "", "  ")
 	if err != nil {
 		panic(err)
 	}
+
 	txt := string(bytes)
 	txt = strings.Replace(txt, "\\u003c", "<", -1)
 	txt = strings.Replace(txt, "\\u003e", ">", -1)
@@ -134,16 +146,20 @@ func printAdvicesJson(advices interface{}) {
 func printAdvicesTable(advices []spot.Advice, csv, region bool) {
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
-	header := table.Row{instanceTypeColumn, vCpuColumn, memoryColumn, savingsColumn, interruptionColumn, priceColumn}
+
+	header := table.Row{instanceTypeColumn, vCPUColumn, memoryColumn, savingsColumn, interruptionColumn, priceColumn}
 	if region {
 		header = append(table.Row{regionColumn}, header...)
 	}
+
 	t.AppendHeader(header)
+
 	for _, advice := range advices {
-		row := table.Row{advice.Instance, advice.Info.Cores, advice.Info.Ram, advice.Savings, advice.Range.Label, advice.Price}
+		row := table.Row{advice.Instance, advice.Info.Cores, advice.Info.RAM, advice.Savings, advice.Range.Label, advice.Price}
 		if region {
 			row = append(table.Row{advice.Region}, row...)
 		}
+
 		t.AppendRow(row)
 	}
 	// render as CSV
@@ -176,7 +192,9 @@ func handleSignals() context.Context {
 
 	go func() {
 		defer cancel()
+
 		sid := <-sig
+
 		log.Printf("received signal: %d\n", sid)
 		log.Println("canceling main command ...")
 	}()
@@ -236,20 +254,23 @@ func main() {
 	}
 	cli.VersionPrinter = func(c *cli.Context) {
 		fmt.Printf("spotinfo %s\n", Version)
+
 		if BuildDate != "" && BuildDate != "unknown" {
 			fmt.Printf("  Build date: %s\n", BuildDate)
 		}
+
 		if GitCommit != "" {
 			fmt.Printf("  Git commit: %s\n", GitCommit)
 		}
+
 		if GitBranch != "" {
 			fmt.Printf("  Git branch: %s\n", GitBranch)
 		}
+
 		fmt.Printf("  Built with: %s\n", runtime.Version())
 	}
 
-	err := app.Run(os.Args)
-	if err != nil {
+	if err := app.Run(os.Args); err != nil {
 		log.Fatal(err)
 	}
 }

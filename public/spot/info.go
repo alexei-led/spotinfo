@@ -1,9 +1,8 @@
 package spot
 
 import (
-	_ "embed"
+	_ "embed" //nolint:gci
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"regexp"
 	"sort"
@@ -21,16 +20,21 @@ var (
 	// parsed json raw data
 	data *advisorData
 	// min ranges
-	minRange = map[int]int{5: 0, 11: 6, 16: 12, 22: 17, 100: 23}
+	minRange = map[int]int{5: 0, 11: 6, 16: 12, 22: 17, 100: 23} //nolint:gomnd
 )
 
 const (
-	SortByRange        = iota
-	SortByInstance     = iota
-	SortBySavings      = iota
-	SortByPrice        = iota
+	// SortByRange sort by frequency of interruption
+	SortByRange = iota
+	// SortByInstance sort by instance type (lexicographical)
+	SortByInstance = iota
+	// SortBySavings sort by savings percentage
+	SortBySavings = iota
+	// SortByPrice sort by spot price
+	SortByPrice = iota
+	// SortByRegion sort by AWS region name
 	SortByRegion       = iota
-	spotAdvisorJsonUrl = "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json"
+	spotAdvisorJSONURL = "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json"
 )
 
 type interruptionRange struct {
@@ -43,7 +47,7 @@ type interruptionRange struct {
 type instanceType struct {
 	Cores int     `json:"cores"`
 	Emr   bool    `json:"emr"`
-	Ram   float32 `json:"ram_gb"`
+	RAM   float32 `json:"ram_gb"` //nolint:tagliatelle
 }
 
 type advice struct {
@@ -52,14 +56,14 @@ type advice struct {
 }
 
 type osTypes struct {
-	Windows map[string]advice `json:"Windows"`
-	Linux   map[string]advice `json:"Linux"`
+	Windows map[string]advice `json:"Windows"` //nolint:tagliatelle
+	Linux   map[string]advice `json:"Linux"`   //nolint:tagliatelle
 }
 
 type advisorData struct {
 	Ranges        []interruptionRange     `json:"ranges"`
-	InstanceTypes map[string]instanceType `json:"instance_types"`
-	Regions       map[string]osTypes      `json:"spot_advisor"`
+	InstanceTypes map[string]instanceType `json:"instance_types"` //nolint:tagliatelle
+	Regions       map[string]osTypes      `json:"spot_advisor"`   //nolint:tagliatelle
 	Embedded      bool                    // true if loaded from embedded copy
 }
 
@@ -125,41 +129,55 @@ func dataLazyLoad(url string, timeout time.Duration, fallbackData string) (*advi
 	var result advisorData
 	// try to load new data
 	client := &http.Client{Timeout: timeout}
+
 	resp, err := client.Get(url)
 	if err != nil {
 		goto fallback
 	}
+
 	defer func() {
 		err = resp.Body.Close()
 	}()
+
 	if resp.StatusCode != http.StatusOK {
 		goto fallback
 	}
+
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	if err != nil {
 		goto fallback
 	}
+
 	return &result, nil
 
 	// fallback to embedded load
 fallback:
 	err = json.Unmarshal([]byte(fallbackData), &result)
+
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse embedded spot data")
 	}
+
 	// set embedded loaded flag true
 	result.Embedded = true
+
 	return &result, nil
 }
 
+// GetSpotSavings get spot saving advices
+//nolint:gocognit,gocyclo
 func GetSpotSavings(regions []string, pattern, instanceOS string, cpu, memory int, price float64, sortBy int, sortDesc bool) ([]Advice, error) {
 	var err error
+
 	loadDataOnce.Do(func() {
-		data, err = dataLazyLoad(spotAdvisorJsonUrl, 10*time.Second, embeddedSpotData)
+		const timeout = 10
+		data, err = dataLazyLoad(spotAdvisorJSONURL, timeout*time.Second, embeddedSpotData)
 	})
+
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load spot data")
 	}
+
 	// special case: "all" regions (slice with single element)
 	if len(regions) == 1 && regions[0] == "all" {
 		// replace regions with all available regions
@@ -168,13 +186,16 @@ func GetSpotSavings(regions []string, pattern, instanceOS string, cpu, memory in
 			regions = append(regions, k)
 		}
 	}
+
 	// get advices for specified regions
 	var result []Advice
+
 	for _, region := range regions {
 		r, ok := data.Regions[region]
 		if !ok {
-			return nil, fmt.Errorf("no spot price for region %s", region)
+			return nil, errors.Errorf("no spot price for region %s", region)
 		}
+
 		var advices map[string]advice
 		if strings.EqualFold("windows", instanceOS) {
 			advices = r.Windows
@@ -191,29 +212,31 @@ func GetSpotSavings(regions []string, pattern, instanceOS string, cpu, memory in
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to match instance type")
 			}
+
 			if !matched { // skip not matched
 				continue
 			}
 			// filter by min vCPU and memory
 			info := data.InstanceTypes[instance]
-			if (cpu != 0 && info.Cores < cpu) || (memory != 0 && info.Ram < float32(memory)) {
+			if (cpu != 0 && info.Cores < cpu) || (memory != 0 && info.RAM < float32(memory)) {
 				continue
 			}
 			// get price details
 			spotPrice, err := getSpotInstancePrice(instance, region, instanceOS, false)
-			if err != nil {
-				// skip this error
+			if err == nil {
+				// filter by max price
+				if price != 0 && spotPrice > price {
+					continue
+				}
 			}
-			// filter by max price
-			if price != 0 && spotPrice > price {
-				continue
-			}
+
 			// prepare record
 			rng := Range{
 				Label: data.Ranges[adv.Range].Label,
 				Max:   data.Ranges[adv.Range].Max,
 				Min:   minRange[data.Ranges[adv.Range].Max],
 			}
+
 			result = append(result, Advice{
 				Region:   region,
 				Instance: instance,
@@ -224,8 +247,10 @@ func GetSpotSavings(regions []string, pattern, instanceOS string, cpu, memory in
 			})
 		}
 	}
+
 	// sort results by - range (default)
 	var data sort.Interface
+
 	switch sortBy {
 	case SortByRange:
 		data = ByRange(result)
@@ -240,9 +265,12 @@ func GetSpotSavings(regions []string, pattern, instanceOS string, cpu, memory in
 	default:
 		data = ByRange(result)
 	}
+
 	if sortDesc {
 		data = sort.Reverse(data)
 	}
+
 	sort.Sort(data)
+
 	return result, nil
 }

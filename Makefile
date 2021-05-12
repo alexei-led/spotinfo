@@ -9,7 +9,7 @@ TESTPKGS = $(shell $(GO) list -f \
 			'{{ if or .TestGoFiles .XTestGoFiles }}{{ .ImportPath }}{{ end }}' \
 			$(PKGS))
 LDFLAGS_VERSION = -X main.Version=$(VERSION) -X main.BuildDate=$(DATE) -X main.GitCommit=$(COMMIT) -X main.GitBranch=$(BRANCH)
-LINT_CONFIG = $(CURDIR)/.golangci.yml
+LINT_CONFIG = $(CURDIR)/.golangci.yaml
 BIN      = $(CURDIR)/.bin
 
 PLATFORMS     = darwin linux windows
@@ -67,7 +67,7 @@ check-file-types: ; $(info $(M) check file type os/arch...) @ ## Check file type
 setup-tools: setup-lint setup-gocov setup-gocov-xml setup-go2xunit setup-mockery setup-ghr
 
 setup-lint:
-	$(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.39
+	$(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.40
 setup-gocov:
 	$(GO) install github.com/axw/gocov/...
 setup-gocov-xml:

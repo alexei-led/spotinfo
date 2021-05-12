@@ -14,11 +14,11 @@ func Test_dataLazyLoad(t *testing.T) {
 		timeout  time.Duration
 		fallback string
 	}
-	type want struct {
+	type want struct { //nolint:wsl
 		embedded  bool
 		rangesLen int
 	}
-	tests := []struct {
+	tests := []struct { //nolint:wsl
 		name    string
 		args    args
 		want    want
@@ -26,12 +26,12 @@ func Test_dataLazyLoad(t *testing.T) {
 	}{
 		{
 			name: "load embedded on timeout",
-			args: args{"http://www.google.com:81/", 1 * time.Second, embeddedSpotData},
+			args: args{"https://www.google.com:81/", 1 * time.Second, embeddedSpotData},
 			want: want{embedded: true, rangesLen: 5},
 		},
 		{
 			name: "load embedded on not found",
-			args: args{"http://notfound", 1 * time.Second, embeddedSpotData},
+			args: args{"https://notfound", 1 * time.Second, embeddedSpotData},
 			want: want{embedded: true, rangesLen: 5},
 		},
 		{
@@ -41,7 +41,7 @@ func Test_dataLazyLoad(t *testing.T) {
 		},
 		{
 			name: "load data from spot advisor",
-			args: args{spotAdvisorJsonUrl, 10 * time.Second, embeddedSpotData},
+			args: args{spotAdvisorJSONURL, 10 * time.Second, embeddedSpotData},
 			want: want{embedded: false, rangesLen: 5},
 		},
 		{
@@ -50,12 +50,13 @@ func Test_dataLazyLoad(t *testing.T) {
 			wantErr: true,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := dataLazyLoad(tt.args.url, tt.args.timeout, tt.args.fallback)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("dataLazyLoad() error = %v, wantErr %v", err, tt.wantErr)
-				return
+				return //nolint:nlreturn
 			}
 			if got != nil {
 				if got.Embedded != tt.want.embedded {
@@ -69,7 +70,8 @@ func Test_dataLazyLoad(t *testing.T) {
 	}
 }
 
-func TestGetSpotSavings(t *testing.T) {
+//nolint:funlen,gocognit,gocyclo
+func TestGetSpotSavings(t *testing.T) { //nolint:cyclop
 	type args struct {
 		pattern    string
 		regions    []string
@@ -80,12 +82,12 @@ func TestGetSpotSavings(t *testing.T) {
 		sortBy     int
 		sortDesc   bool
 	}
-	type want struct {
-		minCpu    int
+	type want struct { //nolint:wsl
+		minCPU    int
 		minMemory float32
 		maxPrice  float64
 	}
-	tests := []struct {
+	tests := []struct { //nolint:wsl
 		name    string
 		args    args
 		want    want
@@ -114,12 +116,12 @@ func TestGetSpotSavings(t *testing.T) {
 		{
 			name: "get advice by pattern min.cpu=64 and min.memory=128",
 			args: args{pattern: "^(m5)(\\S)*", regions: []string{"us-east-1"}, instanceOS: "linux", cpu: 64, memory: 128},
-			want: want{minCpu: 64, minMemory: 128},
+			want: want{minCPU: 64, minMemory: 128},
 		},
 		{
 			name: "get advice by pattern min.cpu=4, min.memory=16 and max.price $1.00/hour",
 			args: args{pattern: "^(m5)(\\S)*", regions: []string{"us-east-1"}, instanceOS: "linux", cpu: 4, memory: 16, price: 1.0},
-			want: want{minCpu: 4, minMemory: 16, maxPrice: 1.0},
+			want: want{minCPU: 4, minMemory: 16, maxPrice: 1.0},
 		},
 		{
 			name:    "fail on bad regexp pattern",
@@ -137,24 +139,26 @@ func TestGetSpotSavings(t *testing.T) {
 			wantErr: true,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := GetSpotSavings(tt.args.regions, tt.args.pattern, tt.args.instanceOS, tt.args.cpu, tt.args.memory, tt.args.price, tt.args.sortBy, tt.args.sortDesc)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetSpotSavings() error = %v, wantErr %v", err, tt.wantErr)
-				return
+				return //nolint:nlreturn
 			}
-			if got != nil {
+
+			if got != nil { //nolint:nestif
 				for _, advice := range got {
 					matched, err := regexp.MatchString(tt.args.pattern, advice.Instance)
 					if !matched || err != nil {
 						t.Errorf("GetSpotSavings() advice.Instance does not match '%v'", &tt.args.pattern)
 					}
-					if advice.Info.Cores < tt.want.minCpu {
-						t.Errorf("GetSpotSavings() advice.Cores = %v < min %v", advice.Info.Cores, tt.want.minCpu)
+					if advice.Info.Cores < tt.want.minCPU {
+						t.Errorf("GetSpotSavings() advice.Cores = %v < min %v", advice.Info.Cores, tt.want.minCPU)
 					}
-					if advice.Info.Ram < tt.want.minMemory {
-						t.Errorf("GetSpotSavings() advice.Ram = %v < min %v", advice.Info.Ram, tt.want.minMemory)
+					if advice.Info.RAM < tt.want.minMemory {
+						t.Errorf("GetSpotSavings() advice.Ram = %v < min %v", advice.Info.RAM, tt.want.minMemory)
 					}
 					if tt.want.maxPrice != 0 && advice.Price > tt.want.maxPrice {
 						t.Errorf("GetSpotSavings() advice.Price = %v > max %v", advice.Price, tt.want.maxPrice)
@@ -168,6 +172,7 @@ func TestGetSpotSavings(t *testing.T) {
 						if tt.args.sortDesc { // descending
 							return strings.Compare(got[j].Region, got[i].Region) == -1
 						}
+
 						return strings.Compare(got[i].Region, got[j].Region) == -1
 					}
 				case SortBySavings:
@@ -175,6 +180,7 @@ func TestGetSpotSavings(t *testing.T) {
 						if tt.args.sortDesc { // descending
 							return got[j].Savings < got[i].Savings
 						}
+
 						return got[i].Savings < got[j].Savings
 					}
 				case SortByPrice:
@@ -182,6 +188,7 @@ func TestGetSpotSavings(t *testing.T) {
 						if tt.args.sortDesc { // descending
 							return got[j].Price < got[i].Price
 						}
+
 						return got[i].Price < got[j].Price
 					}
 				case SortByRange:
@@ -189,6 +196,7 @@ func TestGetSpotSavings(t *testing.T) {
 						if tt.args.sortDesc { // descending
 							return got[j].Range.Min < got[i].Range.Min
 						}
+
 						return got[i].Range.Min < got[j].Range.Min
 					}
 				case SortByInstance:
@@ -196,6 +204,7 @@ func TestGetSpotSavings(t *testing.T) {
 						if tt.args.sortDesc { // descending
 							return strings.Compare(got[j].Instance, got[i].Instance) == -1
 						}
+
 						return strings.Compare(got[i].Instance, got[j].Instance) == -1
 					}
 				}
