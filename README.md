@@ -1,4 +1,5 @@
-[![docker](https://github.com/alexei-led/spotinfo/actions/workflows/build.yaml/badge.svg)](https://github.com/alexei-led/spotinfo/actions/workflows/build.yaml) [![Go Report Card](https://goreportcard.com/badge/github.com/alexei-led/spotinfo)](https://goreportcard.com/report/github.com/alexei-led/spotinfo) [![Docker Pulls](https://img.shields.io/docker/pulls/alexeiled/spotinfo.svg?style=popout)](https://hub.docker.com/r/alexeiled/spotinfo) [![](https://images.microbadger.com/badges/image/alexeiled/spotinfo.svg)](https://microbadger.com/images/alexeiled/spotinfo "Get your own image badge on microbadger.com") 
+[![docker](https://github.com/alexei-led/spotinfo/actions/workflows/build.yaml/badge.svg)](https://github.com/alexei-led/spotinfo/actions/workflows/build.yaml) [![Go Report Card](https://goreportcard.com/badge/github.com/alexei-led/spotinfo)](https://goreportcard.com/report/github.com/alexei-led/spotinfo) [![Docker Pulls](https://img.shields.io/docker/pulls/alexeiled/spotinfo.svg?style=popout)](https://hub.docker.com/r/alexeiled/spotinfo) [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Falexei-led%2Fspotinfo.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Falexei-led%2Fspotinfo?ref=badge_shield)
+[![](https://images.microbadger.com/badges/image/alexeiled/spotinfo.svg)](https://microbadger.com/images/alexeiled/spotinfo "Get your own image badge on microbadger.com") 
 
 # spotinfo
 
@@ -291,3 +292,7 @@ Additional secret to create GitHub Release:
 
 1. `RELEASE_TOKEN` - GitHub Personal Access Token (with `repo` scope)
 
+
+
+## License
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Falexei-led%2Fspotinfo.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Falexei-led%2Fspotinfo?ref=badge_large)
