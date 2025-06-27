@@ -30,7 +30,7 @@ RUN --mount=type=cache,target=/go/mod go mod download
 COPY . .
 
 # test and build
-RUN --mount=type=cache,target=/root/.cache/go-build TARGETOS=${TARGETOS} TARGETARCH=${TARGETARCH} make
+RUN --mount=type=cache,target=/root/.cache/go-build TARGETOS=${TARGETOS} TARGETARCH=${TARGETARCH} make build
 
 #
 # ------ spotinfo GitHub Release
