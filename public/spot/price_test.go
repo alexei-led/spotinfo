@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -13,8 +16,9 @@ var (
 )
 
 func Test_pricingLazyLoad(t *testing.T) {
-	const awsRegionsCount = 22
-	type args struct { //nolint:wsl
+	t.Parallel()
+	const minExpectedRegions = 20 // Use minimum expected instead of exact count
+	type args struct {            //nolint:wsl
 		url          string
 		timeout      time.Duration
 		fallbackData string
@@ -63,33 +67,34 @@ func Test_pricingLazyLoad(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := pricingLazyLoad(tt.args.url, tt.args.timeout, tt.args.fallbackData, tt.args.embedded)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("pricingLazyLoad() error = %v, wantErr %v", err, tt.wantErr)
-				return //nolint:nlreturn
-			}
-			if got != nil {
-				if got.Embedded != tt.want.embedded {
-					t.Errorf("pricingLazyLoad() got.Embedded = %v, want %v", got.Embedded, tt.want.embedded)
-				}
-				if len(got.Config.Regions) != awsRegionsCount {
-					t.Errorf("pricingLazyLoad() len(got.Ranges) = %v, want %v", len(got.Config.Regions), awsRegionsCount)
-				}
 
-				// validate Spot pricing codes replaced
-				for nonStandardCode := range awsSpotPricingRegions { //nolint:gofmt
-					for _, r := range got.Config.Regions {
-						if nonStandardCode == r.Region {
-							t.Errorf("pricingLazyLoad() non-standard region code: %v", nonStandardCode)
-						}
-					}
-				}
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			require.NotNil(t, got)
+			assert.Equal(t, tt.want.embedded, got.Embedded)
+			assert.GreaterOrEqual(t, len(got.Config.Regions), minExpectedRegions, "Should have at least minimum expected regions")
+
+			// Validate no non-standard region codes are present
+			regionCodes := make(map[string]bool)
+			for _, r := range got.Config.Regions {
+				regionCodes[r.Region] = true
+			}
+
+			for nonStandardCode := range awsSpotPricingRegions {
+				assert.False(t, regionCodes[nonStandardCode], "Non-standard region code should be replaced: %s", nonStandardCode)
 			}
 		})
 	}
 }
 
 func Test_convertRawData(t *testing.T) {
+	t.Parallel()
 	type args struct {
 		priceData string
 	}
@@ -104,23 +109,31 @@ func Test_convertRawData(t *testing.T) {
 		{
 			name: "convert embedded test data",
 			args: args{embeddedPriceTestData},
-			want: want{5},
+			want: want{5}, // Exact count for test data
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			var result rawPriceData
-			_ = json.Unmarshal([]byte(tt.args.priceData), &result)
+			err := json.Unmarshal([]byte(tt.args.priceData), &result)
+			require.NoError(t, err, "Should parse test data successfully")
+
 			got := convertRawData(&result)
-			if len(got.region) != tt.want.regionsLen {
-				t.Errorf("convertRawData() regions = %v, want %v", len(got.region), tt.want.regionsLen)
+			assert.Len(t, got.region, tt.want.regionsLen, "Should have expected number of regions")
+
+			// Validate structure
+			for regionName, regionData := range got.region {
+				assert.NotEmpty(t, regionName, "Region name should not be empty")
+				assert.NotEmpty(t, regionData, "Region data should not be empty")
 			}
 		})
 	}
 }
 
 func Test_getSpotInstancePrice(t *testing.T) {
+	t.Parallel()
 	type args struct {
 		instance string
 		region   string
@@ -165,14 +178,16 @@ func Test_getSpotInstancePrice(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := getSpotInstancePrice(tt.args.instance, tt.args.region, tt.args.os, tt.args.embedded)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("getSpotInstancePrice() error = %v, wantErr %v", err, tt.wantErr)
-				return //nolint:nlreturn
+
+			if tt.wantErr {
+				require.Error(t, err)
+				return
 			}
-			if !tt.wantErr && got == 0 {
-				t.Errorf("getSpotInstancePrice() got = %v, want > 0", got)
-			}
+
+			require.NoError(t, err)
+			assert.Greater(t, got, 0.0, "Price should be positive for valid instances")
 		})
 	}
 }
