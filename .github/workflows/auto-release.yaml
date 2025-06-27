@@ -1,5 +1,4 @@
 name: Quarterly Auto Release
-
 on:
   schedule:
     # Run at 9 AM UTC on 1st of January, April, July, October (every 3 months)
@@ -16,111 +15,108 @@ on:
           - minor
           - major
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
-
 jobs:
   auto-release:
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 20
+    permissions:
+      contents: write
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        token: ${{ secrets.GITHUB_TOKEN }}
-        
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.24'
-        
-    - name: Update embedded data
-      run: make update-data update-price
-      
-    - name: Run tests
-      run: make test-verbose
-      
-    - name: Get latest tag
-      id: get-latest-tag
-      run: |
-        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-        echo "latest-tag=${LATEST_TAG}" >> $GITHUB_OUTPUT
-        echo "Latest tag: ${LATEST_TAG}"
-        
-    - name: Calculate next version
-      id: next-version
-      run: |
-        LATEST_TAG="${{ steps.get-latest-tag.outputs.latest-tag }}"
-        VERSION_TYPE="${{ github.event.inputs.version_type || 'patch' }}"
-        
-        # Remove 'v' prefix and split version
-        VERSION=${LATEST_TAG#v}
-        IFS='.' read -ra VERSION_PARTS <<< "$VERSION"
-        
-        MAJOR=${VERSION_PARTS[0]:-0}
-        MINOR=${VERSION_PARTS[1]:-0}
-        PATCH=${VERSION_PARTS[2]:-0}
-        
-        case $VERSION_TYPE in
-          major) NEW_VERSION="v$((MAJOR + 1)).0.0" ;;
-          minor) NEW_VERSION="v${MAJOR}.$((MINOR + 1)).0" ;;
-          patch) NEW_VERSION="v${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
-        esac
-        
-        echo "new-version=${NEW_VERSION}" >> $GITHUB_OUTPUT
-        echo "Next version: ${NEW_VERSION}"
-        
-    - name: Check for changes since last release
-      id: check-changes
-      run: |
-        LATEST_TAG="${{ steps.get-latest-tag.outputs.latest-tag }}"
-        if git rev-list ${LATEST_TAG}..HEAD --count | grep -q "^0$"; then
-          echo "No changes since last release"
-          echo "has-changes=false" >> $GITHUB_OUTPUT
-        else
-          CHANGE_COUNT=$(git rev-list ${LATEST_TAG}..HEAD --count)
-          echo "Found ${CHANGE_COUNT} changes since last release"
-          echo "has-changes=true" >> $GITHUB_OUTPUT
-        fi
-        
-    - name: Generate changelog
-      if: steps.check-changes.outputs.has-changes == 'true'
-      id: changelog
-      run: |
-        LATEST_TAG="${{ steps.get-latest-tag.outputs.latest-tag }}"
-        CHANGELOG=$(git log ${LATEST_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges | head -20)
-        
-        # Save changelog to file for multiline output
-        echo "${CHANGELOG}" > changelog.txt
-        
-        echo "Generated changelog with $(echo "${CHANGELOG}" | wc -l) entries"
-        
-    - name: Create and push tag
-      if: steps.check-changes.outputs.has-changes == 'true'
-      run: |
-        NEW_VERSION="${{ steps.next-version.outputs.new-version }}"
-        LATEST_TAG="${{ steps.get-latest-tag.outputs.latest-tag }}"
-        
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        
-        # Create annotated tag with changelog
-        git tag -a "${NEW_VERSION}" -m "Automated quarterly release ${NEW_VERSION}
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24'
+      - name: Update embedded data
+        run: make update-data update-price
+      - name: Run tests
+        run: make test-verbose
+      - name: Get latest tag
+        id: get-latest-tag
+        run: |
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "latest-tag=${LATEST_TAG}" >> $GITHUB_OUTPUT
+          echo "Latest tag: ${LATEST_TAG}"
+      - name: Calculate next version
+        id: next-version
+        run: |
+          LATEST_TAG="${{ steps.get-latest-tag.outputs.latest-tag }}"
+          VERSION_TYPE="${{ github.event.inputs.version_type || 'patch' }}"
 
-Changes since ${LATEST_TAG}:
-$(cat changelog.txt)"
-        
-        git push origin "${NEW_VERSION}"
-        echo "✅ Created and pushed tag: ${NEW_VERSION}"
-        
-    - name: Summary
-      run: |
-        if [[ "${{ steps.check-changes.outputs.has-changes }}" == "true" ]]; then
-          echo "🚀 Successfully created release tag: ${{ steps.next-version.outputs.new-version }}"
-          echo "📦 Release workflow will be triggered automatically"
-          echo "🔗 Check releases at: https://github.com/${{ github.repository }}/releases"
-        else
-          echo "ℹ️  No changes detected since last release (${{ steps.get-latest-tag.outputs.latest-tag }})"
-          echo "⏭️  Skipping tag creation - no release needed"
-        fi
+          # Remove 'v' prefix and split version
+          VERSION=${LATEST_TAG#v}
+          IFS='.' read -ra VERSION_PARTS <<< "$VERSION"
+
+          MAJOR=${VERSION_PARTS[0]:-0}
+          MINOR=${VERSION_PARTS[1]:-0}
+          PATCH=${VERSION_PARTS[2]:-0}
+
+          case $VERSION_TYPE in
+            major) NEW_VERSION="v$((MAJOR + 1)).0.0" ;;
+            minor) NEW_VERSION="v${MAJOR}.$((MINOR + 1)).0" ;;
+            patch) NEW_VERSION="v${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+          esac
+
+          echo "new-version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "Next version: ${NEW_VERSION}"
+      - name: Check for changes since last release
+        id: check-changes
+        run: |
+          LATEST_TAG="${{ steps.get-latest-tag.outputs.latest-tag }}"
+          if git rev-list ${LATEST_TAG}..HEAD --count | grep -q "^0$"; then
+            echo "No changes since last release"
+            echo "has-changes=false" >> $GITHUB_OUTPUT
+          else
+            CHANGE_COUNT=$(git rev-list ${LATEST_TAG}..HEAD --count)
+            echo "Found ${CHANGE_COUNT} changes since last release"
+            echo "has-changes=true" >> $GITHUB_OUTPUT
+          fi
+      - name: Generate changelog
+        if: steps.check-changes.outputs.has-changes == 'true'
+        id: changelog
+        run: |
+          LATEST_TAG="${{ steps.get-latest-tag.outputs.latest-tag }}"
+          CHANGELOG=$(git log ${LATEST_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges | head -20)
+
+          # Save changelog to file for multiline output
+          echo "${CHANGELOG}" > changelog.txt
+
+          echo "Generated changelog with $(echo "${CHANGELOG}" | wc -l) entries"
+      - name: "Create and push tag"
+        if: steps.check-changes.outputs.has-changes == 'true'
+        run: |
+          NEW_VERSION="${{ steps.next-version.outputs.new-version }}"
+          LATEST_TAG="${{ steps.get-latest-tag.outputs.latest-tag }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Create annotated tag with changelog
+          TAG_MESSAGE="Automated quarterly release ${NEW_VERSION}
+
+          Changes since ${LATEST_TAG}:
+          $(cat changelog.txt)"
+
+          git tag -a "${NEW_VERSION}" -m "${TAG_MESSAGE}"
+          git push origin "${NEW_VERSION}"
+          echo "✅ Created and pushed tag: ${NEW_VERSION}"
+      - name: Summary
+        run: |
+          if [[ "${{ steps.check-changes.outputs.has-changes }}" == "true" ]]; then
+            echo "🚀 Successfully created release tag: ${{ steps.next-version.outputs.new-version }}"
+            echo "📦 Release workflow will be triggered automatically"
+            echo "🔗 Check releases at: https://github.com/${{ github.repository }}/releases"
+          else
+            echo "ℹ️  No changes detected since last release (${{ steps.get-latest-tag.outputs.latest-tag }})"
+            echo "⏭️  Skipping tag creation - no release needed"
+          fi
