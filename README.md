@@ -1,4 +1,4 @@
-[![docker](https://github.com/alexei-led/spotinfo/actions/workflows/build.yaml/badge.svg)](https://github.com/alexei-led/spotinfo/actions/workflows/build.yaml) [![Go Report Card](https://goreportcard.com/badge/github.com/alexei-led/spotinfo)](https://goreportcard.com/report/github.com/alexei-led/spotinfo) [![Docker Pulls](https://img.shields.io/docker/pulls/alexeiled/spotinfo.svg?style=popout)](https://hub.docker.com/r/alexeiled/spotinfo) [![](https://images.microbadger.com/badges/image/alexeiled/spotinfo.svg)](https://microbadger.com/images/alexeiled/spotinfo "Get your own image badge on microbadger.com") 
+[![CI](https://github.com/alexei-led/spotinfo/actions/workflows/ci.yaml/badge.svg)](https://github.com/alexei-led/spotinfo/actions/workflows/ci.yaml) [![Docker](https://github.com/alexei-led/spotinfo/actions/workflows/docker.yaml/badge.svg)](https://github.com/alexei-led/spotinfo/actions/workflows/docker.yaml) [![Go Report Card](https://goreportcard.com/badge/github.com/alexei-led/spotinfo)](https://goreportcard.com/report/github.com/alexei-led/spotinfo) 
 
 # spotinfo
 
@@ -246,7 +246,7 @@ docker pull ghcr.io/alexei-led/spotinfo:latest
 ### Makefile
 
 The `spotinfo` `Makefile` is used for task automation only: compile, lint, test, etc.
-The project requires Go version 1.16+.
+The project requires Go version 1.24+.
 
 ```text
 > make help
@@ -267,7 +267,12 @@ clean            Cleanup everything
 
 ### Continuous Integration
 
-The GitHub action `docker` is used for the `spotinfo` CI.
+The project uses modern GitHub Actions workflows:
+
+- **CI Pipeline** (`ci.yaml`): Runs tests, linting, and cross-platform builds on every push/PR
+- **Release Pipeline** (`release.yaml`): Creates GitHub releases with binaries when tags are pushed  
+- **Docker Pipeline** (`docker.yaml`): Builds and publishes multi-architecture Docker images to GitHub Container Registry
+- **Auto-Release** (`auto-release.yaml`): Automated quarterly releases with smart change detection
 
 ### Build with Docker
 
@@ -277,17 +282,15 @@ Use Docker `buildx` plugin to build multi-architecture Docker image.
 docker buildx build --platform=linux/arm64,linux/amd64 -t spotinfo -f Dockerfile .
 ```
 
-#### Required GitHub secrets
+#### GitHub Actions Configuration
 
-Please specify the following GitHub secrets:
+The CI/CD pipelines use:
 
-1. `DOCKER_USERNAME` - Docker Registry username
-1. `DOCKER_PASSWORD` - Docker Registry password or token
-1. `CR_PAT` - Current GitHub Personal Access Token (with `write/read` packages permission)
-1. `DOCKER_REGISTRY` - _optional_; Docker Registry name, default to `docker.io`
-1. `DOCKER_REPOSITORY` - _optional_; Docker image repository name, default to `$GITHUB_REPOSITORY` (i.e. `user/repo`)
+- **Built-in Secrets**: `GITHUB_TOKEN` for releases and GitHub Container Registry publishing
+- **Go 1.24**: Modern Go version with latest features and security updates
+- **Multi-Architecture Support**: Builds for Linux/macOS/Windows on AMD64/ARM64
+- **Smart Caching**: Go modules and Docker layer caching for faster builds
+- **Automated Releases**: Quarterly releases with semantic versioning
 
-Additional secret to create GitHub Release:
-
-1. `RELEASE_TOKEN` - GitHub Personal Access Token (with `repo` scope)
+No additional secrets required - everything uses GitHub's built-in authentication.
 
