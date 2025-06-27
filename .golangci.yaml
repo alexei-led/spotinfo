@@ -1,102 +1,215 @@
-linters-settings:
-  govet:
-    check-shadowing: true
-  golint:
-    min-confidence: 0
-  gocyclo:
-    min-complexity: 15
-  maligned:
-    suggest-new: true
-  dupl:
-    threshold: 100
-  goconst:
-    min-len: 2
-    min-occurrences: 2
-  misspell:
-    locale: US
-  goimports:
-    local-prefixes: spotinfo
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
-    disabled-checks:
-      - dupImport # https://github.com/go-critic/go-critic/issues/845
-      - ifElseChain
-      - octalLiteral
-      - rangeValCopy
-      - unnamedResult
-      - whyNoLint
-      - wrapperFunc
-  funlen:
-    lines: 120
-    statements: 50
+version: "2"
 
 linters:
+  settings:
+    govet:
+      enable:
+        - shadow
+        - fieldalignment
+    revive:
+      min-confidence: 0
+    gocyclo:
+      min-complexity: 15
+    cyclop:
+      max-complexity: 15
+      package-average: 10.0
+      skip-tests: true
+    dupl:
+      threshold: 100
+    goconst:
+      min-len: 2
+      min-occurrences: 2
+    misspell:
+      locale: US
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+      disabled-checks:
+        - dupImport # https://github.com/go-critic/go-critic/issues/845
+        - ifElseChain
+        - octalLiteral
+        - rangeValCopy
+        - unnamedResult
+        - whyNoLint
+        - wrapperFunc
+    funlen:
+      lines: 120
+      statements: 50
+    gocognit:
+      min-complexity: 20
+    lll:
+      line-length: 120
+    varnamelen:
+      min-name-length: 2
+      ignore-names:
+        - err
+        - i
+        - j
+        - k
+        - v
+        - id
+        - ok
+        - db
+    nolintlint:
+      allow-unused: false
+      require-explanation: true
+      require-specific: true
+    exhaustive:
+      default-signifies-exhaustive: true
+    depguard:
+      rules:
+        main:
+          files:
+            - $all
+          allow:
+            - $gostd
+            - spotinfo/public/spot
+            - github.com/jedib0t/go-pretty/v6
+            - github.com/pkg/errors
+            - github.com/urfave/cli/v2
+    testifylint:
+      enable-all: true
+    tagalign:
+      align: true
+      sort: true
+
   # please, do not use `enable-all`: it's deprecated and will be removed soon.
   # inverted configuration with `enable-all` and `disable` is not scalable during updates of golangci-lint
-  disable-all: true
+  default: none
   enable:
-    - rowserrcheck
-    - bodyclose
-    - deadcode
-    - depguard
-    - dogsled
-    - dupl
-    - errcheck
-    - errorlint
-    - exportloopref
-    - funlen
+    # Essential linters for production Go CLI
+    - errcheck           # Check for unchecked errors
+    - gosec             # Security issues
+    - govet             # Go vet built-in checks
+    - ineffassign       # Ineffective assignments
+    - staticcheck       # Comprehensive static analysis
+    - unused            # Unused code
+    - revive            # Fast golint replacement
+    - errorlint         # Error wrapping issues
+    - misspell          # Spelling mistakes
+    
+    # Additional valuable linters
+    - bodyclose         # HTTP response body close check
+    - contextcheck      # Context usage patterns
+    - copyloopvar       # Loop variable copying issues
+    - cyclop            # Cyclomatic complexity (alternative to gocyclo)
+    - depguard          # Import restrictions
+    - dupl              # Code duplication
+    - err113            # Error definition standards
+    - exhaustive        # Switch statement exhaustiveness
+    - funlen            # Function length
+    - goconst           # Repeated strings that could be constants
+    - gocritic          # Comprehensive go code critic
+    - gocyclo           # Cyclomatic complexity
+    - goprintffuncname  # Printf function naming
+    - importas          # Import alias enforcement
+    - makezero          # Slice initialization
+    - nakedret          # Naked returns
+    - nestif            # Nested if statements
+    - nilerr            # Nil error returns
+    - nilnil            # Nil error and value returns
+    - noctx             # HTTP without context
+    - nolintlint        # Nolint directive usage
+    - predeclared       # Predeclared identifier shadowing
+    - rowserrcheck      # SQL rows.Err() check
+    - sqlclosecheck     # SQL close checks
+    - tagliatelle       # Struct tag format
+    - testifylint       # Testify usage
+    - thelper           # Test helper functions
+    - unconvert         # Unnecessary conversions
+    - unparam           # Unused parameters
+    - wastedassign      # Wasted assignments
+    - whitespace        # Whitespace issues
+    
+    # Performance-related
+    - prealloc          # Slice preallocation
+    - perfsprint        # Performance-oriented sprintf replacements
+    
+    # Style and maintainability
+    - asciicheck        # ASCII identifiers only
+    - bidichk           # Bidirectional unicode
+    - containedctx      # Context in structs
+    - decorder          # Declaration order
+    - dogsled           # Too many blank identifiers
+    - dupword           # Duplicate words in comments
+    - durationcheck     # Duration multiplication
+    - errname           # Error naming conventions
+    - gochecknoinits    # No init functions
+    - godot             # Comment periods
+    - grouper           # Expression grouping
+    - interfacebloat    # Interface size
+    - lll               # Line length
+    - loggercheck       # Logger key-value pairs
+    - maintidx          # Maintainability index
+    - mirror            # Wrong mirror patterns
+    - mnd               # Magic numbers
+    - musttag           # Struct tag enforcement
+    - nilnesserr        # Nil check patterns
+    - nlreturn          # New line before return
+    - nosprintfhostport # Sprintf host:port misuse
+    - paralleltest      # Parallel test usage
+    - reassign          # Package variable reassignment
+    - sloglint          # Structured logging
+    - spancheck         # OpenTelemetry span usage
+    - tagalign          # Struct tag alignment
+    - testableexamples  # Testable examples
+    - testpackage       # Test package separation
+    - tparallel         # t.Parallel() usage
+    - usestdlibvars     # Standard library variables
+    - varnamelen        # Variable name length
+    - wrapcheck         # Error wrapping
+    - wsl               # Whitespace
+    
+    # CLI-specific useful linters
+    - exhaustruct       # Struct field initialization
+    - forcetypeassert   # Type assertion without check
+    - gomodguard        # Go module dependencies
+    - ireturn           # Interface return types
+    - nonamedreturns    # Named return avoidance
+
+  # Explicitly disabled linters with reasons
+  # - gochecknoglobals  # Too restrictive for CLI apps that need global flags/config
+  # - gocognit          # Redundant with cyclop
+  # - godox             # TODO comments are fine during development
+  # - goheader          # Not needed for this project
+  # - gomoddirectives   # Too restrictive for development
+  # - gosmopolitan      # Not needed for this project
+  # - forbidigo         # Too restrictive
+  # - iface             # Too opinionated
+  # - inamedparam       # Too verbose
+  # - intrange          # Go 1.22+ feature not always available
+
+  exclusions:
+    rules:
+      - path: '(.+)\.go$'
+        text: Using the variable on range scope `tt` in function literal
+      - path: '(.+)_test\.go'
+        linters:
+          - funlen
+          - gocyclo
+          - cyclop
+          - dupl
+          - lll
+          - varnamelen
+          - exhaustruct
+      - linters:
+          - lll
+        source: "^//go:generate "
+
+formatters:
+  enable:
     - gci
-    - gocognit
-    - goconst
-    - gocritic
-    - gocyclo
-    - goerr113
     - gofmt
     - goimports
-    - golint
-    - gomnd
-    - gosec
-    - gosimple
-    - govet
-    - goprintffuncname
-    - ifshort
-    - importas
-    - ineffassign
-    - makezero
-    - maligned
-    - misspell
-    - nakedret
-    - nestif
-    - nilerr
-    - nlreturn
-    - revive
-    - scopelint
-    - staticcheck
-    - structcheck
-    - stylecheck
-    - tagliatelle
-    - typecheck
-    - unconvert
-    - unparam
-    - unused
-    - varcheck
-    - wastedassign
-    - whitespace
-    - wrapcheck
-    - wsl
-
-  # don't enable:
-  # - gochecknoglobals
-  # - gocognit
-  # - godox
-  # - maligned
-  # - prealloc
-
-issues:
-    exclude:
-        - Using the variable on range scope `tt` in function literal
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(spotinfo)
+    goimports:
+      local-prefixes: spotinfo

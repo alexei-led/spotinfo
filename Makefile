@@ -67,7 +67,7 @@ check-file-types: ; $(info $(M) check file type os/arch...) @ ## Check file type
 setup-tools: setup-lint setup-gocov setup-gocov-xml setup-go2xunit setup-mockery setup-ghr
 
 setup-lint:
-	$(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.40
+	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6
 setup-gocov:
 	$(GO) install github.com/axw/gocov/...
 setup-gocov-xml:

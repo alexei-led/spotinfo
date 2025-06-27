@@ -3,7 +3,7 @@
 #
 # ----- Go Builder Image ------
 #
-FROM --platform=${BUILDPLATFORM} golang:1.16-alpine AS builder
+FROM --platform=${BUILDPLATFORM} golang:1.24-alpine AS builder
 
 # curl git bash
 RUN apk add --no-cache curl git bash make sed ca-certificates file
