@@ -28,7 +28,16 @@ jobs:
         
     - name: Get version
       id: version
-      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      run: |
+        TAG_NAME=${GITHUB_REF#refs/tags/}
+        # Add 'v' prefix if not present for release name
+        if [[ $TAG_NAME =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+          RELEASE_VERSION="v${TAG_NAME}"
+        else
+          RELEASE_VERSION="${TAG_NAME}"
+        fi
+        echo "VERSION=${TAG_NAME}" >> $GITHUB_OUTPUT
+        echo "RELEASE_VERSION=${RELEASE_VERSION}" >> $GITHUB_OUTPUT
       
     - name: Update embedded data
       run: make update-data update-price
@@ -39,11 +48,11 @@ jobs:
     - name: Create release
       run: |
         gh release create ${{ steps.version.outputs.VERSION }} \
-          --title "Release ${{ steps.version.outputs.VERSION }}" \
+          --title "Release ${{ steps.version.outputs.RELEASE_VERSION }}" \
           --notes-file <(cat <<'EOF'
         ## Changes
         
-        Release ${{ steps.version.outputs.VERSION }}
+        Release ${{ steps.version.outputs.RELEASE_VERSION }}
         
         ### Downloads
         
