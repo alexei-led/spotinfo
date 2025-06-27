@@ -20,6 +20,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
       
     - name: Set up Go
       uses: actions/setup-go@v4
@@ -48,30 +50,8 @@ jobs:
     - name: Create release
       run: |
         gh release create ${{ steps.version.outputs.VERSION }} \
-          --title "Release ${{ steps.version.outputs.RELEASE_VERSION }}" \
-          --notes-file <(cat <<'EOF'
-        ## Changes
-        
-        Release ${{ steps.version.outputs.RELEASE_VERSION }}
-        
-        ### Downloads
-        
-        - **Linux AMD64**: `spotinfo_linux_amd64`
-        - **Linux ARM64**: `spotinfo_linux_arm64`
-        - **macOS AMD64**: `spotinfo_darwin_amd64`
-        - **macOS ARM64**: `spotinfo_darwin_arm64`
-        - **Windows AMD64**: `spotinfo_windows_amd64`
-        
-        ### Installation
-        
-        Download the appropriate binary for your platform and make it executable:
-        
-        ```bash
-        chmod +x spotinfo_*
-        ./spotinfo_* --help
-        ```
-        EOF
-        ) \
+          --title "${{ steps.version.outputs.RELEASE_VERSION }}" \
+          --generate-notes \
           .bin/*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
