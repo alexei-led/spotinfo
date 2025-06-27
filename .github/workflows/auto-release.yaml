@@ -92,9 +92,7 @@ jobs:
         CHANGELOG=$(git log ${LATEST_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges | head -20)
         
         # Save changelog to file for multiline output
-        cat << 'EOF' > changelog.txt
-        ${CHANGELOG}
-        EOF
+        echo "${CHANGELOG}" > changelog.txt
         
         echo "Generated changelog with $(echo "${CHANGELOG}" | wc -l) entries"
         

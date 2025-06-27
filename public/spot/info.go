@@ -166,7 +166,7 @@ fallback:
 
 // GetSpotSavings get spot saving advices
 //
-//nolint:gocognit,gocyclo
+//nolint:gocognit,gocyclo,cyclop
 func GetSpotSavings(regions []string, pattern, instanceOS string, cpu, memory int, price float64, sortBy int, sortDesc bool) ([]Advice, error) {
 	var err error
 

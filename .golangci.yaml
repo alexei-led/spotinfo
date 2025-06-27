@@ -71,6 +71,7 @@ linters:
             - github.com/jedib0t/go-pretty/v6
             - github.com/pkg/errors
             - github.com/urfave/cli/v2
+            - github.com/stretchr/testify
     testifylint:
       enable-all: true
     tagalign:
@@ -195,6 +196,9 @@ linters:
           - dupl
           - lll
           - varnamelen
+          - exhaustruct
+      - path: 'cmd/main\.go'
+        linters:
           - exhaustruct
       - linters:
           - lll
