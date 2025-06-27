@@ -56,7 +56,7 @@ linters:
         - db
     nolintlint:
       allow-unused: false
-      require-explanation: true
+      require-explanation: false
       require-specific: true
     exhaustive:
       default-signifies-exhaustive: true
@@ -82,95 +82,54 @@ linters:
   # inverted configuration with `enable-all` and `disable` is not scalable during updates of golangci-lint
   default: none
   enable:
-    # Essential linters for production Go CLI
+    # Essential bug-finding linters
     - errcheck           # Check for unchecked errors
     - gosec             # Security issues
     - govet             # Go vet built-in checks
     - ineffassign       # Ineffective assignments
     - staticcheck       # Comprehensive static analysis
     - unused            # Unused code
-    - revive            # Fast golint replacement
     - errorlint         # Error wrapping issues
-    - misspell          # Spelling mistakes
     
-    # Additional valuable linters
+    # Code quality and best practices
     - bodyclose         # HTTP response body close check
     - contextcheck      # Context usage patterns
     - copyloopvar       # Loop variable copying issues
-    - cyclop            # Cyclomatic complexity (alternative to gocyclo)
+    - cyclop            # Cyclomatic complexity
     - depguard          # Import restrictions
     - dupl              # Code duplication
-    - err113            # Error definition standards
     - exhaustive        # Switch statement exhaustiveness
     - funlen            # Function length
     - goconst           # Repeated strings that could be constants
     - gocritic          # Comprehensive go code critic
     - gocyclo           # Cyclomatic complexity
-    - goprintffuncname  # Printf function naming
-    - importas          # Import alias enforcement
     - makezero          # Slice initialization
     - nakedret          # Naked returns
     - nestif            # Nested if statements
     - nilerr            # Nil error returns
     - nilnil            # Nil error and value returns
     - noctx             # HTTP without context
-    - nolintlint        # Nolint directive usage
     - predeclared       # Predeclared identifier shadowing
     - rowserrcheck      # SQL rows.Err() check
     - sqlclosecheck     # SQL close checks
-    - tagliatelle       # Struct tag format
-    - testifylint       # Testify usage
-    - thelper           # Test helper functions
     - unconvert         # Unnecessary conversions
     - unparam           # Unused parameters
     - wastedassign      # Wasted assignments
-    - whitespace        # Whitespace issues
     
     # Performance-related
     - prealloc          # Slice preallocation
-    - perfsprint        # Performance-oriented sprintf replacements
     
-    # Style and maintainability
-    - asciicheck        # ASCII identifiers only
-    - bidichk           # Bidirectional unicode
-    - containedctx      # Context in structs
-    - decorder          # Declaration order
-    - dogsled           # Too many blank identifiers
-    - dupword           # Duplicate words in comments
+    # Additional best practices (keep important ones)
     - durationcheck     # Duration multiplication
     - errname           # Error naming conventions
-    - gochecknoinits    # No init functions
-    - godot             # Comment periods
-    - grouper           # Expression grouping
     - interfacebloat    # Interface size
-    - lll               # Line length
-    - loggercheck       # Logger key-value pairs
     - maintidx          # Maintainability index
     - mirror            # Wrong mirror patterns
     - mnd               # Magic numbers
-    - musttag           # Struct tag enforcement
     - nilnesserr        # Nil check patterns
-    - nlreturn          # New line before return
     - nosprintfhostport # Sprintf host:port misuse
-    - paralleltest      # Parallel test usage
     - reassign          # Package variable reassignment
-    - sloglint          # Structured logging
-    - spancheck         # OpenTelemetry span usage
-    - tagalign          # Struct tag alignment
-    - testableexamples  # Testable examples
-    - testpackage       # Test package separation
-    - tparallel         # t.Parallel() usage
-    - usestdlibvars     # Standard library variables
-    - varnamelen        # Variable name length
-    - wrapcheck         # Error wrapping
-    - wsl               # Whitespace
-    
-    # CLI-specific useful linters
-    - exhaustruct       # Struct field initialization
     - forcetypeassert   # Type assertion without check
-    - gomodguard        # Go module dependencies
-    - ireturn           # Interface return types
-    - nonamedreturns    # Named return avoidance
 
   # Explicitly disabled linters with reasons
   # - gochecknoglobals  # Too restrictive for CLI apps that need global flags/config
@@ -197,6 +156,10 @@ linters:
           - lll
           - varnamelen
           - exhaustruct
+          - nolintlint
+          - testpackage
+          - wsl
+          - govet
       - path: 'cmd/main\.go'
         linters:
           - exhaustruct

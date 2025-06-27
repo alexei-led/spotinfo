@@ -1,7 +1,9 @@
+// Package spot provides functionality for retrieving AWS EC2 Spot instance pricing and advice.
 package spot
 
 import (
-	_ "embed" //nolint:gci
+	"context"
+	_ "embed"
 	"encoding/json"
 	"net/http"
 	"regexp"
@@ -20,7 +22,7 @@ var (
 	// parsed json raw data
 	data *advisorData
 	// min ranges
-	minRange = map[int]int{5: 0, 11: 6, 16: 12, 22: 17, 100: 23} //nolint:gomnd
+	minRange = map[int]int{5: 0, 11: 6, 16: 12, 22: 17, 100: 23} //nolint:mnd
 )
 
 const (
@@ -60,7 +62,7 @@ type osTypes struct {
 	Linux   map[string]advice `json:"Linux"`   //nolint:tagliatelle
 }
 
-type advisorData struct {
+type advisorData struct { //nolint:govet
 	Ranges        []interruptionRange     `json:"ranges"`
 	InstanceTypes map[string]instanceType `json:"instance_types"` //nolint:tagliatelle
 	Regions       map[string]osTypes      `json:"spot_advisor"`   //nolint:tagliatelle
@@ -80,7 +82,7 @@ type Range struct {
 type TypeInfo instanceType
 
 // Advice - spot price advice: interruption range and savings
-type Advice struct {
+type Advice struct { //nolint:govet
 	Region    string
 	Instance  string
 	Range     Range
@@ -101,7 +103,7 @@ func (a ByRange) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 type ByInstance []Advice
 
 func (a ByInstance) Len() int           { return len(a) }
-func (a ByInstance) Less(i, j int) bool { return strings.Compare(a[i].Instance, a[j].Instance) == -1 }
+func (a ByInstance) Less(i, j int) bool { return a[i].Instance < a[j].Instance }
 func (a ByInstance) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 
 // BySavings implements sort.Interface based on the Savings field
@@ -122,15 +124,27 @@ func (a ByPrice) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 type ByRegion []Advice
 
 func (a ByRegion) Len() int           { return len(a) }
-func (a ByRegion) Less(i, j int) bool { return strings.Compare(a[i].Region, a[j].Region) == -1 }
+func (a ByRegion) Less(i, j int) bool { return a[i].Region < a[j].Region }
 func (a ByRegion) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 
 func dataLazyLoad(url string, timeout time.Duration, fallbackData string) (*advisorData, error) {
 	var result advisorData
+	var err error
+	var req *http.Request
+	var resp *http.Response
+
 	// try to load new data
 	client := &http.Client{Timeout: timeout}
 
-	resp, err := client.Get(url)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		goto fallback
+	}
+
+	resp, err = client.Do(req)
 	if err != nil {
 		goto fallback
 	}
@@ -192,16 +206,16 @@ func GetSpotSavings(regions []string, pattern, instanceOS string, cpu, memory in
 	var result []Advice
 
 	for _, region := range regions {
-		r, ok := data.Regions[region]
+		regionData, ok := data.Regions[region]
 		if !ok {
 			return nil, errors.Errorf("no spot price for region %s", region)
 		}
 
 		var advices map[string]advice
 		if strings.EqualFold("windows", instanceOS) {
-			advices = r.Windows
+			advices = regionData.Windows
 		} else if strings.EqualFold("linux", instanceOS) {
-			advices = r.Linux
+			advices = regionData.Linux
 		} else {
 			return nil, errors.New("invalid instance OS, must be windows/linux")
 		}

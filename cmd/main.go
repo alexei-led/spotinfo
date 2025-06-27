@@ -1,3 +1,4 @@
+// Package main provides the CLI application for spotinfo.
 package main
 
 import (
@@ -12,7 +13,7 @@ import (
 	"strings"
 	"syscall"
 
-	"spotinfo/public/spot" //nolint:gci
+	"spotinfo/public/spot" //nolint:gci // local import group
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
@@ -44,19 +45,19 @@ const (
 )
 
 //nolint:cyclop
-func mainCmd(c *cli.Context) error {
+func mainCmd(ctx *cli.Context) error {
 	if v := mainCtx.Value("key"); v != nil {
 		log.Printf("context value = %v", v)
 	}
 
-	regions := c.StringSlice("region")
-	instanceOS := c.String("os")
-	instance := c.String("type")
-	cpu := c.Int("cpu")
-	memory := c.Int("memory")
-	maxPrice := c.Float64("price")
-	sortBy := c.String("sort")
-	order := c.String("order")
+	regions := ctx.StringSlice("region")
+	instanceOS := ctx.String("os")
+	instance := ctx.String("type")
+	cpu := ctx.Int("cpu")
+	memory := ctx.Int("memory")
+	maxPrice := ctx.Float64("price")
+	sortBy := ctx.String("sort")
+	order := ctx.String("order")
 	sortDesc := strings.EqualFold(order, "desc")
 
 	var sort int
@@ -85,7 +86,7 @@ func mainCmd(c *cli.Context) error {
 	// decide if region should be printed
 	printRegion := len(regions) > 1 || (len(regions) == 1 && regions[0] == "all")
 
-	switch c.String("output") {
+	switch ctx.String("output") {
 	case "number":
 		printAdvicesNumber(advices, printRegion)
 	case "text":
@@ -138,21 +139,21 @@ func printAdvicesJSON(advices interface{}) {
 	}
 
 	txt := string(bytes)
-	txt = strings.Replace(txt, "\\u003c", "<", -1)
-	txt = strings.Replace(txt, "\\u003e", ">", -1)
+	txt = strings.ReplaceAll(txt, "\\u003c", "<")
+	txt = strings.ReplaceAll(txt, "\\u003e", ">")
 	fmt.Println(txt)
 }
 
 func printAdvicesTable(advices []spot.Advice, csv, region bool) {
-	t := table.NewWriter()
-	t.SetOutputMirror(os.Stdout)
+	tbl := table.NewWriter()
+	tbl.SetOutputMirror(os.Stdout)
 
 	header := table.Row{instanceTypeColumn, vCPUColumn, memoryColumn, savingsColumn, interruptionColumn, priceColumn}
 	if region {
 		header = append(table.Row{regionColumn}, header...)
 	}
 
-	t.AppendHeader(header)
+	tbl.AppendHeader(header)
 
 	for _, advice := range advices {
 		row := table.Row{advice.Instance, advice.Info.Cores, advice.Info.RAM, advice.Savings, advice.Range.Label, advice.Price}
@@ -160,20 +161,20 @@ func printAdvicesTable(advices []spot.Advice, csv, region bool) {
 			row = append(table.Row{advice.Region}, row...)
 		}
 
-		t.AppendRow(row)
+		tbl.AppendRow(row)
 	}
 	// render as CSV
 	if csv {
 		fmt.Println("rendering CSV")
-		t.RenderCSV()
+		tbl.RenderCSV()
 	} else { // render as pretty table
-		t.SetColumnConfigs([]table.ColumnConfig{{
+		tbl.SetColumnConfigs([]table.ColumnConfig{{
 			Name:        savingsColumn,
 			Transformer: text.NewNumberTransformer("%d%%"),
 		}})
-		t.SetStyle(table.StyleLight)
-		t.Style().Options.SeparateRows = true
-		t.Render()
+		tbl.SetStyle(table.StyleLight)
+		tbl.Style().Options.SeparateRows = true
+		tbl.Render()
 	}
 }
 
@@ -252,7 +253,7 @@ func main() {
 		Action:  mainCmd,
 		Version: Version,
 	}
-	cli.VersionPrinter = func(c *cli.Context) {
+	cli.VersionPrinter = func(_ *cli.Context) {
 		fmt.Printf("spotinfo %s\n", Version)
 
 		if BuildDate != "" && BuildDate != "unknown" {

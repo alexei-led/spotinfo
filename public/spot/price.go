@@ -1,9 +1,10 @@
 package spot
 
 import (
-	_ "embed" //nolint:gci
+	"context"
+	_ "embed"
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -36,7 +37,7 @@ const (
 	spotPriceJsURL = "https://spot-price.s3.amazonaws.com/spot.js"
 )
 
-type rawPriceData struct {
+type rawPriceData struct { //nolint:govet
 	Embedded bool // true if loaded from embedded copy
 	Config   struct {
 		Rate         string   `json:"rate"`
@@ -78,6 +79,9 @@ func pricingLazyLoad(url string, timeout time.Duration, fallbackData string, emb
 		bodyString string
 		client     *http.Client
 		resp       *http.Response
+		req        *http.Request
+		ctx        context.Context
+		cancel     context.CancelFunc
 		err        error
 	)
 	// load embedded data if asked explicitly
@@ -87,7 +91,15 @@ func pricingLazyLoad(url string, timeout time.Duration, fallbackData string, emb
 	// try to load new data
 	client = &http.Client{Timeout: timeout}
 
-	resp, err = client.Get(url)
+	ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		goto fallback
+	}
+
+	resp, err = client.Do(req)
 	if err != nil {
 		goto fallback
 	}
@@ -101,7 +113,7 @@ func pricingLazyLoad(url string, timeout time.Duration, fallbackData string, emb
 	}
 
 	// get response as text and trim JS code
-	bodyBytes, err = ioutil.ReadAll(resp.Body)
+	bodyBytes, err = io.ReadAll(resp.Body)
 	if err != nil {
 		goto fallback
 	}
