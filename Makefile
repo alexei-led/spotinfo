@@ -33,14 +33,14 @@ all: update-data update-price fmt lint test-verbose ; $(info $(M) building $(TAR
 	$Q env GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) $(GO) build \
 		-tags release \
 		-ldflags "$(LDFLAGS_VERSION)" \
-		-o $(BIN)/$(basename $(MODULE)) ./cmd/main.go
+		-o $(BIN)/$(basename $(MODULE)) ./cmd/spotinfo
 
 .PHONY: build
 build: update-data update-price ; $(info $(M) building $(TARGETOS)/$(TARGETARCH) binary...) @ ## Build program binary
 	$Q env GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) $(GO) build \
 		-tags release \
 		-ldflags "$(LDFLAGS_VERSION)" \
-		-o $(BIN)/$(basename $(MODULE)) ./cmd/main.go
+		-o $(BIN)/$(basename $(MODULE)) ./cmd/spotinfo
 
 # Release for multiple platforms
 
@@ -54,7 +54,7 @@ release: clean ; $(info $(M) building binaries for multiple os/arch...) @ ## Bui
 				$(GO) build \
 				-tags release \
 				-ldflags "$(LDFLAGS_VERSION)" \
-				-o $(BIN)/$(basename $(MODULE))_$(GOOS)_$(GOARCH) ./cmd/main.go || true)))
+				-o $(BIN)/$(basename $(MODULE))_$(GOOS)_$(GOARCH) ./cmd/spotinfo || true)))
 
 .PHONY: check-file-types
 check-file-types: ; $(info $(M) check file type os/arch...) @ ## Check file types for release
@@ -75,7 +75,7 @@ setup-gocov-xml:
 setup-go2xunit:
 	$(GO) install github.com/tebeka/go2xunit
 setup-mockery:
-	$(GO) install github.com/vektra/mockery/v2/
+	$(GO) install github.com/vektra/mockery/v3@latest
 setup-ghr:
 	$(GO) install github.com/tcnksm/ghr@v0.13.0
 
@@ -174,9 +174,8 @@ endif
 
 # generate test mock for interfaces
 .PHONY: mockgen
-mockgen: | setup-mockery ; $(info $(M) generating mocks...) @ ## Run mockery to generate mocks for all interfaces
-	$Q $(GOMOCK)  --dir internal --recursive --all
-	$Q $(GOMOCK)  --dir public --recursive --all
+mockgen: | setup-mockery ; $(info $(M) generating mocks...) @ ## Generate mocks using go:generate annotations
+	$Q $(GO) generate ./...
 
 .PHONY: fmt
 fmt: ; $(info $(M) running gofmt...) @ ## Run gofmt on all source files

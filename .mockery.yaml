@@ -1,0 +1,9 @@
+dir: "{{.InterfaceDir}}"
+filename: "mocks_test.go"
+inpackage: true
+template: testify
+packages:
+  spotinfo/internal/spot:
+    interfaces:
+      advisorProvider:
+      pricingProvider:
