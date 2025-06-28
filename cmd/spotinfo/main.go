@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 
+	"spotinfo/internal/mcp"  //nolint:gci // local import group
 	"spotinfo/internal/spot" //nolint:gci // local import group
 
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -90,7 +91,7 @@ func isMCPMode(ctx *cli.Context) bool {
 	return false
 }
 
-// runMCPServer starts the MCP server (placeholder for now)
+// runMCPServer starts the MCP server
 func runMCPServer(_ *cli.Context, execCtx context.Context) error {
 	log.Info("starting MCP server mode")
 
@@ -102,13 +103,25 @@ func runMCPServer(_ *cli.Context, execCtx context.Context) error {
 		slog.String("transport", transport),
 		slog.String("port", port))
 
-	// TODO: Implement actual MCP server startup in Phase 1.3
-	select {
-	case <-execCtx.Done():
-		log.Info("MCP server stopped by context cancellation")
-		return execCtx.Err()
+	// Create MCP server
+	mcpServer, err := mcp.NewServer(mcp.Config{
+		Version:   Version,
+		Transport: transport,
+		Port:      port,
+		Logger:    log,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create MCP server: %w", err)
+	}
+
+	// Start server based on transport
+	switch transport {
+	case stdioTransport:
+		return mcpServer.ServeStdio(execCtx)
+	case sseTransport:
+		return mcpServer.ServeSSE(execCtx, port)
 	default:
-		return fmt.Errorf("MCP server not yet implemented - coming in Phase 1.3")
+		return fmt.Errorf("unsupported transport: %s", transport)
 	}
 }
 
