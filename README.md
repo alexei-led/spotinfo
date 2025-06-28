@@ -23,7 +23,7 @@ The `spotinfo` allows you to access the same information you can see in the **AW
 
 ### Advanced Filtering
 
-The first feature is _advanced filtering+. You can filter spot instances by:
+The first feature is _advanced filtering_. You can filter spot instances by:
 
 - vCPU - minimum number of CPU cores
 - Memory GiB - minimum memory size
@@ -57,11 +57,11 @@ Another option is to pass a special `all` value (with `--region=all` flag) to se
 
 While the `spotinfo` uses public AWS data feeds, it also embeds the same data within the tool. So, if data feed is not available, for any reason (no connectivity, service not available or other), the `spotinfo` still will be able to return the same result.
 
-Data snapshoot from the both AWS data feeds is [embedded](https://golang.org/pkg/embed) into the `spotinfo` binary during the build.
+Data snapshot from both AWS data feeds is [embedded](https://golang.org/pkg/embed) into the `spotinfo` binary during the build.
 
 ## Install
 
-### OS X with Homebrew
+### macOS with Homebrew
 
 ```sh
 brew tap alexei-led/spotinfo
@@ -72,7 +72,7 @@ brew install spotinfo
 
 Download OS/platform specific binary from the [Releases](https://github.com/alexei-led/spotinfo/releases) page and add it to the `PATH`.
 
-- Supported OS: OS X, Windows, Linux
+- Supported OS: macOS, Windows, Linux
 - Supported Platforms: Intel (`amd64`) and ARM (`arm64`)
 
 ## Usage
