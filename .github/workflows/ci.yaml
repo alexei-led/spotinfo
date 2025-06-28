@@ -49,6 +49,7 @@ jobs:
       uses: golangci/golangci-lint-action@v4
       with:
         version: v2.1.6
+        args: --format=github-actions
       
     - name: Build binary
       run: make build
