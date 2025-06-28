@@ -55,11 +55,77 @@ const (
 
 	// Build constants
 	unknownBuildValue = "unknown"
+
+	// MCP mode constants
+	mcpModeEnv      = "SPOTINFO_MODE"
+	mcpTransportEnv = "MCP_TRANSPORT"
+	mcpPortEnv      = "MCP_PORT"
+	mcpModeValue    = "mcp"
+	stdioTransport  = "stdio"
+	sseTransport    = "sse"
+	defaultMCPPort  = "8080"
 )
 
 //nolint:cyclop
 func mainCmd(ctx *cli.Context) error {
+	// Check for MCP mode before running CLI
+	if isMCPMode(ctx) {
+		return runMCPServer(ctx, mainCtx)
+	}
 	return execMainCmd(ctx, mainCtx, spot.New(), os.Stdout)
+}
+
+// isMCPMode checks if the application should run in MCP server mode
+func isMCPMode(ctx *cli.Context) bool {
+	// Check CLI flag first
+	if ctx.Bool("mcp") {
+		return true
+	}
+
+	// Check environment variable
+	if mode, exists := os.LookupEnv(mcpModeEnv); exists && strings.EqualFold(mode, mcpModeValue) {
+		return true
+	}
+
+	return false
+}
+
+// runMCPServer starts the MCP server (placeholder for now)
+func runMCPServer(_ *cli.Context, execCtx context.Context) error {
+	log.Info("starting MCP server mode")
+
+	// Get transport mode
+	transport := getMCPTransport()
+	port := getMCPPort()
+
+	log.Info("MCP server configuration",
+		slog.String("transport", transport),
+		slog.String("port", port))
+
+	// TODO: Implement actual MCP server startup in Phase 1.3
+	select {
+	case <-execCtx.Done():
+		log.Info("MCP server stopped by context cancellation")
+		return execCtx.Err()
+	default:
+		return fmt.Errorf("MCP server not yet implemented - coming in Phase 1.3")
+	}
+}
+
+// getMCPTransport returns the configured MCP transport mode
+func getMCPTransport() string {
+	if transport, exists := os.LookupEnv(mcpTransportEnv); exists && transport != "" {
+		return transport
+	}
+	return stdioTransport // default
+}
+
+// getMCPPort returns the configured MCP port for SSE transport
+func getMCPPort() string {
+	if port, exists := os.LookupEnv(mcpPortEnv); exists && port != "" {
+		return port
+	}
+	return defaultMCPPort
 }
 
 // SpotClient interface defined close to consumer for testing (following codebase patterns)
@@ -250,6 +316,10 @@ func main() {
 			return nil
 		},
 		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "mcp",
+				Usage: "run as MCP server instead of CLI",
+			},
 			&cli.BoolFlag{
 				Name:  "debug",
 				Usage: "enable debug logging",
