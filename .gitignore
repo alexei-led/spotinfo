@@ -1,5 +1,7 @@
 # code coverage
 .cover
+coverage.html
+coverage.out
 
 # git repo
 .git
@@ -13,6 +15,9 @@
 
 # env customization
 .env
+
+# claude settings
+.claude
 
 # temporary
 **/.DS_Store

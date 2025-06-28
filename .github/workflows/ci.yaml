@@ -42,10 +42,10 @@ jobs:
     - name: Update embedded data
       run: make update-data update-price
       
-    - name: Run tests
-      run: make test-verbose
+    - name: Run tests with coverage
+      run: go test -cover -v ./...
       
-    - name: Run linter
+    - name: Run golangci-lint
       run: make lint
       
     - name: Build binary
@@ -55,6 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: test
+    if: github.event_name == 'push'
     permissions:
       contents: read
     

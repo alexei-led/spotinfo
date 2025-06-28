@@ -67,9 +67,9 @@ linters:
             - $all
           allow:
             - $gostd
-            - spotinfo/public/spot
+            - spotinfo/pkg/spot
+            - spotinfo/internal
             - github.com/jedib0t/go-pretty/v6
-            - github.com/pkg/errors
             - github.com/urfave/cli/v2
             - github.com/stretchr/testify
     testifylint:
@@ -160,6 +160,21 @@ linters:
           - testpackage
           - wsl
           - govet
+          - errcheck
+          - goconst
+          - gocritic
+          - staticcheck
+          - unused
+          - gosec
+      - path: 'mocks_test\.go'
+        linters:
+          - stylecheck
+          - revive
+          - golint
+          - staticcheck
+          - unused
+          - deadcode
+          - typecheck
       - path: 'cmd/main\.go'
         linters:
           - exhaustruct
