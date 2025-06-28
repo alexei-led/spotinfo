@@ -42,11 +42,13 @@ jobs:
     - name: Update embedded data
       run: make update-data update-price
       
-    - name: Run tests
-      run: make test-verbose
+    - name: Run tests with coverage
+      run: go test -cover -v ./...
       
-    - name: Run linter
-      run: make lint
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v4
+      with:
+        version: v2.1.6
       
     - name: Build binary
       run: make build

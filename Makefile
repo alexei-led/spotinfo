@@ -64,27 +64,15 @@ check-file-types: ; $(info $(M) check file type os/arch...) @ ## Check file type
 
 # Tools
 
-setup-tools: setup-lint setup-gocov setup-gocov-xml setup-go2xunit setup-mockery setup-ghr
+setup-tools: setup-lint setup-mockery
 
 setup-lint:
 	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6
-setup-gocov:
-	$(GO) install github.com/axw/gocov/...
-setup-gocov-xml:
-	$(GO) install github.com/AlekSi/gocov-xml
-setup-go2xunit:
-	$(GO) install github.com/tebeka/go2xunit
 setup-mockery:
 	$(GO) install github.com/vektra/mockery/v3@latest
-setup-ghr:
-	$(GO) install github.com/tcnksm/ghr@v0.13.0
 
 GOLINT=golangci-lint
-GOCOV=gocov
-GOCOVXML=gocov-xml
-GO2XUNIT=go2xunit
 GOMOCK=mockery
-GHR=ghr
 
 # upstream data
 SPOT_ADVISOR_DATA_URL := "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json"
@@ -125,28 +113,14 @@ $(TEST_TARGETS): test
 check test tests: fmt ; $(info $(M) running $(NAME:%=% )tests...) @ ## Run tests
 	$Q $(GO) test -timeout $(TIMEOUT)s $(ARGS) $(TESTPKGS)
 
-test-xml: fmt | setup-go2xunit ; $(info $(M) running xUnit tests...) @ ## Run tests with xUnit output
-	$Q mkdir -p test
-	$Q 2>&1 $(GO) test -timeout $(TIMEOUT)s -v $(TESTPKGS) | tee test/tests.output
-	$(GO2XUNIT) -fail -input test/tests.output -output test/tests.xml
-
 COVERAGE_MODE    = atomic
-COVERAGE_PROFILE = $(COVERAGE_DIR)/profile.out
-COVERAGE_XML     = $(COVERAGE_DIR)/coverage.xml
-COVERAGE_HTML    = $(COVERAGE_DIR)/index.html
-.PHONY: test-coverage test-coverage-tools
-test-coverage-tools: | setup-gocov setup-gocov-xml
-test-coverage: COVERAGE_DIR := $(CURDIR)/test/coverage.$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-test-coverage: fmt test-coverage-tools ; $(info $(M) running coverage tests...) @ ## Run coverage tests
-	$Q mkdir -p $(COVERAGE_DIR)
-	$Q $(GO) test \
-		-coverpkg=$$($(GO) list -f '{{ join .Deps "\n" }}' $(TESTPKGS) | \
-					grep '^$(MODULE)/' | \
-					tr '\n' ',' | sed 's/,$$//') \
-		-covermode=$(COVERAGE_MODE) \
-		-coverprofile="$(COVERAGE_PROFILE)" $(TESTPKGS)
+COVERAGE_PROFILE = coverage.out
+COVERAGE_HTML    = coverage.html
+.PHONY: test-coverage
+test-coverage: fmt ; $(info $(M) running coverage tests...) @ ## Run coverage tests with HTML output
+	$Q $(GO) test -covermode=$(COVERAGE_MODE) -coverprofile=$(COVERAGE_PROFILE) ./...
 	$Q $(GO) tool cover -html=$(COVERAGE_PROFILE) -o $(COVERAGE_HTML)
-	$Q $(GOCOV) convert $(COVERAGE_PROFILE) | $(GOCOVXML) > $(COVERAGE_XML)
+	$Q $(GO) tool cover -func=$(COVERAGE_PROFILE)
 
 .PHONY: lint
 lint: setup-lint; $(info $(M) running golangci-lint...) @ ## Run golangci-lint linters
@@ -154,22 +128,6 @@ lint: setup-lint; $(info $(M) running golangci-lint...) @ ## Run golangci-lint l
 	# conflict when multiple go versions are installed
 	$Q env $(GOLINT) run -v -c $(LINT_CONFIG) ./...
 
-# generate github draft release
-.PHONY: github-release
-github-release: setup-ghr | release check-file-types; $(info $(M) generating github draft release...) @ ## run ghr tool
-ifndef RELEASE_TOKEN
-	$(error RELEASE_TOKEN is undefined)
-endif
-	$Q $(GHR) \
-		-t $(RELEASE_TOKEN) \
-		-u alexei-led \
-		-r spotinfo \
-		-n "v$(RELEASE_TAG)" \
-		-b "Draft Release" \
-		-prerelease \
-		-draft \
-		$(RELEASE_TAG) \
-		$(BIN)/$(dir $(MODULE))
 
 
 # generate test mock for interfaces
@@ -186,7 +144,7 @@ fmt: ; $(info $(M) running gofmt...) @ ## Run gofmt on all source files
 .PHONY: clean
 clean: ; $(info $(M) cleaning...)	@ ## Cleanup everything
 	@rm -rf $(BIN)
-	@rm -rf test/tests.* test/coverage.*
+	@rm -f coverage.out coverage.html
 
 .PHONY: help
 help:
