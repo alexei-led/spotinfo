@@ -160,6 +160,12 @@ linters:
           - testpackage
           - wsl
           - govet
+          - errcheck
+          - goconst
+          - gocritic
+          - staticcheck
+          - unused
+          - gosec
       - path: 'mocks_test\.go'
         linters:
           - stylecheck

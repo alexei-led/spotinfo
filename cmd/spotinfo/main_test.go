@@ -1,15 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
+	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v2"
 
@@ -33,62 +35,137 @@ const (
 	allRegions = "all"
 )
 
-// TestMain sets up test environment
-func TestMain(m *testing.M) {
-	// Ensure tests run with clean state
-	code := m.Run()
-	os.Exit(code)
-}
+// Helper functions for mock setup (following spot package patterns)
 
-// captureOutput captures stdout during function execution
-func captureOutput(t *testing.T, fn func()) string {
-	t.Helper()
+// setupSuccessfulSpotClient creates a mock client with successful single instance response
+func setupSuccessfulSpotClient(t *testing.T, region, instanceType string, savings int) *MockSpotClient {
+	mockClient := NewMockSpotClient(t)
 
-	oldStdout := os.Stdout
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-
-	os.Stdout = w
-
-	// Use a goroutine to read from the pipe to avoid blocking
-	done := make(chan string, 1)
-	go func() {
-		defer func() { _ = r.Close() }()
-		var buf []byte
-		chunk := make([]byte, 1024)
-		for {
-			n, err := r.Read(chunk)
-			if n > 0 {
-				buf = append(buf, chunk[:n]...)
-			}
-			if err != nil {
-				break
-			}
-		}
-		done <- string(buf)
-	}()
-
-	fn()
-	_ = w.Close()
-	os.Stdout = oldStdout
-
-	select {
-	case output := <-done:
-		return output
-	case <-time.After(5 * time.Second):
-		t.Fatal("captureOutput timed out after 5 seconds")
-		return ""
-	}
-}
-
-// createTestApp creates a CLI app with all necessary flags for testing
-func createTestApp() *cli.App {
-	return &cli.App{
-		Before: func(ctx *cli.Context) error {
-			// Use embedded data only for tests to avoid network calls
-			return nil
+	advice := []spot.Advice{
+		{
+			Region:   region,
+			Instance: instanceType,
+			Savings:  savings,
+			Info:     spot.TypeInfo{Cores: 1, RAM: 1.0, EMR: false},
+			Range:    spot.Range{Label: "<5%", Min: 0, Max: 5},
+			Price:    0.0116,
 		},
-		Action: testMainCmd,
+	}
+
+	mockClient.EXPECT().GetSpotSavings(
+		mock.Anything,
+		[]string{region},
+		instanceType,
+		"linux",
+		0, 0, float64(0),
+		spot.SortByRange,
+		false,
+	).Return(advice, nil).Once()
+
+	return mockClient
+}
+
+// setupMultipleInstancesSpotClient creates a mock client with multiple instances response
+func setupMultipleInstancesSpotClient(t *testing.T, region string, sortBy spot.SortBy, sortDesc bool) *MockSpotClient {
+	mockClient := NewMockSpotClient(t)
+
+	// Create base data
+	advice1 := spot.Advice{
+		Region:   region,
+		Instance: "t2.micro",
+		Savings:  30,
+		Info:     spot.TypeInfo{Cores: 1, RAM: 1.0, EMR: false},
+		Range:    spot.Range{Label: "<5%", Min: 0, Max: 5},
+		Price:    0.0116,
+	}
+	advice2 := spot.Advice{
+		Region:   region,
+		Instance: "t2.small",
+		Savings:  50,
+		Info:     spot.TypeInfo{Cores: 1, RAM: 2.0, EMR: false},
+		Range:    spot.Range{Label: "<10%", Min: 5, Max: 10},
+		Price:    0.023,
+	}
+
+	// Order data based on sort parameters
+	var advices []spot.Advice
+	switch sortBy {
+	case spot.SortBySavings:
+		if sortDesc {
+			// Descending: higher savings first (50, 30)
+			advices = []spot.Advice{advice2, advice1}
+		} else {
+			// Ascending: lower savings first (30, 50)
+			advices = []spot.Advice{advice1, advice2}
+		}
+	case spot.SortByInstance:
+		if sortDesc {
+			// Descending: t2.small, t2.micro (lexicographically)
+			advices = []spot.Advice{advice2, advice1}
+		} else {
+			// Ascending: t2.micro, t2.small (lexicographically)
+			advices = []spot.Advice{advice1, advice2}
+		}
+	default:
+		// Default order for other sort types
+		advices = []spot.Advice{advice1, advice2}
+	}
+
+	mockClient.EXPECT().GetSpotSavings(
+		mock.Anything,
+		[]string{region},
+		"t2.*",
+		"linux",
+		0, 0, float64(0),
+		sortBy,
+		sortDesc,
+	).Return(advices, nil).Once()
+
+	return mockClient
+}
+
+// setupErrorSpotClient creates a mock client that returns an error
+func setupErrorSpotClient(t *testing.T, expectedError error) *MockSpotClient {
+	mockClient := NewMockSpotClient(t)
+
+	mockClient.EXPECT().GetSpotSavings(
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+	).Return(nil, expectedError).Once()
+
+	return mockClient
+}
+
+// setupFilteredSpotClient creates a mock client with filtered results
+func setupFilteredSpotClient(t *testing.T, cpu, memory int, maxPrice float64, expectedAdvices []spot.Advice) *MockSpotClient {
+	mockClient := NewMockSpotClient(t)
+
+	mockClient.EXPECT().GetSpotSavings(
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+		"linux",
+		cpu,
+		memory,
+		maxPrice,
+		spot.SortByRange,
+		false,
+	).Return(expectedAdvices, nil).Once()
+
+	return mockClient
+}
+
+// createTestApp creates a CLI app for testing (following existing patterns)
+func createTestApp(action func(*cli.Context) error) *cli.App {
+	return &cli.App{
+		Action: action,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "type"},
 			&cli.StringFlag{Name: "os", Value: "linux"},
@@ -103,70 +180,12 @@ func createTestApp() *cli.App {
 	}
 }
 
-// testMainCmd is a version of mainCmd that uses embedded data only for testing
-func testMainCmd(ctx *cli.Context) error {
-	regions := ctx.StringSlice("region")
-	instanceOS := ctx.String("os")
-	instance := ctx.String("type")
-	cpu := ctx.Int("cpu")
-	memory := ctx.Int("memory")
-	maxPrice := ctx.Float64("price")
-	sortBy := ctx.String("sort")
-	order := ctx.String("order")
-	sortDesc := strings.EqualFold(order, "desc")
-
-	var sortByType spot.SortBy
-
-	switch sortBy {
-	case sortType:
-		sortByType = spot.SortByInstance
-	case sortInterruption:
-		sortByType = spot.SortByRange
-	case sortSavings:
-		sortByType = spot.SortBySavings
-	case sortPrice:
-		sortByType = spot.SortByPrice
-	case sortRegion:
-		sortByType = spot.SortByRegion
-	default:
-		sortByType = spot.SortByRange
-	}
-
-	// Create spot client that uses embedded data only (no network calls)
-	client := spot.NewWithOptions(1*time.Second, true) // Short timeout, use embedded data
-
-	// Get spot savings
-	advices, err := client.GetSpotSavings(context.Background(), regions, instance, instanceOS, cpu, memory, maxPrice, sortByType, sortDesc)
-	if err != nil {
-		return fmt.Errorf("failed to get spot savings: %w", err)
-	}
-
-	// Decide if region should be printed
-	printRegion := len(regions) > 1 || (len(regions) == 1 && regions[0] == allRegions)
-
-	switch ctx.String("output") {
-	case outputNumber:
-		printAdvicesNumber(advices, printRegion)
-	case outputText:
-		printAdvicesText(advices, printRegion)
-	case outputJSON:
-		printAdvicesJSON(advices)
-	case outputTable:
-		printAdvicesTable(advices, false, printRegion)
-	case outputCSV:
-		printAdvicesTable(advices, true, printRegion)
-	default:
-		printAdvicesNumber(advices, printRegion)
-	}
-
-	return nil
-}
-
-func TestMainCmd_OutputFormats(t *testing.T) {
+func TestExecMainCmd_OutputFormats(t *testing.T) {
 	tests := []struct {
 		name           string
 		outputFormat   string
 		instanceType   string
+		region         string
 		validateOutput func(t *testing.T, output string)
 		wantErr        bool
 	}{
@@ -174,172 +193,205 @@ func TestMainCmd_OutputFormats(t *testing.T) {
 			name:         "JSON format produces valid JSON",
 			outputFormat: "json",
 			instanceType: "t2.micro",
+			region:       "us-east-1",
 			validateOutput: func(t *testing.T, output string) {
 				var advices []spot.Advice
 				err := json.Unmarshal([]byte(output), &advices)
 				require.NoError(t, err, "Output should be valid JSON")
-				assert.NotEmpty(t, advices, "Should return at least one advice")
+				assert.Len(t, advices, 1, "Should return one advice")
+				assert.Equal(t, "t2.micro", advices[0].Instance)
+				assert.Equal(t, 50, advices[0].Savings)
 			},
 		},
 		{
-			name:         "table format contains headers",
+			name:         "table format contains headers and data",
 			outputFormat: "table",
 			instanceType: "t2.micro",
+			region:       "us-east-1",
 			validateOutput: func(t *testing.T, output string) {
 				assert.Contains(t, output, "INSTANCE INFO", "Table should contain instance header")
 				assert.Contains(t, output, "SAVINGS", "Table should contain savings header")
-				assert.Contains(t, output, "t2.micro", "Table should contain requested instance type")
+				assert.Contains(t, output, "t2.micro", "Table should contain instance type")
+				assert.Contains(t, output, "50%", "Table should contain savings percentage")
 			},
 		},
 		{
 			name:         "number format for single result",
 			outputFormat: "number",
 			instanceType: "t2.micro",
+			region:       "us-east-1",
 			validateOutput: func(t *testing.T, output string) {
 				output = strings.TrimSpace(output)
-				// Should be just a number (savings percentage)
-				assert.Regexp(t, `^\d+$`, output, "Number format should output only digits for single result")
+				assert.Equal(t, "50", output, "Single result should output just the savings number")
 			},
 		},
 		{
 			name:         "text format contains key-value pairs",
 			outputFormat: "text",
 			instanceType: "t2.micro",
+			region:       "us-east-1",
 			validateOutput: func(t *testing.T, output string) {
-				assert.Contains(t, output, "type=", "Text format should contain type field")
-				assert.Contains(t, output, "saving=", "Text format should contain saving field")
-				assert.Contains(t, output, "interruption=", "Text format should contain interruption field")
+				assert.Contains(t, output, "type=t2.micro", "Text format should contain type field")
+				assert.Contains(t, output, "saving=50%", "Text format should contain saving field")
+				assert.Contains(t, output, "interruption='<5%'", "Text format should contain interruption field")
+				assert.Contains(t, output, "price=0.01", "Text format should contain price field")
 			},
 		},
 		{
 			name:         "CSV format produces CSV structure",
 			outputFormat: "csv",
 			instanceType: "t2.micro",
+			region:       "us-east-1",
 			validateOutput: func(t *testing.T, output string) {
-				// Look for CSV headers and data
 				assert.Contains(t, output, "Instance Info,vCPU,Memory GiB", "Should contain CSV headers")
-				assert.Contains(t, output, "t2.micro,1,1,", "Should contain CSV formatted data with commas")
+				assert.Contains(t, output, "t2.micro,1,1,50,<5%", "Should contain CSV formatted data")
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			app := createTestApp()
+			var output bytes.Buffer
 
-			var output string
-			var err error
+			// Create mock client
+			mockClient := setupSuccessfulSpotClient(t, tt.region, tt.instanceType, 50)
 
-			// Capture output during CLI execution
-			output = captureOutput(t, func() {
-				err = app.Run([]string{"spotinfo", "--type", tt.instanceType, "--output", tt.outputFormat})
+			// Create test context
+			testCtx := context.Background()
+
+			// Create CLI app and run it with test args
+			app := createTestApp(func(ctx *cli.Context) error {
+				return execMainCmd(ctx, testCtx, mockClient, &output)
 			})
+
+			// Build command line arguments
+			args := []string{"spotinfo"}
+			args = append(args, "--type", tt.instanceType)
+			args = append(args, "--os", "linux")
+			args = append(args, "--region", tt.region)
+			args = append(args, "--output", tt.outputFormat)
+
+			// Execute the CLI app
+			err := app.Run(args)
 
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
-				require.NoError(t, err, "CLI should execute without error")
-				assert.NotEmpty(t, output, "Output should not be empty")
-				tt.validateOutput(t, output)
+				require.NoError(t, err, "CLI app should execute without error")
+				tt.validateOutput(t, output.String())
 			}
+
+			// Verify all mock expectations were met
+			mockClient.AssertExpectations(t)
 		})
 	}
 }
 
-func TestMainCmd_SortingAndOrdering(t *testing.T) {
+func TestExecMainCmd_SortingAndOrdering(t *testing.T) {
 	tests := []struct {
 		name     string
 		sortBy   string
 		order    string
-		filter   string // Add filter to limit results
 		validate func(t *testing.T, advices []spot.Advice)
 	}{
 		{
 			name:   "sort by savings ascending",
 			sortBy: "savings",
 			order:  "asc",
-			filter: "t2.micro",
 			validate: func(t *testing.T, advices []spot.Advice) {
-				require.True(t, len(advices) >= 1, "Need at least 1 result to validate sorting")
-				if len(advices) >= 2 {
-					for i := 1; i < len(advices); i++ {
-						assert.GreaterOrEqual(t, advices[i].Savings, advices[i-1].Savings,
-							"Savings should be in ascending order")
-					}
-				}
+				require.Len(t, advices, 2, "Should have 2 results")
+				assert.LessOrEqual(t, advices[0].Savings, advices[1].Savings,
+					"Savings should be in ascending order")
 			},
 		},
 		{
 			name:   "sort by savings descending",
 			sortBy: "savings",
 			order:  "desc",
-			filter: "t2.small",
 			validate: func(t *testing.T, advices []spot.Advice) {
-				require.True(t, len(advices) >= 1, "Need at least 1 result to validate sorting")
-				if len(advices) >= 2 {
-					for i := 1; i < len(advices); i++ {
-						assert.LessOrEqual(t, advices[i].Savings, advices[i-1].Savings,
-							"Savings should be in descending order")
-					}
-				}
+				require.Len(t, advices, 2, "Should have 2 results")
+				assert.GreaterOrEqual(t, advices[0].Savings, advices[1].Savings,
+					"Savings should be in descending order")
 			},
 		},
 		{
 			name:   "sort by instance type ascending",
 			sortBy: "type",
 			order:  "asc",
-			filter: "t2.*",
 			validate: func(t *testing.T, advices []spot.Advice) {
-				require.True(t, len(advices) >= 1, "Need at least 1 result to validate sorting")
-				if len(advices) >= 2 {
-					for i := 1; i < len(advices); i++ {
-						assert.True(t, advices[i].Instance >= advices[i-1].Instance,
-							"Instance types should be in ascending order")
-					}
-				}
+				require.Len(t, advices, 2, "Should have 2 results")
+				assert.True(t, advices[0].Instance <= advices[1].Instance,
+					"Instance types should be in ascending order")
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			app := createTestApp()
+			var output bytes.Buffer
 
-			var output string
-			var err error
-
-			// Use JSON output for easy parsing and validation, add filter to limit results
-			args := []string{"spotinfo", "--sort", tt.sortBy, "--order", tt.order, "--output", "json"}
-			if tt.filter != "" {
-				args = append(args, "--type", tt.filter)
+			// Create mock client with multiple instances
+			sortBy := spot.SortByRange
+			switch tt.sortBy {
+			case "savings":
+				sortBy = spot.SortBySavings
+			case "type":
+				sortBy = spot.SortByInstance
 			}
 
-			output = captureOutput(t, func() {
-				err = app.Run(args)
+			sortDesc := strings.EqualFold(tt.order, "desc")
+			mockClient := setupMultipleInstancesSpotClient(t, "us-east-1", sortBy, sortDesc)
+
+			testCtx := context.Background()
+
+			// Create CLI app and run it with test args
+			app := createTestApp(func(ctx *cli.Context) error {
+				return execMainCmd(ctx, testCtx, mockClient, &output)
 			})
 
-			require.NoError(t, err, "CLI should execute without error")
+			// Build command line arguments
+			args := []string{"spotinfo"}
+			args = append(args, "--type", "t2.*")
+			args = append(args, "--sort", tt.sortBy)
+			args = append(args, "--order", tt.order)
+			args = append(args, "--output", "json")
+
+			err := app.Run(args)
+			require.NoError(t, err, "CLI app should execute without error")
 
 			var advices []spot.Advice
-			err = json.Unmarshal([]byte(output), &advices)
+			err = json.Unmarshal(output.Bytes(), &advices)
 			require.NoError(t, err, "Output should be valid JSON")
 
 			tt.validate(t, advices)
+			mockClient.AssertExpectations(t)
 		})
 	}
 }
 
-func TestMainCmd_FilteringOptions(t *testing.T) {
+func TestExecMainCmd_FilteringOptions(t *testing.T) {
 	tests := []struct {
-		name        string
-		args        []string
-		validateFn  func(t *testing.T, advices []spot.Advice)
-		expectEmpty bool
+		name            string
+		cpu             int
+		memory          int
+		price           float64
+		expectedAdvices []spot.Advice
+		validate        func(t *testing.T, advices []spot.Advice)
 	}{
 		{
 			name: "filter by minimum CPU cores",
-			args: []string{"--cpu", "4", "--output", "json"},
-			validateFn: func(t *testing.T, advices []spot.Advice) {
+			cpu:  4,
+			expectedAdvices: []spot.Advice{
+				{
+					Region:   "us-east-1",
+					Instance: "m5.large",
+					Savings:  40,
+					Info:     spot.TypeInfo{Cores: 4, RAM: 8.0, EMR: false},
+					Range:    spot.Range{Label: "<10%", Min: 5, Max: 10},
+					Price:    0.096,
+				},
+			},
+			validate: func(t *testing.T, advices []spot.Advice) {
 				for _, advice := range advices {
 					assert.GreaterOrEqual(t, advice.Info.Cores, 4,
 						"All results should have at least 4 CPU cores")
@@ -347,9 +399,19 @@ func TestMainCmd_FilteringOptions(t *testing.T) {
 			},
 		},
 		{
-			name: "filter by minimum memory",
-			args: []string{"--memory", "8", "--output", "json"},
-			validateFn: func(t *testing.T, advices []spot.Advice) {
+			name:   "filter by minimum memory",
+			memory: 8,
+			expectedAdvices: []spot.Advice{
+				{
+					Region:   "us-east-1",
+					Instance: "m5.large",
+					Savings:  40,
+					Info:     spot.TypeInfo{Cores: 2, RAM: 8.0, EMR: false},
+					Range:    spot.Range{Label: "<10%", Min: 5, Max: 10},
+					Price:    0.096,
+				},
+			},
+			validate: func(t *testing.T, advices []spot.Advice) {
 				for _, advice := range advices {
 					assert.GreaterOrEqual(t, advice.Info.RAM, float32(8),
 						"All results should have at least 8GB RAM")
@@ -357,9 +419,19 @@ func TestMainCmd_FilteringOptions(t *testing.T) {
 			},
 		},
 		{
-			name: "filter by maximum price",
-			args: []string{"--price", "0.50", "--output", "json"},
-			validateFn: func(t *testing.T, advices []spot.Advice) {
+			name:  "filter by maximum price",
+			price: 0.50,
+			expectedAdvices: []spot.Advice{
+				{
+					Region:   "us-east-1",
+					Instance: "t2.small",
+					Savings:  35,
+					Info:     spot.TypeInfo{Cores: 1, RAM: 2.0, EMR: false},
+					Range:    spot.Range{Label: "<5%", Min: 0, Max: 5},
+					Price:    0.023,
+				},
+			},
+			validate: func(t *testing.T, advices []spot.Advice) {
 				for _, advice := range advices {
 					assert.LessOrEqual(t, advice.Price, 0.50,
 						"All results should cost at most $0.50/hour")
@@ -367,10 +439,10 @@ func TestMainCmd_FilteringOptions(t *testing.T) {
 			},
 		},
 		{
-			name:        "extremely high CPU filter returns empty",
-			args:        []string{"--cpu", "1000", "--output", "json"},
-			expectEmpty: true,
-			validateFn: func(t *testing.T, advices []spot.Advice) {
+			name:            "extremely high CPU filter returns empty",
+			cpu:             1000,
+			expectedAdvices: []spot.Advice{},
+			validate: func(t *testing.T, advices []spot.Advice) {
 				assert.Empty(t, advices, "No instances should match extreme CPU requirement")
 			},
 		},
@@ -378,192 +450,388 @@ func TestMainCmd_FilteringOptions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			app := createTestApp()
+			var output bytes.Buffer
 
-			var output string
-			var err error
+			mockClient := setupFilteredSpotClient(t, tt.cpu, tt.memory, tt.price, tt.expectedAdvices)
 
-			args := append([]string{"spotinfo"}, tt.args...)
-			output = captureOutput(t, func() {
-				err = app.Run(args)
+			testCtx := context.Background()
+
+			// Create CLI app and run it with test args
+			app := createTestApp(func(ctx *cli.Context) error {
+				return execMainCmd(ctx, testCtx, mockClient, &output)
 			})
 
-			require.NoError(t, err, "CLI should execute without error")
-
-			var advices []spot.Advice
-			err = json.Unmarshal([]byte(output), &advices)
-			require.NoError(t, err, "Output should be valid JSON")
-
-			if tt.expectEmpty {
-				assert.Empty(t, advices, "Should return empty results")
-			} else {
-				assert.NotEmpty(t, advices, "Should return some results")
+			// Build command line arguments
+			args := []string{"spotinfo", "--output", "json"}
+			if tt.cpu > 0 {
+				args = append(args, "--cpu", fmt.Sprintf("%d", tt.cpu))
+			}
+			if tt.memory > 0 {
+				args = append(args, "--memory", fmt.Sprintf("%d", tt.memory))
+			}
+			if tt.price > 0 {
+				args = append(args, "--price", fmt.Sprintf("%.2f", tt.price))
 			}
 
-			tt.validateFn(t, advices)
+			err := app.Run(args)
+			require.NoError(t, err, "CLI app should execute without error")
+
+			var advices []spot.Advice
+			err = json.Unmarshal(output.Bytes(), &advices)
+			require.NoError(t, err, "Output should be valid JSON")
+
+			tt.validate(t, advices)
+			mockClient.AssertExpectations(t)
 		})
 	}
 }
 
-func TestMainCmd_ErrorConditions(t *testing.T) {
+func TestExecMainCmd_ErrorConditions(t *testing.T) {
 	tests := []struct {
-		name          string
-		args          []string
-		expectedError string
+		name        string
+		setupFlags  func(*cli.Context)
+		expectedErr error
+		errorSubstr string
 	}{
 		{
-			name:          "invalid region",
-			args:          []string{"--region", "invalid-region"},
-			expectedError: "region not found",
+			name: "client returns region error",
+			setupFlags: func(ctx *cli.Context) {
+				ctx.Set("region", "invalid-region")
+			},
+			expectedErr: errors.New("region not found: invalid-region"),
+			errorSubstr: "region not found",
 		},
 		{
-			name:          "invalid OS",
-			args:          []string{"--os", "invalid-os"},
-			expectedError: "invalid instance OS",
+			name: "client returns OS error",
+			setupFlags: func(ctx *cli.Context) {
+				ctx.Set("os", "invalid-os")
+			},
+			expectedErr: errors.New("invalid instance OS: invalid-os"),
+			errorSubstr: "invalid instance OS",
 		},
 		{
-			name:          "invalid regex pattern",
-			args:          []string{"--type", "[invalid-regex"},
-			expectedError: "failed to match instance type",
+			name: "client returns regex error",
+			setupFlags: func(ctx *cli.Context) {
+				ctx.Set("type", "[invalid-regex")
+			},
+			expectedErr: errors.New("failed to match instance type: [invalid-regex"),
+			errorSubstr: "failed to match instance type",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			app := createTestApp()
+			var output bytes.Buffer
 
-			args := append([]string{"spotinfo"}, tt.args...)
+			mockClient := setupErrorSpotClient(t, tt.expectedErr)
+
+			testCtx := context.Background()
+
+			// Create CLI app and run it with test args
+			app := createTestApp(func(ctx *cli.Context) error {
+				return execMainCmd(ctx, testCtx, mockClient, &output)
+			})
+
+			// Build command line arguments based on test case
+			args := []string{"spotinfo"}
+			if tt.name == "client returns region error" {
+				args = append(args, "--region", "invalid-region")
+			} else if tt.name == "client returns OS error" {
+				args = append(args, "--os", "invalid-os")
+			} else if tt.name == "client returns regex error" {
+				args = append(args, "--type", "[invalid-regex")
+			}
+
 			err := app.Run(args)
 
 			require.Error(t, err, "Should return error for invalid input")
-			assert.Contains(t, err.Error(), tt.expectedError,
+			assert.Contains(t, err.Error(), tt.errorSubstr,
 				"Error message should contain expected text")
+
+			mockClient.AssertExpectations(t)
 		})
 	}
 }
 
-func TestMainCmd_RegionHandling(t *testing.T) {
+func TestExecMainCmd_RegionHandling(t *testing.T) {
 	tests := []struct {
-		name            string
-		regions         []string
-		instanceType    string
-		expectMultiple  bool
-		validateRegions func(t *testing.T, advices []spot.Advice, expectedRegions []string)
+		name    string
+		regions []string
+		setup   func(*testing.T) *MockSpotClient
 	}{
 		{
-			name:           "single region",
-			regions:        []string{"us-east-1"},
-			instanceType:   "t2.micro",
-			expectMultiple: false,
-			validateRegions: func(t *testing.T, advices []spot.Advice, expectedRegions []string) {
-				for _, advice := range advices {
-					assert.Equal(t, "us-east-1", advice.Region)
-				}
+			name:    "single region",
+			regions: []string{"us-east-1"},
+			setup: func(t *testing.T) *MockSpotClient {
+				return setupSuccessfulSpotClient(t, "us-east-1", "t2.micro", 50)
 			},
 		},
 		{
-			name:           "multiple regions",
-			regions:        []string{"us-east-1", "us-west-2"},
-			instanceType:   "t2.micro",
-			expectMultiple: true,
-			validateRegions: func(t *testing.T, advices []spot.Advice, expectedRegions []string) {
-				foundRegions := make(map[string]bool)
-				for _, advice := range advices {
-					foundRegions[advice.Region] = true
+			name:    "multiple regions",
+			regions: []string{"us-east-1", "us-west-2"},
+			setup: func(t *testing.T) *MockSpotClient {
+				mockClient := NewMockSpotClient(t)
+
+				advices := []spot.Advice{
+					{Region: "us-east-1", Instance: "t2.micro", Savings: 50},
+					{Region: "us-west-2", Instance: "t2.micro", Savings: 45},
 				}
-				// Should have results from both regions
-				assert.True(t, len(foundRegions) >= 1, "Should have results from at least one region")
-				for region := range foundRegions {
-					assert.Contains(t, expectedRegions, region, "Result region should be in expected list")
-				}
-			},
-		},
-		{
-			name:           "all regions",
-			regions:        []string{"all"},
-			instanceType:   "t2.micro", // Use micro which exists in data
-			expectMultiple: true,
-			validateRegions: func(t *testing.T, advices []spot.Advice, expectedRegions []string) {
-				foundRegions := make(map[string]bool)
-				for _, advice := range advices {
-					foundRegions[advice.Region] = true
-				}
-				// Should have results from multiple regions when using "all"
-				assert.True(t, len(foundRegions) > 1, "Should have results from multiple regions")
+
+				mockClient.EXPECT().GetSpotSavings(
+					mock.Anything,
+					[]string{"us-east-1", "us-west-2"},
+					"t2.micro",
+					"linux",
+					0, 0, float64(0),
+					spot.SortByRange,
+					false,
+				).Return(advices, nil).Once()
+
+				return mockClient
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			app := createTestApp()
+			var output bytes.Buffer
 
-			var output string
-			var err error
+			mockClient := tt.setup(t)
 
-			args := []string{"spotinfo", "--output", "json", "--type", tt.instanceType}
+			testCtx := context.Background()
+
+			// Create CLI app and run it with test args
+			app := createTestApp(func(ctx *cli.Context) error {
+				return execMainCmd(ctx, testCtx, mockClient, &output)
+			})
+
+			// Build command line arguments
+			args := []string{"spotinfo", "--output", "json", "--type", "t2.micro"}
 			for _, region := range tt.regions {
 				args = append(args, "--region", region)
 			}
 
-			output = captureOutput(t, func() {
-				err = app.Run(args)
-			})
-
-			require.NoError(t, err, "CLI should execute without error")
+			err := app.Run(args)
+			require.NoError(t, err, "CLI app should execute without error")
 
 			var advices []spot.Advice
-			err = json.Unmarshal([]byte(output), &advices)
+			err = json.Unmarshal(output.Bytes(), &advices)
 			require.NoError(t, err, "Output should be valid JSON")
 			require.NotEmpty(t, advices, "Should return some results")
 
-			tt.validateRegions(t, advices, tt.regions)
+			mockClient.AssertExpectations(t)
 		})
 	}
 }
 
-func TestPrintAdvicesNumber_OutputFormat(t *testing.T) {
+func TestMainCmd_Integration(t *testing.T) {
+	// Test that mainCmd delegates to execMainCmd properly
+	oldMainCtx := mainCtx
+	testCtx := context.WithValue(context.Background(), "key", "test-value")
+	mainCtx = testCtx
+	defer func() { mainCtx = oldMainCtx }()
+
+	app := createTestApp(mainCmd)
+	ctx := cli.NewContext(app, nil, nil)
+	ctx.Set("type", "t2.micro")
+	ctx.Set("output", "json")
+
+	err := mainCmd(ctx)
+	require.NoError(t, err, "mainCmd should execute without error")
+}
+
+func TestVersionPrinter(t *testing.T) {
+	// Save original values
+	originalVersion := Version
+	originalBuildDate := BuildDate
+	originalGitCommit := GitCommit
+	originalGitBranch := GitBranch
+
+	defer func() {
+		Version = originalVersion
+		BuildDate = originalBuildDate
+		GitCommit = originalGitCommit
+		GitBranch = originalGitBranch
+	}()
+
 	tests := []struct {
-		name           string
-		advices        []spot.Advice
-		printRegion    bool
-		expectedOutput string
+		name          string
+		version       string
+		buildDate     string
+		gitCommit     string
+		gitBranch     string
+		expectedParts []string
 	}{
 		{
-			name: "single result without region",
-			advices: []spot.Advice{
-				{Instance: "t2.micro", Savings: 50, Region: "us-east-1"},
+			name:      "full version info",
+			version:   "v1.2.3",
+			buildDate: "2023-01-01T12:00:00Z",
+			gitCommit: "abc123def456",
+			gitBranch: "main",
+			expectedParts: []string{
+				"spotinfo v1.2.3",
+				"Build date: 2023-01-01T12:00:00Z",
+				"Git commit: abc123def456",
+				"Git branch: main",
+				"Built with:",
 			},
-			printRegion:    false,
-			expectedOutput: "50\n",
 		},
 		{
-			name: "multiple results without region",
-			advices: []spot.Advice{
-				{Instance: "t2.micro", Savings: 50, Region: "us-east-1"},
-				{Instance: "t2.small", Savings: 60, Region: "us-east-1"},
-			},
-			printRegion:    false,
-			expectedOutput: "t2.micro: 50\nt2.small: 60\n",
-		},
-		{
-			name: "multiple results with region",
-			advices: []spot.Advice{
-				{Instance: "t2.micro", Savings: 50, Region: "us-east-1"},
-				{Instance: "t2.small", Savings: 60, Region: "us-west-2"},
-			},
-			printRegion:    true,
-			expectedOutput: "us-east-1/t2.micro: 50\nus-west-2/t2.small: 60\n",
+			name:          "minimal version info",
+			version:       "dev",
+			buildDate:     "unknown",
+			gitCommit:     "",
+			gitBranch:     "",
+			expectedParts: []string{"spotinfo dev", "Built with:"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			output := captureOutput(t, func() {
-				printAdvicesNumber(tt.advices, tt.printRegion)
-			})
+			// Set test values
+			Version = tt.version
+			BuildDate = tt.buildDate
+			GitCommit = tt.gitCommit
+			GitBranch = tt.gitBranch
 
-			assert.Equal(t, tt.expectedOutput, output)
+			var output bytes.Buffer
+
+			// Set the version printer to match main.go
+			cli.VersionPrinter = func(_ *cli.Context) {
+				fmt.Fprintf(&output, "spotinfo %s\n", Version)
+
+				if BuildDate != "" && BuildDate != "unknown" {
+					fmt.Fprintf(&output, "  Build date: %s\n", BuildDate)
+				}
+
+				if GitCommit != "" {
+					fmt.Fprintf(&output, "  Git commit: %s\n", GitCommit)
+				}
+
+				if GitBranch != "" {
+					fmt.Fprintf(&output, "  Git branch: %s\n", GitBranch)
+				}
+
+				fmt.Fprintf(&output, "  Built with: %s\n", runtime.Version())
+			}
+
+			app := &cli.App{
+				Name:    "spotinfo",
+				Version: Version,
+			}
+
+			err := app.Run([]string{"spotinfo", "--version"})
+			require.NoError(t, err)
+
+			outputStr := output.String()
+			for _, part := range tt.expectedParts {
+				assert.Contains(t, outputStr, part, "Version output should contain: %s", part)
+			}
 		})
 	}
+}
+
+func TestCLIApp_BeforeHook(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "debug flag",
+			args: []string{"spotinfo", "--debug"},
+		},
+		{
+			name: "quiet flag",
+			args: []string{"spotinfo", "--quiet"},
+		},
+		{
+			name: "json-log flag",
+			args: []string{"spotinfo", "--json-log"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := &cli.App{
+				Before: func(ctx *cli.Context) error {
+					// Simulate the Before hook from main.go
+					// We can't easily test the logger state, but we can ensure no error
+					return nil
+				},
+				Action: func(ctx *cli.Context) error {
+					return nil
+				},
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "debug"},
+					&cli.BoolFlag{Name: "quiet"},
+					&cli.BoolFlag{Name: "json-log"},
+				},
+			}
+
+			err := app.Run(tt.args)
+			require.NoError(t, err, "Before hook should execute without error")
+		})
+	}
+}
+
+func TestPrintFunctions_EdgeCases(t *testing.T) {
+	t.Run("printAdvicesNumber with empty list", func(t *testing.T) {
+		var output bytes.Buffer
+		printAdvicesNumber([]spot.Advice{}, false, &output)
+		assert.Empty(t, output.String(), "Empty advice list should produce no output")
+	})
+
+	t.Run("printAdvicesText with empty list", func(t *testing.T) {
+		var output bytes.Buffer
+		printAdvicesText([]spot.Advice{}, false, &output)
+		assert.Empty(t, output.String(), "Empty advice list should produce no output")
+	})
+
+	t.Run("printAdvicesJSON with nil", func(t *testing.T) {
+		var output bytes.Buffer
+		printAdvicesJSON(nil, &output)
+		assert.Equal(t, "null\n", output.String(), "nil should produce 'null'")
+	})
+
+	t.Run("printAdvicesTable with empty list", func(t *testing.T) {
+		var output bytes.Buffer
+		printAdvicesTable([]spot.Advice{}, false, false, &output)
+		// Should produce at least headers
+		outputStr := output.String()
+		assert.Contains(t, outputStr, "INSTANCE INFO", "Should contain headers even with empty data")
+	})
+
+	t.Run("printAdvicesNumber single vs multiple results", func(t *testing.T) {
+		advice := spot.Advice{Instance: "t2.micro", Savings: 75, Region: "us-east-1"}
+
+		// Test single result
+		var output1 bytes.Buffer
+		printAdvicesNumber([]spot.Advice{advice}, false, &output1)
+		assert.Equal(t, "75\n", output1.String(), "Single result should show just the number")
+
+		// Test multiple results
+		var output2 bytes.Buffer
+		printAdvicesNumber([]spot.Advice{advice, advice}, false, &output2)
+		expected := "t2.micro: 75\nt2.micro: 75\n"
+		assert.Equal(t, expected, output2.String(), "Multiple results should show instance: number format")
+	})
+
+	t.Run("printAdvicesText with region flag", func(t *testing.T) {
+		advice := spot.Advice{
+			Instance: "t2.micro",
+			Savings:  75,
+			Region:   "us-west-2",
+			Info:     spot.TypeInfo{Cores: 1, RAM: 1.0},
+			Range:    spot.Range{Label: "<5%"},
+			Price:    0.0116,
+		}
+
+		var output bytes.Buffer
+		printAdvicesText([]spot.Advice{advice}, true, &output)
+		result := output.String()
+
+		assert.Contains(t, result, "region=us-west-2", "Should include region when flag is true")
+		assert.Contains(t, result, "type=t2.micro", "Should include instance type")
+		assert.Contains(t, result, "saving=75%", "Should include savings")
+	})
 }

@@ -7,3 +7,6 @@ packages:
     interfaces:
       advisorProvider:
       pricingProvider:
+  spotinfo/cmd/spotinfo:
+    interfaces:
+      SpotClient:

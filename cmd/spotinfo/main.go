@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -47,7 +48,20 @@ const (
 
 //nolint:cyclop
 func mainCmd(ctx *cli.Context) error {
-	if v := mainCtx.Value("key"); v != nil {
+	return execMainCmd(ctx, mainCtx, spot.New(), os.Stdout)
+}
+
+// SpotClient interface defined close to consumer for testing (following codebase patterns)
+type SpotClient interface {
+	GetSpotSavings(ctx context.Context, regions []string, pattern, instanceOS string,
+		cpu, memory int, maxPrice float64, sortBy spot.SortBy, sortDesc bool) ([]spot.Advice, error)
+}
+
+// execMainCmd is the testable version of mainCmd that accepts dependencies.
+//
+//nolint:cyclop
+func execMainCmd(ctx *cli.Context, execCtx context.Context, client SpotClient, output io.Writer) error {
+	if v := execCtx.Value("key"); v != nil {
 		log.Debug("context value received", slog.Any("value", v))
 	}
 
@@ -78,11 +92,8 @@ func mainCmd(ctx *cli.Context) error {
 		sortType = spot.SortByRange
 	}
 
-	// create spot client
-	client := spot.New()
-
 	// get spot savings
-	advices, err := client.GetSpotSavings(mainCtx, regions, instance, instanceOS, cpu, memory, maxPrice, sortType, sortDesc)
+	advices, err := client.GetSpotSavings(execCtx, regions, instance, instanceOS, cpu, memory, maxPrice, sortType, sortDesc)
 	if err != nil {
 		return fmt.Errorf("failed to get spot savings: %w", err)
 	}
@@ -92,51 +103,50 @@ func mainCmd(ctx *cli.Context) error {
 
 	switch ctx.String("output") {
 	case "number":
-		printAdvicesNumber(advices, printRegion)
+		printAdvicesNumber(advices, printRegion, output)
 	case "text":
-		printAdvicesText(advices, printRegion)
+		printAdvicesText(advices, printRegion, output)
 	case "json":
-		printAdvicesJSON(advices)
+		printAdvicesJSON(advices, output)
 	case "table":
-		printAdvicesTable(advices, false, printRegion)
+		printAdvicesTable(advices, false, printRegion, output)
 	case "csv":
-		printAdvicesTable(advices, true, printRegion)
+		printAdvicesTable(advices, true, printRegion, output)
 	default:
-		printAdvicesNumber(advices, printRegion)
+		printAdvicesNumber(advices, printRegion, output)
 	}
 
 	return nil
 }
 
-func printAdvicesText(advices []spot.Advice, region bool) {
+func printAdvicesText(advices []spot.Advice, region bool, output io.Writer) {
 	for _, advice := range advices {
 		if region {
-			fmt.Printf("region=%s, type=%s, vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s', price=%.2f\n",
+			fmt.Fprintf(output, "region=%s, type=%s, vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s', price=%.2f\n", //nolint:errcheck
 				advice.Region, advice.Instance, advice.Info.Cores, advice.Info.RAM, advice.Savings, advice.Range.Label, advice.Price)
 		} else {
-			fmt.Printf("type=%s, vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s', price=%.2f\n",
+			fmt.Fprintf(output, "type=%s, vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s', price=%.2f\n", //nolint:errcheck
 				advice.Instance, advice.Info.Cores, advice.Info.RAM, advice.Savings, advice.Range.Label, advice.Price)
 		}
 	}
 }
 
-func printAdvicesNumber(advices []spot.Advice, region bool) {
+func printAdvicesNumber(advices []spot.Advice, region bool, output io.Writer) {
 	if len(advices) == 1 {
-		fmt.Println(advices[0].Savings)
-
+		fmt.Fprintln(output, advices[0].Savings) //nolint:errcheck
 		return
 	}
 
 	for _, advice := range advices {
 		if region {
-			fmt.Printf("%s/%s: %d\n", advice.Region, advice.Instance, advice.Savings)
+			fmt.Fprintf(output, "%s/%s: %d\n", advice.Region, advice.Instance, advice.Savings) //nolint:errcheck
 		} else {
-			fmt.Printf("%s: %d\n", advice.Instance, advice.Savings)
+			fmt.Fprintf(output, "%s: %d\n", advice.Instance, advice.Savings) //nolint:errcheck
 		}
 	}
 }
 
-func printAdvicesJSON(advices interface{}) {
+func printAdvicesJSON(advices interface{}, output io.Writer) {
 	bytes, err := json.MarshalIndent(advices, "", "  ")
 	if err != nil {
 		panic(err)
@@ -145,12 +155,12 @@ func printAdvicesJSON(advices interface{}) {
 	txt := string(bytes)
 	txt = strings.ReplaceAll(txt, "\\u003c", "<")
 	txt = strings.ReplaceAll(txt, "\\u003e", ">")
-	fmt.Println(txt)
+	fmt.Fprintln(output, txt) //nolint:errcheck
 }
 
-func printAdvicesTable(advices []spot.Advice, csv, region bool) {
+func printAdvicesTable(advices []spot.Advice, csv, region bool, output io.Writer) {
 	tbl := table.NewWriter()
-	tbl.SetOutputMirror(os.Stdout)
+	tbl.SetOutputMirror(output)
 
 	header := table.Row{instanceTypeColumn, vCPUColumn, memoryColumn, savingsColumn, interruptionColumn, priceColumn}
 	if region {
