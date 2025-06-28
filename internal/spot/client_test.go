@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -227,6 +228,7 @@ func TestClient_GetSpotSavings(t *testing.T) { //nolint:maintidx // Complex test
 			regions:    []string{"us-east-1"},
 			pattern:    "t2\\.(micro|small)",
 			instanceOS: "linux",
+			sortBy:     SortByInstance,
 			setupMocks: func(m *mockProviders) {
 				m.advisor.EXPECT().getRegionAdvice("us-east-1", "linux").Return(map[string]spotAdvice{
 					"t2.micro":  {Range: 0, Savings: 50},
@@ -399,6 +401,20 @@ func TestClient_GetSpotSavings_SortingBehavior(t *testing.T) {
 			},
 		},
 		{
+			name:     "sort by region ascending",
+			sortBy:   SortByRegion,
+			sortDesc: false,
+			validate: func(t *testing.T, advices []Advice) {
+				require.Len(t, advices, 3, "Should have exactly 3 results")
+				// Verify ascending order by region
+				for i := 1; i < len(advices); i++ {
+					assert.True(t, advices[i-1].Region <= advices[i].Region,
+						"Region at index %d (%s) should be <= region at index %d (%s)",
+						i-1, advices[i-1].Region, i, advices[i].Region)
+				}
+			},
+		},
+		{
 			name:     "sort by instance type ascending",
 			sortBy:   SortByInstance,
 			sortDesc: false,
@@ -475,6 +491,77 @@ func TestClient_GetSpotSavings_SortingBehavior(t *testing.T) {
 			// Assert mock expectations
 			mocks.advisor.AssertExpectations(t)
 			mocks.pricing.AssertExpectations(t)
+		})
+	}
+}
+
+func TestNew_IntegrationWithEmbeddedData(t *testing.T) {
+	client := New()
+
+	// Test that the client can actually perform operations with embedded data
+	// by creating a context with short timeout to force fallback
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
+
+	// This should fallback to embedded data and still work
+	result, err := client.GetSpotSavings(
+		ctx,
+		[]string{"us-east-1"},
+		"t2.micro",
+		"linux",
+		0, 0, 0,
+		SortByInstance,
+		false,
+	)
+
+	// Should get results from embedded data
+	require.NoError(t, err)
+	assert.NotEmpty(t, result)
+
+	// Verify we got expected data structure
+	advice := result[0]
+	assert.Equal(t, "us-east-1", advice.Region)
+	assert.Equal(t, "t2.micro", advice.Instance)
+	assert.NotZero(t, advice.Savings)
+	assert.NotZero(t, advice.Price)
+}
+
+func TestNewWithOptions_EmbeddedDataMode(t *testing.T) {
+	tests := []struct {
+		name        string
+		useEmbedded bool
+		description string
+	}{
+		{
+			name:        "embedded mode enabled",
+			useEmbedded: true,
+			description: "should use embedded data directly",
+		},
+		{
+			name:        "embedded mode disabled",
+			useEmbedded: false,
+			description: "should fallback to embedded data on network failure",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := NewWithOptions(100*time.Millisecond, tt.useEmbedded)
+
+			// Test that both configurations can load data
+			result, err := client.GetSpotSavings(
+				context.Background(),
+				[]string{"us-east-1"},
+				"t2.micro",
+				"linux",
+				0, 0, 0,
+				SortByInstance,
+				false,
+			)
+
+			require.NoError(t, err)
+			assert.NotEmpty(t, result)
+			assert.Equal(t, tt.useEmbedded, client.useEmbedded)
 		})
 	}
 }
