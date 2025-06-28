@@ -18,14 +18,8 @@ import (
 	"spotinfo/internal/spot"
 )
 
-// Constants for repeated strings
+// Constants for repeated strings in tests
 const (
-	sortType         = "type"
-	sortInterruption = "interruption"
-	sortSavings      = "savings"
-	sortPrice        = "price"
-	sortRegion       = "region"
-
 	outputNumber = "number"
 	outputText   = "text"
 	outputJSON   = "json"

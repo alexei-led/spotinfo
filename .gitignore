@@ -1,5 +1,7 @@
 # code coverage
 .cover
+coverage.html
+coverage.out
 
 # git repo
 .git

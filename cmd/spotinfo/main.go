@@ -29,7 +29,7 @@ var (
 	// Version contains the current version.
 	Version = "dev"
 	// BuildDate contains a string with the build date.
-	BuildDate = "unknown"
+	BuildDate = unknownBuildValue
 	// GitCommit git commit SHA
 	GitCommit = "dirty"
 	// GitBranch git branch
@@ -37,6 +37,7 @@ var (
 )
 
 const (
+	// Table column headers
 	regionColumn       = "Region"
 	instanceTypeColumn = "Instance Info"
 	vCPUColumn         = "vCPU"
@@ -44,6 +45,16 @@ const (
 	savingsColumn      = "Savings over On-Demand"
 	interruptionColumn = "Frequency of interruption"
 	priceColumn        = "USD/Hour"
+
+	// Sort types
+	sortType         = "type"
+	sortInterruption = "interruption"
+	sortSavings      = "savings"
+	sortPrice        = "price"
+	sortRegion       = "region"
+
+	// Build constants
+	unknownBuildValue = "unknown"
 )
 
 //nolint:cyclop
@@ -75,25 +86,25 @@ func execMainCmd(ctx *cli.Context, execCtx context.Context, client SpotClient, o
 	order := ctx.String("order")
 	sortDesc := strings.EqualFold(order, "desc")
 
-	var sortType spot.SortBy
+	var sortByType spot.SortBy
 
 	switch sortBy {
-	case "type":
-		sortType = spot.SortByInstance
-	case "interruption":
-		sortType = spot.SortByRange
-	case "savings":
-		sortType = spot.SortBySavings
-	case "price":
-		sortType = spot.SortByPrice
-	case "region":
-		sortType = spot.SortByRegion
+	case sortType:
+		sortByType = spot.SortByInstance
+	case sortInterruption:
+		sortByType = spot.SortByRange
+	case sortSavings:
+		sortByType = spot.SortBySavings
+	case sortPrice:
+		sortByType = spot.SortByPrice
+	case sortRegion:
+		sortByType = spot.SortByRegion
 	default:
-		sortType = spot.SortByRange
+		sortByType = spot.SortByRange
 	}
 
 	// get spot savings
-	advices, err := client.GetSpotSavings(execCtx, regions, instance, instanceOS, cpu, memory, maxPrice, sortType, sortDesc)
+	advices, err := client.GetSpotSavings(execCtx, regions, instance, instanceOS, cpu, memory, maxPrice, sortByType, sortDesc)
 	if err != nil {
 		return fmt.Errorf("failed to get spot savings: %w", err)
 	}
@@ -301,7 +312,7 @@ func main() {
 	cli.VersionPrinter = func(_ *cli.Context) {
 		fmt.Printf("spotinfo %s\n", Version)
 
-		if BuildDate != "" && BuildDate != "unknown" {
+		if BuildDate != "" && BuildDate != unknownBuildValue {
 			fmt.Printf("  Build date: %s\n", BuildDate)
 		}
 
