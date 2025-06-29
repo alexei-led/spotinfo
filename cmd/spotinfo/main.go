@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 
+	"spotinfo/internal/mcp"  //nolint:gci // local import group
 	"spotinfo/internal/spot" //nolint:gci // local import group
 
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -55,11 +56,90 @@ const (
 
 	// Build constants
 	unknownBuildValue = "unknown"
+
+	// MCP mode constants
+	mcpModeEnv      = "SPOTINFO_MODE"
+	mcpTransportEnv = "MCP_TRANSPORT"
+	mcpPortEnv      = "MCP_PORT"
+	mcpModeValue    = "mcp"
+	stdioTransport  = "stdio"
+	sseTransport    = "sse"
+	defaultMCPPort  = "8080"
 )
 
 //nolint:cyclop
 func mainCmd(ctx *cli.Context) error {
+	// Check for MCP mode before running CLI
+	if isMCPMode(ctx) {
+		return runMCPServer(ctx, mainCtx)
+	}
 	return execMainCmd(ctx, mainCtx, spot.New(), os.Stdout)
+}
+
+// isMCPMode checks if the application should run in MCP server mode
+func isMCPMode(ctx *cli.Context) bool {
+	// Check CLI flag first
+	if ctx.Bool("mcp") {
+		return true
+	}
+
+	// Check environment variable
+	if mode, exists := os.LookupEnv(mcpModeEnv); exists && strings.EqualFold(mode, mcpModeValue) {
+		return true
+	}
+
+	return false
+}
+
+// runMCPServer starts the MCP server
+func runMCPServer(_ *cli.Context, execCtx context.Context) error {
+	log.Info("starting MCP server mode")
+
+	// Get transport mode
+	transport := getMCPTransport()
+	port := getMCPPort()
+
+	log.Info("MCP server configuration",
+		slog.String("transport", transport),
+		slog.String("port", port))
+
+	// Create MCP server
+	mcpServer, err := mcp.NewServer(mcp.Config{
+		Version:    Version,
+		Transport:  transport,
+		Port:       port,
+		Logger:     log,
+		SpotClient: spot.New(),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create MCP server: %w", err)
+	}
+
+	// Start server based on transport
+	switch transport {
+	case stdioTransport:
+		return mcpServer.ServeStdio(execCtx)
+	case sseTransport:
+		return mcpServer.ServeSSE(execCtx, port)
+	default:
+		return fmt.Errorf("unsupported transport: %s", transport)
+	}
+}
+
+// getMCPTransport returns the configured MCP transport mode
+func getMCPTransport() string {
+	if transport, exists := os.LookupEnv(mcpTransportEnv); exists && transport != "" {
+		return transport
+	}
+	return stdioTransport // default
+}
+
+// getMCPPort returns the configured MCP port for SSE transport
+func getMCPPort() string {
+	if port, exists := os.LookupEnv(mcpPortEnv); exists && port != "" {
+		return port
+	}
+	return defaultMCPPort
 }
 
 // SpotClient interface defined close to consumer for testing (following codebase patterns)
@@ -250,6 +330,10 @@ func main() {
 			return nil
 		},
 		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "mcp",
+				Usage: "run as MCP server instead of CLI",
+			},
 			&cli.BoolFlag{
 				Name:  "debug",
 				Usage: "enable debug logging",

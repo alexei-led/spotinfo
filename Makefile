@@ -1,156 +1,129 @@
-MODULE   = $(shell $(GO) list -m)
+# Makefile for spotinfo
+
+# Build variables
+MODULE   = $(shell go list -m)
+VERSION ?= $(shell git describe --tags --always --dirty --match="v*" 2> /dev/null || echo v0)
 DATE    ?= $(shell date +%FT%T%z)
-VERSION ?= $(shell git describe --tags --always --dirty --match="v*" 2> /dev/null || \
-			cat $(CURDIR)/.version 2> /dev/null || echo v0)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null)
 BRANCH  ?= $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null)
-PKGS     = $(shell $(GO) list ./...)
-TESTPKGS = $(shell $(GO) list -f \
-			'{{ if or .TestGoFiles .XTestGoFiles }}{{ .ImportPath }}{{ end }}' \
-			$(PKGS))
-LDFLAGS_VERSION = -X main.Version=$(VERSION) -X main.BuildDate=$(DATE) -X main.GitCommit=$(COMMIT) -X main.GitBranch=$(BRANCH)
-LINT_CONFIG = $(CURDIR)/.golangci.yaml
-BIN      = $(CURDIR)/.bin
 
-PLATFORMS     = darwin linux windows
+# Build flags
+LDFLAGS = -X main.Version=$(VERSION) -X main.BuildDate=$(DATE) -X main.GitCommit=$(COMMIT) -X main.GitBranch=$(BRANCH)
+
+# Directories
+BIN_DIR = .bin
+
+# Release platforms
+PLATFORMS = darwin linux windows
 ARCHITECTURES = amd64 arm64
 
-TARGETOS   ?= $(GOOS)
-TARGETARCH ?= $(GOARCH)
+# Data URLs
+SPOT_ADVISOR_URL = "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json"
+SPOT_PRICE_URL = "http://spot-price.s3.amazonaws.com/spot.js"
 
-GO      ?= go
-TIMEOUT = 15
-V = 0
-Q = $(if $(filter 1,$V),,@)
-M = $(shell printf "\033[34;1m▶\033[0m")
-
+# Go environment
 export GO111MODULE=on
 export CGO_ENABLED=0
-export GOPROXY=https://proxy.golang.org
 
-.PHONY: all
-all: update-data update-price fmt lint test-verbose ; $(info $(M) building $(TARGETOS)/$(TARGETARCH) binary...) @ ## Build program binary
-	$Q env GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) $(GO) build \
-		-tags release \
-		-ldflags "$(LDFLAGS_VERSION)" \
-		-o $(BIN)/$(basename $(MODULE)) ./cmd/spotinfo
+.PHONY: all build test test-verbose test-race test-coverage lint fmt clean help version
+.PHONY: update-data update-price check-deps setup-tools release
 
-.PHONY: build
-build: update-data update-price ; $(info $(M) building $(TARGETOS)/$(TARGETARCH) binary...) @ ## Build program binary
-	$Q env GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) $(GO) build \
-		-tags release \
-		-ldflags "$(LDFLAGS_VERSION)" \
-		-o $(BIN)/$(basename $(MODULE)) ./cmd/spotinfo
+# Default target
+all: build
 
-# Release for multiple platforms
+# Build binary for current platform
+build: update-data update-price
+	@echo "Building binary..."
+	@go build -tags release -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(shell basename $(MODULE)) ./cmd/spotinfo
 
-.PHONY: release
-release: clean ; $(info $(M) building binaries for multiple os/arch...) @ ## Build program binary for platforms and os
-	$(foreach GOOS, $(PLATFORMS),\
-		$(foreach GOARCH, $(ARCHITECTURES), \
-			$(shell \
-				if [ "$(GOARCH)" = "arm64" ] && [ "$(GOOS)" == "windows" ]; then exit 0; fi; \
-				GOPROXY=$(GOPROXY) CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) \
-				$(GO) build \
-				-tags release \
-				-ldflags "$(LDFLAGS_VERSION)" \
-				-o $(BIN)/$(basename $(MODULE))_$(GOOS)_$(GOARCH) ./cmd/spotinfo || true)))
+# Test targets (no formatting requirement)
+test:
+	@echo "Running tests..."
+	@go test ./...
 
-.PHONY: check-file-types
-check-file-types: ; $(info $(M) check file type os/arch...) @ ## Check file types for release
-	@for f in $(BIN)/* ; do \
-        file $${f} ; \
-    done
+test-verbose:
+	@echo "Running tests with verbose output..."
+	@go test -v ./...
 
-# Tools
+test-race:
+	@echo "Running tests with race detector..."
+	@go test -race ./...
 
-setup-tools: setup-lint setup-mockery
+test-coverage:
+	@echo "Running tests with coverage..."
+	@go test -covermode=atomic -coverprofile=coverage.out ./...
+	@go tool cover -html=coverage.out -o coverage.html
+	@go tool cover -func=coverage.out
 
-setup-lint:
-	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6
-setup-mockery:
-	$(GO) install github.com/vektra/mockery/v3@latest
+# Code quality
+lint: setup-tools
+	@echo "Running linter..."
+	@golangci-lint run -v -c .golangci.yaml ./...
 
-GOLINT=golangci-lint
-GOMOCK=mockery
+fmt:
+	@echo "Formatting code..."
+	@go fmt ./...
 
-# upstream data
-SPOT_ADVISOR_DATA_URL := "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json"
-SPOT_PRICE_DATA_URL := "http://spot-price.s3.amazonaws.com/spot.js"
-DEPS := "wget"
+# Data updates
+check-deps:
+	@command -v wget > /dev/null 2>&1 || (echo "Error: wget is required" && exit 1)
+	@echo "Dependencies satisfied"
 
-.PHONY: check-deps
-check-deps: ; @ ## Verify the system has all dependencies installed
-	@for DEP in $(shell echo "$(DEPS)"); do \
-		command -v "$$DEP" > /dev/null 2>&1 \
-		|| (echo "Error: dependency '$$DEP' is absent" ; exit 1); \
-	done
-	@echo "all dependencies satisfied: $(DEPS)"
-
-.PHONY: update-data
-update-data: check-deps; @ ## Update Spot Advisor data file
+update-data: check-deps
+	@echo "Updating spot advisor data..."
 	@mkdir -p public/spot/data
-	@wget -nv $(SPOT_ADVISOR_DATA_URL) -O - > public/spot/data/spot-advisor-data.json
-	@echo "spot advisor data updated"
+	@wget -nv $(SPOT_ADVISOR_URL) -O public/spot/data/spot-advisor-data.json
 
-.PHONY: update-price
-update-price: check-deps; @ ## Update Spot pricing data file
+update-price: check-deps
+	@echo "Updating spot pricing data..."
 	@mkdir -p public/spot/data
-	@wget -nv $(SPOT_PRICE_DATA_URL) -O - > public/spot/data/spot-price-data.json
+	@wget -nv $(SPOT_PRICE_URL) -O public/spot/data/spot-price-data.json
 	@sed -i'' -e "s/callback(//g" public/spot/data/spot-price-data.json
 	@sed -i'' -e "s/);//g" public/spot/data/spot-price-data.json
 
-# Tests
+# Development tools
+setup-tools:
+	@echo "Installing development tools..."
+	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 
-TEST_TARGETS := test-default test-bench test-short test-verbose test-race
-.PHONY: $(TEST_TARGETS) test-xml check test tests
-test-bench:   ARGS=-run=__absolutelynothing__ -bench=. ## Run benchmarks
-test-short:   ARGS=-short        ## Run only short tests
-test-verbose: ARGS=-v            ## Run tests in verbose mode with coverage reporting
-test-race:    ARGS=-race         ## Run tests with race detectorß
-$(TEST_TARGETS): NAME=$(MAKECMDGOALS:test-%=%)
-$(TEST_TARGETS): test
-check test tests: fmt ; $(info $(M) running $(NAME:%=% )tests...) @ ## Run tests
-	$Q $(GO) test -timeout $(TIMEOUT)s $(ARGS) $(TESTPKGS)
+# Multi-platform release
+release: clean
+	@echo "Building release binaries..."
+	@for os in $(PLATFORMS); do \
+		for arch in $(ARCHITECTURES); do \
+			if [ "$$arch" = "arm64" ] && [ "$$os" = "windows" ]; then continue; fi; \
+			echo "Building $$os/$$arch..."; \
+			GOOS=$$os GOARCH=$$arch go build \
+				-tags release \
+				-ldflags "$(LDFLAGS)" \
+				-o $(BIN_DIR)/$(shell basename $(MODULE))_$${os}_$${arch} \
+				./cmd/spotinfo; \
+		done; \
+	done
 
-COVERAGE_MODE    = atomic
-COVERAGE_PROFILE = coverage.out
-COVERAGE_HTML    = coverage.html
-.PHONY: test-coverage
-test-coverage: fmt ; $(info $(M) running coverage tests...) @ ## Run coverage tests with HTML output
-	$Q $(GO) test -covermode=$(COVERAGE_MODE) -coverprofile=$(COVERAGE_PROFILE) ./...
-	$Q $(GO) tool cover -html=$(COVERAGE_PROFILE) -o $(COVERAGE_HTML)
-	$Q $(GO) tool cover -func=$(COVERAGE_PROFILE)
-
-.PHONY: lint
-lint: setup-lint; $(info $(M) running golangci-lint...) @ ## Run golangci-lint linters
-	# updating path since golangci-lint is looking for go binary and this may lead to
-	# conflict when multiple go versions are installed
-	$Q env $(GOLINT) run -v -c $(LINT_CONFIG) ./...
-
-
-
-# generate test mock for interfaces
-.PHONY: mockgen
-mockgen: | setup-mockery ; $(info $(M) generating mocks...) @ ## Generate mocks using go:generate annotations
-	$Q $(GO) generate ./...
-
-.PHONY: fmt
-fmt: ; $(info $(M) running gofmt...) @ ## Run gofmt on all source files
-	$Q $(GO) fmt $(PKGS)
-
-# Misc
-
-.PHONY: clean
-clean: ; $(info $(M) cleaning...)	@ ## Cleanup everything
-	@rm -rf $(BIN)
+# Cleanup
+clean:
+	@echo "Cleaning up..."
+	@rm -rf $(BIN_DIR)
 	@rm -f coverage.out coverage.html
 
-.PHONY: help
-help:
-	@grep -E '^[ a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
-
-.PHONY: version
+# Utility targets
 version:
 	@echo $(VERSION)
+
+help:
+	@echo "Available targets:"
+	@echo "  build         Build binary for current platform"
+	@echo "  test          Run tests"
+	@echo "  test-verbose  Run tests with verbose output"
+	@echo "  test-race     Run tests with race detector"
+	@echo "  test-coverage Run tests with coverage report"
+	@echo "  lint          Run golangci-lint"
+	@echo "  fmt           Format Go code"
+	@echo "  update-data   Update embedded spot advisor data"
+	@echo "  update-price  Update embedded spot pricing data"
+	@echo "  release       Build binaries for all platforms"
+	@echo "  clean         Remove build artifacts"
+	@echo "  setup-tools   Install development tools"
+	@echo "  version       Show version"
+	@echo "  help          Show this help"
