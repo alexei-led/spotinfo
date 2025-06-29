@@ -832,34 +832,30 @@ func TestPrintFunctions_EdgeCases(t *testing.T) {
 	})
 }
 
-// TestIsMCPMode tests MCP mode detection
 func TestIsMCPMode(t *testing.T) {
 	tests := []struct {
 		name        string
-		setupCLI    func(*cli.Context)
+		args        []string
 		setupEnv    func()
 		cleanupEnv  func()
 		expectedMCP bool
 	}{
 		{
-			name: "MCP flag set to true",
-			setupCLI: func(ctx *cli.Context) {
-				ctx.Set("mcp", "true")
-			},
+			name:        "MCP flag set to true",
+			args:        []string{"spotinfo", "--mcp"},
 			setupEnv:    func() {},
 			cleanupEnv:  func() {},
 			expectedMCP: true,
 		},
 		{
 			name:        "MCP flag false, no env var",
-			setupCLI:    func(ctx *cli.Context) {},
+			args:        []string{"spotinfo"},
 			setupEnv:    func() {},
 			cleanupEnv:  func() {},
-			expectedMCP: false,
 		},
 		{
-			name:     "MCP flag false, env var set to mcp",
-			setupCLI: func(ctx *cli.Context) {},
+			name: "MCP flag false, env var set to mcp",
+			args: []string{"spotinfo"},
 			setupEnv: func() {
 				os.Setenv(mcpModeEnv, mcpModeValue)
 			},
@@ -869,8 +865,8 @@ func TestIsMCPMode(t *testing.T) {
 			expectedMCP: true,
 		},
 		{
-			name:     "MCP flag false, env var set to MCP (case insensitive)",
-			setupCLI: func(ctx *cli.Context) {},
+			name: "MCP flag false, env var set to MCP (case insensitive)",
+			args: []string{"spotinfo"},
 			setupEnv: func() {
 				os.Setenv(mcpModeEnv, "MCP")
 			},
@@ -880,21 +876,18 @@ func TestIsMCPMode(t *testing.T) {
 			expectedMCP: true,
 		},
 		{
-			name:     "MCP flag false, env var set to invalid value",
-			setupCLI: func(ctx *cli.Context) {},
+			name: "MCP flag false, env var set to invalid value",
+			args: []string{"spotinfo"},
 			setupEnv: func() {
 				os.Setenv(mcpModeEnv, "invalid")
 			},
 			cleanupEnv: func() {
 				os.Unsetenv(mcpModeEnv)
 			},
-			expectedMCP: false,
 		},
 		{
 			name: "MCP flag true overrides env var false",
-			setupCLI: func(ctx *cli.Context) {
-				ctx.Set("mcp", "true")
-			},
+			args: []string{"spotinfo", "--mcp"},
 			setupEnv: func() {
 				os.Setenv(mcpModeEnv, "false")
 			},
@@ -907,25 +900,24 @@ func TestIsMCPMode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup environment
 			tt.setupEnv()
 			defer tt.cleanupEnv()
 
-			// Create test app and context
+			var capturedMCPMode bool
 			app := &cli.App{
 				Flags: []cli.Flag{
 					&cli.BoolFlag{Name: "mcp"},
 				},
+				Action: func(ctx *cli.Context) error {
+					capturedMCPMode = isMCPMode(ctx)
+					return nil
+				},
 			}
 
-			ctx := cli.NewContext(app, nil, nil)
-			if tt.setupCLI != nil {
-				tt.setupCLI(ctx)
-			}
+			err := app.Run(tt.args)
+			require.NoError(t, err)
 
-			// Test the function
-			result := isMCPMode(ctx)
-			assert.Equal(t, tt.expectedMCP, result, "MCP mode detection should match expected result")
+			assert.Equal(t, tt.expectedMCP, capturedMCPMode, "MCP mode detection should match expected result")
 		})
 	}
 }
@@ -1057,7 +1049,7 @@ func TestRunMCPServer(t *testing.T) {
 			transport:     stdioTransport,
 		},
 		{
-			name: "sse transport - not implemented",
+			name: "sse transport success",
 			setupEnv: func() {
 				os.Setenv(mcpTransportEnv, sseTransport)
 				os.Setenv(mcpPortEnv, "9090")
@@ -1066,9 +1058,8 @@ func TestRunMCPServer(t *testing.T) {
 				os.Unsetenv(mcpTransportEnv)
 				os.Unsetenv(mcpPortEnv)
 			},
-			expectedError: "SSE transport not yet implemented",
-			transport:     sseTransport,
-			port:          "9090",
+			transport: sseTransport,
+			port:      "9090",
 		},
 		{
 			name: "unsupported transport",

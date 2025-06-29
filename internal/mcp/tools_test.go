@@ -1,10 +1,18 @@
 package mcp
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"spotinfo/internal/spot"
 )
@@ -415,6 +423,612 @@ func TestMarshalResponse(t *testing.T) {
 				assert.NotNil(t, result)
 				assert.False(t, result.IsError)
 			}
+		})
+	}
+}
+
+func TestFindSpotInstancesTool_Handle(t *testing.T) {
+	tests := []struct {
+		name           string
+		arguments      interface{}
+		mockSetup      func(*mockspotClient)
+		validateResult func(*testing.T, *mcp.CallToolResult)
+	}{
+		{
+			name: "successful request with complete response validation",
+			arguments: map[string]interface{}{
+				"regions":        []interface{}{"us-east-1"},
+				"instance_types": "t2.micro",
+				"limit":          2,
+				"sort_by":        "price",
+			},
+			mockSetup: func(m *mockspotClient) {
+				advices := []spot.Advice{
+					{
+						Instance: "t2.micro",
+						Region:   "us-east-1",
+						Price:    0.0116,
+						Savings:  50,
+						Range:    spot.Range{Min: 0, Max: 5, Label: "<5%"},
+						Info:     spot.TypeInfo{Cores: 1, RAM: 1.0},
+					},
+				}
+				m.EXPECT().GetSpotSavings(
+					mock.Anything,
+					[]string{"us-east-1"},
+					"t2.micro",
+					"linux",
+					0, 0, float64(0),
+					spot.SortByPrice,
+					false,
+				).Return(advices, nil).Once()
+			},
+			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
+				require.False(t, result.IsError)
+				require.Len(t, result.Content, 1)
+				
+				textContent, ok := result.Content[0].(mcp.TextContent)
+				require.True(t, ok, "Content should be TextContent")
+				assert.Equal(t, "text", textContent.Type)
+				
+				// Validate JSON structure contains expected fields
+				var response map[string]interface{}
+				err := json.Unmarshal([]byte(textContent.Text), &response)
+				require.NoError(t, err)
+				
+				assert.Contains(t, response, "results")
+				assert.Contains(t, response, "metadata")
+				
+				results, ok := response["results"].([]interface{})
+				require.True(t, ok)
+				assert.Len(t, results, 1)
+				
+				metadata, ok := response["metadata"].(map[string]interface{})
+				require.True(t, ok)
+				assert.Equal(t, float64(1), metadata["total_results"])
+			},
+		},
+		{
+			name:      "parameter validation with multiple filters",
+			arguments: map[string]interface{}{
+				"regions":               []interface{}{"us-east-1", "eu-west-1"},
+				"instance_types":        "m5.*",
+				"min_vcpu":              4,
+				"min_memory_gb":         16,
+				"max_price_per_hour":    0.5,
+				"max_interruption_rate": 10.0,
+				"sort_by":               "savings",
+				"limit":                 5,
+			},
+			mockSetup: func(m *mockspotClient) {
+				m.EXPECT().GetSpotSavings(
+					mock.Anything,
+					[]string{"us-east-1", "eu-west-1"},
+					"m5.*",
+					"linux",
+					4, 16, 0.5,
+					spot.SortBySavings,
+					true, // savings sort is descending
+				).Return([]spot.Advice{}, nil).Once()
+			},
+			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
+				assert.False(t, result.IsError)
+				assert.NotNil(t, result.Content)
+			},
+		},
+		{
+			name:      "client error handling",
+			arguments: map[string]interface{}{"regions": []interface{}{"invalid-region"}},
+			mockSetup: func(m *mockspotClient) {
+				m.EXPECT().GetSpotSavings(
+					mock.Anything,
+					[]string{"invalid-region"},
+					"",
+					"linux",
+					0, 0, float64(0),
+					spot.SortByRange,
+					false,
+				).Return(nil, errors.New("region not found: invalid-region")).Once()
+			},
+			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
+				assert.True(t, result.IsError, "Should be an error result")
+				require.Len(t, result.Content, 1)
+				
+				textContent, ok := result.Content[0].(mcp.TextContent)
+				require.True(t, ok)
+				assert.Contains(t, textContent.Text, "Failed to get spot recommendations")
+				assert.Contains(t, textContent.Text, "region not found")
+			},
+		},
+		{
+			name:      "default parameters behavior",
+			arguments: map[string]interface{}{},
+			mockSetup: func(m *mockspotClient) {
+				m.EXPECT().GetSpotSavings(
+					mock.Anything,
+					[]string{"all"},
+					"", // empty instance types
+					"linux",
+					0, 0, float64(0), // no filters
+					spot.SortByRange, // default sort
+					false,
+				).Return([]spot.Advice{}, nil).Once()
+			},
+			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
+				assert.False(t, result.IsError)
+				
+				textContent, ok := result.Content[0].(mcp.TextContent)
+				require.True(t, ok)
+				
+				var response map[string]interface{}
+				err := json.Unmarshal([]byte(textContent.Text), &response)
+				require.NoError(t, err)
+				
+				metadata := response["metadata"].(map[string]interface{})
+				assert.Equal(t, float64(0), metadata["total_results"])
+			},
+		},
+		{
+			name: "interruption filtering works correctly",
+			arguments: map[string]interface{}{
+				"regions":               []interface{}{"us-east-1"},
+				"max_interruption_rate": 7.5, // Should filter out avg > 7.5
+			},
+			mockSetup: func(m *mockspotClient) {
+				advices := []spot.Advice{
+					{
+						Instance: "t2.micro",
+						Region:   "us-east-1",
+						Range:    spot.Range{Min: 0, Max: 5}, // avg = 2.5, should pass
+						Savings:  50,
+						Price:    0.01,
+					},
+					{
+						Instance: "t2.small",
+						Region:   "us-east-1",
+						Range:    spot.Range{Min: 10, Max: 20}, // avg = 15, should be filtered
+						Savings:  40,
+						Price:    0.02,
+					},
+				}
+				m.EXPECT().GetSpotSavings(
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+				).Return(advices, nil).Once()
+			},
+			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
+				assert.False(t, result.IsError)
+				
+				textContent, ok := result.Content[0].(mcp.TextContent)
+				require.True(t, ok)
+				
+				var response map[string]interface{}
+				err := json.Unmarshal([]byte(textContent.Text), &response)
+				require.NoError(t, err)
+				
+				results := response["results"].([]interface{})
+				assert.Len(t, results, 1, "Should filter out high interruption instances")
+				
+				firstResult := results[0].(map[string]interface{})
+				assert.Equal(t, "t2.micro", firstResult["instance_type"])
+			},
+		},
+		{
+			name: "limit parameter works correctly",
+			arguments: map[string]interface{}{
+				"regions": []interface{}{"us-east-1"},
+				"limit":   2,
+			},
+			mockSetup: func(m *mockspotClient) {
+				advices := []spot.Advice{
+					{Instance: "t2.micro", Region: "us-east-1", Savings: 50},
+					{Instance: "t2.small", Region: "us-east-1", Savings: 40},
+					{Instance: "t2.medium", Region: "us-east-1", Savings: 30},
+				}
+				m.EXPECT().GetSpotSavings(
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+				).Return(advices, nil).Once()
+			},
+			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
+				assert.False(t, result.IsError)
+				
+				textContent, ok := result.Content[0].(mcp.TextContent)
+				require.True(t, ok)
+				
+				var response map[string]interface{}
+				err := json.Unmarshal([]byte(textContent.Text), &response)
+				require.NoError(t, err)
+				
+				results := response["results"].([]interface{})
+				assert.Len(t, results, 2, "Should limit results to 2")
+				
+				metadata := response["metadata"].(map[string]interface{})
+				assert.Equal(t, float64(2), metadata["total_results"])
+			},
+		},
+		{
+			name:      "invalid argument types handled gracefully",
+			arguments: "not a map", // Invalid argument type
+			mockSetup: func(m *mockspotClient) {
+				// Should use defaults when arguments are invalid
+				m.EXPECT().GetSpotSavings(
+					mock.Anything,
+					[]string{"all"},
+					"",
+					"linux",
+					0, 0, float64(0),
+					spot.SortByRange,
+					false,
+				).Return([]spot.Advice{}, nil).Once()
+			},
+			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
+				assert.False(t, result.IsError, "Should handle invalid arguments gracefully")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockClient := newMockspotClient(t)
+			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+			tool := NewFindSpotInstancesTool(mockClient, logger)
+
+			if tt.mockSetup != nil {
+				tt.mockSetup(mockClient)
+			}
+
+			req := mcp.CallToolRequest{
+				Params: mcp.CallToolParams{
+					Arguments: tt.arguments,
+				},
+			}
+
+			result, err := tool.Handle(context.Background(), req)
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			tt.validateResult(t, result)
+			mockClient.AssertExpectations(t)
+		})
+	}
+}
+
+func TestListSpotRegionsTool_Handle(t *testing.T) {
+	tests := []struct {
+		name           string
+		arguments      interface{}
+		mockSetup      func(*mockspotClient)
+		validateResult func(*testing.T, *mcp.CallToolResult)
+	}{
+		{
+			name:      "successful regions list with deduplication",
+			arguments: map[string]interface{}{},
+			mockSetup: func(m *mockspotClient) {
+				advices := []spot.Advice{
+					{Region: "us-east-1", Instance: "t2.micro"},
+					{Region: "us-west-2", Instance: "t2.small"},
+					{Region: "us-east-1", Instance: "t2.medium"}, // duplicate region
+					{Region: "eu-west-1", Instance: "t2.large"},
+					{Region: "us-west-2", Instance: "t2.xlarge"}, // another duplicate
+				}
+				m.EXPECT().GetSpotSavings(
+					mock.Anything,
+					[]string{"all"},
+					"",
+					"linux",
+					0, 0, float64(0),
+					spot.SortByRegion,
+					false,
+				).Return(advices, nil).Once()
+			},
+			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
+				require.False(t, result.IsError)
+				require.Len(t, result.Content, 1)
+				
+				textContent, ok := result.Content[0].(mcp.TextContent)
+				require.True(t, ok)
+				
+				var response map[string]interface{}
+				err := json.Unmarshal([]byte(textContent.Text), &response)
+				require.NoError(t, err)
+				
+				assert.Contains(t, response, "regions")
+				assert.Contains(t, response, "total")
+				
+				regions, ok := response["regions"].([]interface{})
+				require.True(t, ok)
+				assert.Len(t, regions, 3, "Should deduplicate regions")
+				
+				// Convert to string slice for easier testing
+				regionStrs := make([]string, len(regions))
+				for i, r := range regions {
+					regionStrs[i] = r.(string)
+				}
+				
+				assert.Contains(t, regionStrs, "us-east-1")
+				assert.Contains(t, regionStrs, "us-west-2")
+				assert.Contains(t, regionStrs, "eu-west-1")
+				
+				assert.Equal(t, float64(3), response["total"])
+			},
+		},
+		{
+			name:      "empty results handled correctly",
+			arguments: map[string]interface{}{},
+			mockSetup: func(m *mockspotClient) {
+				m.EXPECT().GetSpotSavings(
+					mock.Anything,
+					[]string{"all"},
+					"",
+					"linux",
+					0, 0, float64(0),
+					spot.SortByRegion,
+					false,
+				).Return([]spot.Advice{}, nil).Once()
+			},
+			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
+				assert.False(t, result.IsError)
+				
+				textContent, ok := result.Content[0].(mcp.TextContent)
+				require.True(t, ok)
+				
+				var response map[string]interface{}
+				err := json.Unmarshal([]byte(textContent.Text), &response)
+				require.NoError(t, err)
+				
+				regions := response["regions"].([]interface{})
+				assert.Empty(t, regions)
+				assert.Equal(t, float64(0), response["total"])
+			},
+		},
+		{
+			name:      "client error handling with proper error message",
+			arguments: map[string]interface{}{},
+			mockSetup: func(m *mockspotClient) {
+				m.EXPECT().GetSpotSavings(
+					mock.Anything,
+					[]string{"all"},
+					"",
+					"linux",
+					0, 0, float64(0),
+					spot.SortByRegion,
+					false,
+				).Return(nil, errors.New("network timeout while fetching data")).Once()
+			},
+			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
+				assert.True(t, result.IsError, "Should be an error result")
+				require.Len(t, result.Content, 1)
+				
+				textContent, ok := result.Content[0].(mcp.TextContent)
+				require.True(t, ok)
+				assert.Contains(t, textContent.Text, "Failed to retrieve regions")
+				assert.Contains(t, textContent.Text, "network timeout")
+			},
+		},
+		{
+			name:      "single region returned correctly",
+			arguments: map[string]interface{}{},
+			mockSetup: func(m *mockspotClient) {
+				advices := []spot.Advice{
+					{Region: "ap-south-1", Instance: "t3.micro"},
+				}
+				m.EXPECT().GetSpotSavings(
+					mock.Anything,
+					[]string{"all"},
+					"",
+					"linux",
+					0, 0, float64(0),
+					spot.SortByRegion,
+					false,
+				).Return(advices, nil).Once()
+			},
+			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
+				assert.False(t, result.IsError)
+				
+				textContent, ok := result.Content[0].(mcp.TextContent)
+				require.True(t, ok)
+				
+				var response map[string]interface{}
+				err := json.Unmarshal([]byte(textContent.Text), &response)
+				require.NoError(t, err)
+				
+				regions := response["regions"].([]interface{})
+				assert.Len(t, regions, 1)
+				assert.Equal(t, "ap-south-1", regions[0])
+				assert.Equal(t, float64(1), response["total"])
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockClient := newMockspotClient(t)
+			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+			tool := NewListSpotRegionsTool(mockClient, logger)
+
+			if tt.mockSetup != nil {
+				tt.mockSetup(mockClient)
+			}
+
+			req := mcp.CallToolRequest{
+				Params: mcp.CallToolParams{
+					Arguments: tt.arguments,
+				},
+			}
+
+			result, err := tool.Handle(context.Background(), req)
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			tt.validateResult(t, result)
+			mockClient.AssertExpectations(t)
+		})
+	}
+}
+
+func TestCreateErrorResult(t *testing.T) {
+	tests := []struct {
+		name    string
+		message string
+	}{
+		{"simple error", "test error message"},
+		{"empty message", ""},
+		{"complex error", "Failed to process request: invalid parameter"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := createErrorResult(tt.message)
+
+			assert.True(t, result.IsError, "createErrorResult should create error results")
+			assert.Len(t, result.Content, 1)
+			
+			textContent, ok := result.Content[0].(mcp.TextContent)
+			require.True(t, ok)
+			assert.Equal(t, "text", textContent.Type)
+			assert.Contains(t, textContent.Text, tt.message)
+		})
+	}
+}
+
+func TestMarshalResponse_ErrorCases(t *testing.T) {
+	tests := []struct {
+		name      string
+		response  interface{}
+		expected  bool
+	}{
+		{
+			name: "unmarshalable response with channel",
+			response: map[string]interface{}{
+				"invalid": make(chan int),
+			},
+			expected: true,
+		},
+		{
+			name:     "function in response",
+			response: map[string]interface{}{"fn": func() {}},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := marshalResponse(tt.response)
+
+			if tt.expected {
+				// marshalResponse returns error result with IsError=true, not a nil result
+				assert.NoError(t, err, "marshalResponse should always return successful response")
+				assert.NotNil(t, result)
+				assert.True(t, result.IsError, "Should be an error result for unmarshalable data")
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, result)
+				assert.False(t, result.IsError)
+			}
+		})
+	}
+}
+
+func TestFetchRegions(t *testing.T) {
+	tests := []struct {
+		name           string
+		mockSetup      func(*mockspotClient)
+		expectedError  bool
+		expectedCount  int
+	}{
+		{
+			name: "successful fetch with multiple regions",
+			mockSetup: func(m *mockspotClient) {
+				advices := []spot.Advice{
+					{Region: "us-east-1"},
+					{Region: "us-west-2"},
+					{Region: "us-east-1"}, // duplicate should be handled
+					{Region: "eu-west-1"},
+				}
+				m.EXPECT().GetSpotSavings(
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+				).Return(advices, nil).Once()
+			},
+			expectedCount: 3,
+		},
+		{
+			name: "client error",
+			mockSetup: func(m *mockspotClient) {
+				m.EXPECT().GetSpotSavings(
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+				).Return(nil, errors.New("network error")).Once()
+			},
+			expectedError: true,
+		},
+		{
+			name: "empty results",
+			mockSetup: func(m *mockspotClient) {
+				m.EXPECT().GetSpotSavings(
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+					mock.Anything,
+				).Return([]spot.Advice{}, nil).Once()
+			},
+			expectedCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockClient := newMockspotClient(t)
+			if tt.mockSetup != nil {
+				tt.mockSetup(mockClient)
+			}
+
+			tool := &ListSpotRegionsTool{client: mockClient, logger: slog.Default()}
+			regions, err := tool.fetchRegions(context.Background())
+
+			if tt.expectedError {
+				assert.Error(t, err)
+				assert.Nil(t, regions)
+			} else {
+				assert.NoError(t, err)
+				assert.Len(t, regions, tt.expectedCount)
+			}
+
+			mockClient.AssertExpectations(t)
 		})
 	}
 }
