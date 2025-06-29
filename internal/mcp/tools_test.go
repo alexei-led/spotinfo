@@ -427,6 +427,7 @@ func TestMarshalResponse(t *testing.T) {
 	}
 }
 
+//nolint:maintidx // Complex table-driven test with multiple scenarios
 func TestFindSpotInstancesTool_Handle(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -466,30 +467,30 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				require.False(t, result.IsError)
 				require.Len(t, result.Content, 1)
-				
+
 				textContent, ok := result.Content[0].(mcp.TextContent)
 				require.True(t, ok, "Content should be TextContent")
 				assert.Equal(t, "text", textContent.Type)
-				
+
 				// Validate JSON structure contains expected fields
 				var response map[string]interface{}
 				err := json.Unmarshal([]byte(textContent.Text), &response)
 				require.NoError(t, err)
-				
+
 				assert.Contains(t, response, "results")
 				assert.Contains(t, response, "metadata")
-				
+
 				results, ok := response["results"].([]interface{})
 				require.True(t, ok)
 				assert.Len(t, results, 1)
-				
+
 				metadata, ok := response["metadata"].(map[string]interface{})
 				require.True(t, ok)
 				assert.Equal(t, float64(1), metadata["total_results"])
 			},
 		},
 		{
-			name:      "parameter validation with multiple filters",
+			name: "parameter validation with multiple filters",
 			arguments: map[string]interface{}{
 				"regions":               []interface{}{"us-east-1", "eu-west-1"},
 				"instance_types":        "m5.*",
@@ -533,7 +534,7 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				assert.True(t, result.IsError, "Should be an error result")
 				require.Len(t, result.Content, 1)
-				
+
 				textContent, ok := result.Content[0].(mcp.TextContent)
 				require.True(t, ok)
 				assert.Contains(t, textContent.Text, "Failed to get spot recommendations")
@@ -556,15 +557,16 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 			},
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				assert.False(t, result.IsError)
-				
+
 				textContent, ok := result.Content[0].(mcp.TextContent)
 				require.True(t, ok)
-				
+
 				var response map[string]interface{}
 				err := json.Unmarshal([]byte(textContent.Text), &response)
 				require.NoError(t, err)
-				
-				metadata := response["metadata"].(map[string]interface{})
+
+				metadata, ok := response["metadata"].(map[string]interface{})
+				require.True(t, ok, "metadata should be a map")
 				assert.Equal(t, float64(0), metadata["total_results"])
 			},
 		},
@@ -605,18 +607,20 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 			},
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				assert.False(t, result.IsError)
-				
+
 				textContent, ok := result.Content[0].(mcp.TextContent)
 				require.True(t, ok)
-				
+
 				var response map[string]interface{}
 				err := json.Unmarshal([]byte(textContent.Text), &response)
 				require.NoError(t, err)
-				
-				results := response["results"].([]interface{})
+
+				results, ok := response["results"].([]interface{})
+				require.True(t, ok, "results should be a slice")
 				assert.Len(t, results, 1, "Should filter out high interruption instances")
-				
-				firstResult := results[0].(map[string]interface{})
+
+				firstResult, ok := results[0].(map[string]interface{})
+				require.True(t, ok, "first result should be a map")
 				assert.Equal(t, "t2.micro", firstResult["instance_type"])
 			},
 		},
@@ -646,18 +650,20 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 			},
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				assert.False(t, result.IsError)
-				
+
 				textContent, ok := result.Content[0].(mcp.TextContent)
 				require.True(t, ok)
-				
+
 				var response map[string]interface{}
 				err := json.Unmarshal([]byte(textContent.Text), &response)
 				require.NoError(t, err)
-				
-				results := response["results"].([]interface{})
+
+				results, ok := response["results"].([]interface{})
+				require.True(t, ok, "results should be a slice")
 				assert.Len(t, results, 2, "Should limit results to 2")
-				
-				metadata := response["metadata"].(map[string]interface{})
+
+				metadata, ok := response["metadata"].(map[string]interface{})
+				require.True(t, ok, "metadata should be a map")
 				assert.Equal(t, float64(2), metadata["total_results"])
 			},
 		},
@@ -739,31 +745,33 @@ func TestListSpotRegionsTool_Handle(t *testing.T) {
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				require.False(t, result.IsError)
 				require.Len(t, result.Content, 1)
-				
+
 				textContent, ok := result.Content[0].(mcp.TextContent)
 				require.True(t, ok)
-				
+
 				var response map[string]interface{}
 				err := json.Unmarshal([]byte(textContent.Text), &response)
 				require.NoError(t, err)
-				
+
 				assert.Contains(t, response, "regions")
 				assert.Contains(t, response, "total")
-				
+
 				regions, ok := response["regions"].([]interface{})
 				require.True(t, ok)
 				assert.Len(t, regions, 3, "Should deduplicate regions")
-				
+
 				// Convert to string slice for easier testing
 				regionStrs := make([]string, len(regions))
 				for i, r := range regions {
-					regionStrs[i] = r.(string)
+					if str, ok := r.(string); ok {
+						regionStrs[i] = str
+					}
 				}
-				
+
 				assert.Contains(t, regionStrs, "us-east-1")
 				assert.Contains(t, regionStrs, "us-west-2")
 				assert.Contains(t, regionStrs, "eu-west-1")
-				
+
 				assert.Equal(t, float64(3), response["total"])
 			},
 		},
@@ -783,15 +791,16 @@ func TestListSpotRegionsTool_Handle(t *testing.T) {
 			},
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				assert.False(t, result.IsError)
-				
+
 				textContent, ok := result.Content[0].(mcp.TextContent)
 				require.True(t, ok)
-				
+
 				var response map[string]interface{}
 				err := json.Unmarshal([]byte(textContent.Text), &response)
 				require.NoError(t, err)
-				
-				regions := response["regions"].([]interface{})
+
+				regions, ok := response["regions"].([]interface{})
+				require.True(t, ok, "regions should be a slice")
 				assert.Empty(t, regions)
 				assert.Equal(t, float64(0), response["total"])
 			},
@@ -813,7 +822,7 @@ func TestListSpotRegionsTool_Handle(t *testing.T) {
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				assert.True(t, result.IsError, "Should be an error result")
 				require.Len(t, result.Content, 1)
-				
+
 				textContent, ok := result.Content[0].(mcp.TextContent)
 				require.True(t, ok)
 				assert.Contains(t, textContent.Text, "Failed to retrieve regions")
@@ -839,15 +848,16 @@ func TestListSpotRegionsTool_Handle(t *testing.T) {
 			},
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				assert.False(t, result.IsError)
-				
+
 				textContent, ok := result.Content[0].(mcp.TextContent)
 				require.True(t, ok)
-				
+
 				var response map[string]interface{}
 				err := json.Unmarshal([]byte(textContent.Text), &response)
 				require.NoError(t, err)
-				
-				regions := response["regions"].([]interface{})
+
+				regions, ok := response["regions"].([]interface{})
+				require.True(t, ok, "regions should be a slice")
 				assert.Len(t, regions, 1)
 				assert.Equal(t, "ap-south-1", regions[0])
 				assert.Equal(t, float64(1), response["total"])
@@ -897,7 +907,7 @@ func TestCreateErrorResult(t *testing.T) {
 
 			assert.True(t, result.IsError, "createErrorResult should create error results")
 			assert.Len(t, result.Content, 1)
-			
+
 			textContent, ok := result.Content[0].(mcp.TextContent)
 			require.True(t, ok)
 			assert.Equal(t, "text", textContent.Type)
@@ -908,9 +918,9 @@ func TestCreateErrorResult(t *testing.T) {
 
 func TestMarshalResponse_ErrorCases(t *testing.T) {
 	tests := []struct {
-		name      string
-		response  interface{}
-		expected  bool
+		name     string
+		response interface{}
+		expected bool
 	}{
 		{
 			name: "unmarshalable response with channel",
@@ -946,10 +956,10 @@ func TestMarshalResponse_ErrorCases(t *testing.T) {
 
 func TestFetchRegions(t *testing.T) {
 	tests := []struct {
-		name           string
-		mockSetup      func(*mockspotClient)
-		expectedError  bool
-		expectedCount  int
+		name          string
+		mockSetup     func(*mockspotClient)
+		expectedError bool
+		expectedCount int
 	}{
 		{
 			name: "successful fetch with multiple regions",

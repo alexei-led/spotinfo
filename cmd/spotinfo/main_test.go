@@ -848,10 +848,10 @@ func TestIsMCPMode(t *testing.T) {
 			expectedMCP: true,
 		},
 		{
-			name:        "MCP flag false, no env var",
-			args:        []string{"spotinfo"},
-			setupEnv:    func() {},
-			cleanupEnv:  func() {},
+			name:       "MCP flag false, no env var",
+			args:       []string{"spotinfo"},
+			setupEnv:   func() {},
+			cleanupEnv: func() {},
 		},
 		{
 			name: "MCP flag false, env var set to mcp",
