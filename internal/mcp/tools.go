@@ -67,7 +67,7 @@ func (t *FindSpotInstancesTool) Handle(ctx context.Context, req mcp.CallToolRequ
 }
 
 // params holds parsed parameters for easier handling
-type params struct {
+type params struct { //nolint:govet
 	regions         []string
 	instanceTypes   string
 	sortBy          string
@@ -251,7 +251,7 @@ func NewListSpotRegionsTool(client spotClient, logger *slog.Logger) *ListSpotReg
 }
 
 // Handle implements the list_spot_regions tool
-func (t *ListSpotRegionsTool) Handle(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (t *ListSpotRegionsTool) Handle(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	t.logger.Debug("handling list_spot_regions request")
 
 	regions, err := t.fetchRegions(ctx)
