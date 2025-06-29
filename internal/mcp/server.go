@@ -130,8 +130,25 @@ func (s *Server) ServeStdio(ctx context.Context) error {
 func (s *Server) ServeSSE(ctx context.Context, port string) error {
 	s.logger.Info("starting MCP server with SSE transport", slog.String("port", port))
 
-	// TODO: Implement SSE transport in Phase 3.2
-	// Example: sseServer := server.NewSSEServer(s.mcpServer)
-	// return sseServer.Start(":" + port)
-	return fmt.Errorf("SSE transport not yet implemented - coming in Phase 3.2")
+	// Create SSE server using the built-in mcp-go library support
+	sseServer := server.NewSSEServer(s.mcpServer)
+
+	// Start SSE server - this will block until context is cancelled or error occurs
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- sseServer.Start(":" + port)
+	}()
+
+	// Wait for context cancellation or server error
+	select {
+	case <-ctx.Done():
+		s.logger.Info("SSE server context cancelled, shutting down")
+		return ctx.Err()
+	case err := <-errChan:
+		if err != nil {
+			s.logger.Error("SSE server failed", slog.Any("error", err))
+			return fmt.Errorf("SSE server failed: %w", err)
+		}
+		return nil
+	}
 }

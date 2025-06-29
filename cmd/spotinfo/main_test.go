@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -828,4 +830,529 @@ func TestPrintFunctions_EdgeCases(t *testing.T) {
 		assert.Contains(t, result, "type=t2.micro", "Should include instance type")
 		assert.Contains(t, result, "saving=75%", "Should include savings")
 	})
+}
+
+// TestIsMCPMode tests MCP mode detection
+func TestIsMCPMode(t *testing.T) {
+	tests := []struct {
+		name        string
+		setupCLI    func(*cli.Context)
+		setupEnv    func()
+		cleanupEnv  func()
+		expectedMCP bool
+	}{
+		{
+			name: "MCP flag set to true",
+			setupCLI: func(ctx *cli.Context) {
+				ctx.Set("mcp", "true")
+			},
+			setupEnv:    func() {},
+			cleanupEnv:  func() {},
+			expectedMCP: true,
+		},
+		{
+			name:        "MCP flag false, no env var",
+			setupCLI:    func(ctx *cli.Context) {},
+			setupEnv:    func() {},
+			cleanupEnv:  func() {},
+			expectedMCP: false,
+		},
+		{
+			name:     "MCP flag false, env var set to mcp",
+			setupCLI: func(ctx *cli.Context) {},
+			setupEnv: func() {
+				os.Setenv(mcpModeEnv, mcpModeValue)
+			},
+			cleanupEnv: func() {
+				os.Unsetenv(mcpModeEnv)
+			},
+			expectedMCP: true,
+		},
+		{
+			name:     "MCP flag false, env var set to MCP (case insensitive)",
+			setupCLI: func(ctx *cli.Context) {},
+			setupEnv: func() {
+				os.Setenv(mcpModeEnv, "MCP")
+			},
+			cleanupEnv: func() {
+				os.Unsetenv(mcpModeEnv)
+			},
+			expectedMCP: true,
+		},
+		{
+			name:     "MCP flag false, env var set to invalid value",
+			setupCLI: func(ctx *cli.Context) {},
+			setupEnv: func() {
+				os.Setenv(mcpModeEnv, "invalid")
+			},
+			cleanupEnv: func() {
+				os.Unsetenv(mcpModeEnv)
+			},
+			expectedMCP: false,
+		},
+		{
+			name: "MCP flag true overrides env var false",
+			setupCLI: func(ctx *cli.Context) {
+				ctx.Set("mcp", "true")
+			},
+			setupEnv: func() {
+				os.Setenv(mcpModeEnv, "false")
+			},
+			cleanupEnv: func() {
+				os.Unsetenv(mcpModeEnv)
+			},
+			expectedMCP: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup environment
+			tt.setupEnv()
+			defer tt.cleanupEnv()
+
+			// Create test app and context
+			app := &cli.App{
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "mcp"},
+				},
+			}
+
+			ctx := cli.NewContext(app, nil, nil)
+			if tt.setupCLI != nil {
+				tt.setupCLI(ctx)
+			}
+
+			// Test the function
+			result := isMCPMode(ctx)
+			assert.Equal(t, tt.expectedMCP, result, "MCP mode detection should match expected result")
+		})
+	}
+}
+
+// TestGetMCPTransport tests transport selection logic
+func TestGetMCPTransport(t *testing.T) {
+	tests := []struct {
+		name              string
+		envValue          string
+		expectedTransport string
+	}{
+		{
+			name:              "no environment variable - default to stdio",
+			envValue:          "",
+			expectedTransport: stdioTransport,
+		},
+		{
+			name:              "stdio transport",
+			envValue:          stdioTransport,
+			expectedTransport: stdioTransport,
+		},
+		{
+			name:              "sse transport",
+			envValue:          sseTransport,
+			expectedTransport: sseTransport,
+		},
+		{
+			name:              "custom transport value",
+			envValue:          "custom",
+			expectedTransport: "custom",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Save original value
+			originalValue, exists := os.LookupEnv(mcpTransportEnv)
+			defer func() {
+				if exists {
+					os.Setenv(mcpTransportEnv, originalValue)
+				} else {
+					os.Unsetenv(mcpTransportEnv)
+				}
+			}()
+
+			// Set test value
+			if tt.envValue != "" {
+				os.Setenv(mcpTransportEnv, tt.envValue)
+			} else {
+				os.Unsetenv(mcpTransportEnv)
+			}
+
+			// Test the function
+			result := getMCPTransport()
+			assert.Equal(t, tt.expectedTransport, result)
+		})
+	}
+}
+
+// TestGetMCPPort tests port selection logic
+func TestGetMCPPort(t *testing.T) {
+	tests := []struct {
+		name         string
+		envValue     string
+		expectedPort string
+	}{
+		{
+			name:         "no environment variable - default port",
+			envValue:     "",
+			expectedPort: defaultMCPPort,
+		},
+		{
+			name:         "custom port",
+			envValue:     "9090",
+			expectedPort: "9090",
+		},
+		{
+			name:         "default port explicitly set",
+			envValue:     defaultMCPPort,
+			expectedPort: defaultMCPPort,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Save original value
+			originalValue, exists := os.LookupEnv(mcpPortEnv)
+			defer func() {
+				if exists {
+					os.Setenv(mcpPortEnv, originalValue)
+				} else {
+					os.Unsetenv(mcpPortEnv)
+				}
+			}()
+
+			// Set test value
+			if tt.envValue != "" {
+				os.Setenv(mcpPortEnv, tt.envValue)
+			} else {
+				os.Unsetenv(mcpPortEnv)
+			}
+
+			// Test the function
+			result := getMCPPort()
+			assert.Equal(t, tt.expectedPort, result)
+		})
+	}
+}
+
+// TestRunMCPServer tests MCP server startup scenarios
+func TestRunMCPServer(t *testing.T) {
+	tests := []struct {
+		name          string
+		setupEnv      func()
+		cleanupEnv    func()
+		expectedError string
+		transport     string
+		port          string
+	}{
+		{
+			name: "stdio transport success",
+			setupEnv: func() {
+				os.Setenv(mcpTransportEnv, stdioTransport)
+			},
+			cleanupEnv: func() {
+				os.Unsetenv(mcpTransportEnv)
+			},
+			expectedError: "", // Actual stdio testing is complex, we just test setup
+			transport:     stdioTransport,
+		},
+		{
+			name: "sse transport - not implemented",
+			setupEnv: func() {
+				os.Setenv(mcpTransportEnv, sseTransport)
+				os.Setenv(mcpPortEnv, "9090")
+			},
+			cleanupEnv: func() {
+				os.Unsetenv(mcpTransportEnv)
+				os.Unsetenv(mcpPortEnv)
+			},
+			expectedError: "SSE transport not yet implemented",
+			transport:     sseTransport,
+			port:          "9090",
+		},
+		{
+			name: "unsupported transport",
+			setupEnv: func() {
+				os.Setenv(mcpTransportEnv, "websocket")
+			},
+			cleanupEnv: func() {
+				os.Unsetenv(mcpTransportEnv)
+			},
+			expectedError: "unsupported transport: websocket",
+			transport:     "websocket",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup environment
+			tt.setupEnv()
+			defer tt.cleanupEnv()
+
+			// Create context with cancellation (to avoid hanging)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			// Run with very short timeout for non-stdio tests
+			if tt.transport != stdioTransport {
+				var timeoutCtx context.Context
+				timeoutCtx, cancel = context.WithTimeout(ctx, 100*time.Millisecond)
+				defer cancel()
+				ctx = timeoutCtx
+			}
+
+			// Create empty CLI context (not used in runMCPServer)
+			app := &cli.App{}
+			cliCtx := cli.NewContext(app, nil, nil)
+
+			// Test the function
+			err := runMCPServer(cliCtx, ctx)
+
+			if tt.expectedError != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+			} else if tt.transport == stdioTransport {
+				// For stdio, we expect context cancellation or similar
+				// since we can't easily mock stdin/stdout in this test
+				assert.True(t, err == nil || errors.Is(err, context.Canceled))
+			}
+		})
+	}
+}
+
+// TestMainCmd_MCPModeIntegration tests integration between CLI and MCP modes
+func TestMainCmd_MCPModeIntegration(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		setupEnv   func()
+		cleanupEnv func()
+		expectMCP  bool
+	}{
+		{
+			name:       "normal CLI mode",
+			args:       []string{"spotinfo", "--type", "t3.micro"},
+			setupEnv:   func() {},
+			cleanupEnv: func() {},
+			expectMCP:  false,
+		},
+		{
+			name:       "MCP mode via flag",
+			args:       []string{"spotinfo", "--mcp"},
+			setupEnv:   func() {},
+			cleanupEnv: func() {},
+			expectMCP:  true,
+		},
+		{
+			name: "MCP mode via environment",
+			args: []string{"spotinfo"},
+			setupEnv: func() {
+				os.Setenv(mcpModeEnv, mcpModeValue)
+			},
+			cleanupEnv: func() {
+				os.Unsetenv(mcpModeEnv)
+			},
+			expectMCP: true,
+		},
+		{
+			name: "CLI mode overrides environment",
+			args: []string{"spotinfo", "--type", "t3.micro"},
+			setupEnv: func() {
+				os.Setenv(mcpModeEnv, "false") // Not "mcp"
+			},
+			cleanupEnv: func() {
+				os.Unsetenv(mcpModeEnv)
+			},
+			expectMCP: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup environment
+			tt.setupEnv()
+			defer tt.cleanupEnv()
+
+			// Create test app
+			var capturedMCPMode bool
+			var capturedCLIMode bool
+
+			app := &cli.App{
+				Name: "spotinfo",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "mcp"},
+					&cli.StringFlag{Name: "type"},
+					&cli.StringFlag{Name: "output", Value: "table"},
+					&cli.StringSliceFlag{Name: "region", Value: cli.NewStringSlice("us-east-1")},
+				},
+				Action: func(ctx *cli.Context) error {
+					if isMCPMode(ctx) {
+						capturedMCPMode = true
+						// Don't actually start MCP server, just capture the detection
+						return nil
+					} else {
+						capturedCLIMode = true
+						// Don't actually run CLI logic, just capture the detection
+						return nil
+					}
+				},
+			}
+
+			// Create context with timeout to prevent hanging
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+			defer cancel()
+
+			// Run the app
+			err := app.RunContext(ctx, tt.args)
+
+			// We expect no error for mode detection
+			require.NoError(t, err)
+
+			// Verify the correct mode was detected
+			if tt.expectMCP {
+				assert.True(t, capturedMCPMode, "Should detect MCP mode")
+				assert.False(t, capturedCLIMode, "Should not detect CLI mode")
+			} else {
+				assert.False(t, capturedMCPMode, "Should not detect MCP mode")
+				assert.True(t, capturedCLIMode, "Should detect CLI mode")
+			}
+		})
+	}
+}
+
+// TestMCPServerConfiguration tests MCP server configuration scenarios
+func TestMCPServerConfiguration(t *testing.T) {
+	tests := []struct {
+		name              string
+		transport         string
+		port              string
+		expectedTransport string
+		expectedPort      string
+	}{
+		{
+			name:              "default configuration",
+			transport:         "",
+			port:              "",
+			expectedTransport: stdioTransport,
+			expectedPort:      defaultMCPPort,
+		},
+		{
+			name:              "custom stdio configuration",
+			transport:         stdioTransport,
+			port:              "custom",
+			expectedTransport: stdioTransport,
+			expectedPort:      "custom",
+		},
+		{
+			name:              "SSE configuration",
+			transport:         sseTransport,
+			port:              "9090",
+			expectedTransport: sseTransport,
+			expectedPort:      "9090",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Save original env values
+			originalTransport, transportExists := os.LookupEnv(mcpTransportEnv)
+			originalPort, portExists := os.LookupEnv(mcpPortEnv)
+
+			defer func() {
+				if transportExists {
+					os.Setenv(mcpTransportEnv, originalTransport)
+				} else {
+					os.Unsetenv(mcpTransportEnv)
+				}
+				if portExists {
+					os.Setenv(mcpPortEnv, originalPort)
+				} else {
+					os.Unsetenv(mcpPortEnv)
+				}
+			}()
+
+			// Set test environment
+			if tt.transport != "" {
+				os.Setenv(mcpTransportEnv, tt.transport)
+			} else {
+				os.Unsetenv(mcpTransportEnv)
+			}
+
+			if tt.port != "" {
+				os.Setenv(mcpPortEnv, tt.port)
+			} else {
+				os.Unsetenv(mcpPortEnv)
+			}
+
+			// Test configuration functions
+			actualTransport := getMCPTransport()
+			actualPort := getMCPPort()
+
+			assert.Equal(t, tt.expectedTransport, actualTransport)
+			assert.Equal(t, tt.expectedPort, actualPort)
+		})
+	}
+}
+
+// TestMainCmd_ErrorHandling tests error scenarios in main command
+func TestMainCmd_ErrorHandling(t *testing.T) {
+	tests := []struct {
+		name          string
+		args          []string
+		setupEnv      func()
+		cleanupEnv    func()
+		expectError   bool
+		errorContains string
+	}{
+		{
+			name: "unsupported MCP transport",
+			args: []string{"spotinfo", "--mcp"},
+			setupEnv: func() {
+				os.Setenv(mcpTransportEnv, "invalid-transport")
+			},
+			cleanupEnv: func() {
+				os.Unsetenv(mcpTransportEnv)
+			},
+			expectError:   true,
+			errorContains: "unsupported transport",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup environment
+			tt.setupEnv()
+			defer tt.cleanupEnv()
+
+			// Create test app that will call mainCmd
+			app := &cli.App{
+				Name: "spotinfo",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "mcp"},
+				},
+				Action: func(ctx *cli.Context) error {
+					// Create a context with short timeout to prevent hanging
+					execCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+					defer cancel()
+
+					if isMCPMode(ctx) {
+						return runMCPServer(ctx, execCtx)
+					}
+					return nil
+				},
+			}
+
+			// Run the app
+			err := app.Run(tt.args)
+
+			if tt.expectError {
+				require.Error(t, err)
+				if tt.errorContains != "" {
+					assert.Contains(t, err.Error(), tt.errorContains)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
