@@ -73,6 +73,7 @@ linters:
             - github.com/urfave/cli/v2
             - github.com/stretchr/testify
             - github.com/mark3labs/mcp-go
+            - github.com/spf13/cast
     testifylint:
       enable-all: true
     tagalign:

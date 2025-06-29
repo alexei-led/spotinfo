@@ -6,21 +6,40 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+
+	"spotinfo/internal/spot"
 )
+
+// Constants for MCP server configuration
+const (
+	defaultMaxInterruptionRateParam = 100
+	defaultLimitParam               = 10
+	maxLimitParam                   = 50
+	totalMCPTools                   = 2
+)
+
+// spotClient interface defined close to consumer for testing (following codebase patterns)
+type spotClient interface {
+	GetSpotSavings(ctx context.Context, regions []string, pattern, instanceOS string,
+		cpu, memory int, maxPrice float64, sortBy spot.SortBy, sortDesc bool) ([]spot.Advice, error)
+}
 
 // Server wraps the MCP server with spotinfo-specific configuration
 type Server struct {
-	mcpServer *server.MCPServer
-	logger    *slog.Logger
+	mcpServer  *server.MCPServer
+	logger     *slog.Logger
+	spotClient spotClient
 }
 
 // Config holds MCP server configuration
 type Config struct {
-	Logger    *slog.Logger
-	Version   string
-	Transport string
-	Port      string
+	Logger     *slog.Logger
+	SpotClient spotClient
+	Version    string
+	Transport  string
+	Port       string
 }
 
 // NewServer creates a new MCP server instance with spotinfo tools
@@ -38,8 +57,9 @@ func NewServer(cfg Config) (*Server, error) {
 	)
 
 	s := &Server{
-		mcpServer: mcpServer,
-		logger:    cfg.Logger,
+		mcpServer:  mcpServer,
+		logger:     cfg.Logger,
+		spotClient: cfg.SpotClient,
 	}
 
 	// Register tools
@@ -52,12 +72,50 @@ func NewServer(cfg Config) (*Server, error) {
 func (s *Server) registerTools() {
 	s.logger.Debug("registering MCP tools")
 
-	// TODO: Register actual tools in Phase 2
-	// - spot_recommend: Find best spot instances based on requirements
-	// - spot_lookup: Get pricing data for specific instances
-	// - spot_regions: List available AWS regions
+	// Register find_spot_instances tool - combines search and lookup functionality
+	findSpotInstancesTool := mcp.NewTool("find_spot_instances",
+		mcp.WithDescription("Search for AWS EC2 Spot Instance options based on requirements. Returns pricing, savings, and interruption data."),
+		mcp.WithArray("regions",
+			mcp.Description("AWS regions to search (e.g., ['us-east-1', 'eu-west-1']). Use ['all'] or omit to search all regions"),
+			mcp.Items(map[string]any{"type": "string"})),
+		mcp.WithString("instance_types",
+			mcp.Description("Instance type pattern - exact type (e.g., 'm5.large') or pattern (e.g., 't3.*', 'm5.*')")),
+		mcp.WithNumber("min_vcpu",
+			mcp.Description("Minimum number of vCPUs required"),
+			mcp.DefaultNumber(0)),
+		mcp.WithNumber("min_memory_gb",
+			mcp.Description("Minimum memory in gigabytes"),
+			mcp.DefaultNumber(0)),
+		mcp.WithNumber("max_price_per_hour",
+			mcp.Description("Maximum spot price per hour in USD"),
+			mcp.DefaultNumber(0)),
+		mcp.WithNumber("max_interruption_rate",
+			mcp.Description("Maximum acceptable interruption rate percentage (0-100)"),
+			mcp.DefaultNumber(defaultMaxInterruptionRateParam)),
+		mcp.WithString("sort_by",
+			mcp.Description("Sort results by: 'price' (cheapest first), 'reliability' (lowest interruption first), 'savings' (highest savings first)"),
+			mcp.DefaultString("reliability")),
+		mcp.WithNumber("limit",
+			mcp.Description("Maximum number of results to return"),
+			mcp.DefaultNumber(defaultLimitParam),
+			mcp.Max(maxLimitParam)),
+	)
 
-	s.logger.Info("MCP tools registered", slog.Int("count", 0))
+	findSpotInstancesHandler := NewFindSpotInstancesTool(s.spotClient, s.logger)
+	s.mcpServer.AddTool(findSpotInstancesTool, findSpotInstancesHandler.Handle)
+
+	// Register list_spot_regions tool
+	listSpotRegionsTool := mcp.NewTool("list_spot_regions",
+		mcp.WithDescription("List all AWS regions where EC2 Spot Instances are available"),
+		mcp.WithBoolean("include_names",
+			mcp.Description("Include human-readable region names (e.g., 'US East (N. Virginia)')"),
+			mcp.DefaultBool(true)),
+	)
+
+	listSpotRegionsHandler := NewListSpotRegionsTool(s.spotClient, s.logger)
+	s.mcpServer.AddTool(listSpotRegionsTool, listSpotRegionsHandler.Handle)
+
+	s.logger.Info("MCP tools registered", slog.Int("count", totalMCPTools))
 }
 
 // ServeStdio starts the MCP server with stdio transport

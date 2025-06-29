@@ -105,10 +105,11 @@ func runMCPServer(_ *cli.Context, execCtx context.Context) error {
 
 	// Create MCP server
 	mcpServer, err := mcp.NewServer(mcp.Config{
-		Version:   Version,
-		Transport: transport,
-		Port:      port,
-		Logger:    log,
+		Version:    Version,
+		Transport:  transport,
+		Port:       port,
+		Logger:     log,
+		SpotClient: spot.New(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create MCP server: %w", err)
