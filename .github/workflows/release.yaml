@@ -45,7 +45,7 @@ jobs:
       run: make update-data update-price
       
     - name: Build release binaries
-      run: make release
+      run: make release VERSION=${{ steps.version.outputs.VERSION }} GITHUB_RELEASE=${{ steps.version.outputs.RELEASE_VERSION }}
       
     - name: Create release
       run: |

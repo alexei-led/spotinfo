@@ -35,6 +35,8 @@ var (
 	GitCommit = "dirty"
 	// GitBranch git branch
 	GitBranch = "master"
+	// GitHubRelease indicates if this is a GitHub release build
+	GitHubRelease = ""
 )
 
 const (
@@ -395,6 +397,10 @@ func main() {
 	}
 	cli.VersionPrinter = func(_ *cli.Context) {
 		fmt.Printf("spotinfo %s\n", Version)
+
+		if GitHubRelease != "" {
+			fmt.Printf("  GitHub release: %s\n", GitHubRelease)
+		}
 
 		if BuildDate != "" && BuildDate != unknownBuildValue {
 			fmt.Printf("  Build date: %s\n", BuildDate)
