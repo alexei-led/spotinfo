@@ -7,9 +7,11 @@ packages:
     interfaces:
       advisorProvider:
       pricingProvider:
+      scoreProvider:
+      awsAPIProvider:
   spotinfo/cmd/spotinfo:
     interfaces:
-      SpotClient:
+      spotClient:
   spotinfo/internal/mcp:
     interfaces:
       spotClient:

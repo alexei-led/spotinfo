@@ -34,8 +34,8 @@ const (
 // Helper functions for mock setup (following spot package patterns)
 
 // setupSuccessfulSpotClient creates a mock client with successful single instance response
-func setupSuccessfulSpotClient(t *testing.T, region, instanceType string, savings int) *MockSpotClient {
-	mockClient := NewMockSpotClient(t)
+func setupSuccessfulSpotClient(t *testing.T, region, instanceType string, savings int) *mockspotClient {
+	mockClient := newMockspotClient(t)
 
 	advice := []spot.Advice{
 		{
@@ -48,22 +48,18 @@ func setupSuccessfulSpotClient(t *testing.T, region, instanceType string, saving
 		},
 	}
 
+	// Mock expects functional options, so we match any options
 	mockClient.EXPECT().GetSpotSavings(
-		mock.Anything,
-		[]string{region},
-		instanceType,
-		"linux",
-		0, 0, float64(0),
-		spot.SortByRange,
-		false,
+		mock.Anything, // context
+		mock.Anything, // variadic options
 	).Return(advice, nil).Once()
 
 	return mockClient
 }
 
 // setupMultipleInstancesSpotClient creates a mock client with multiple instances response
-func setupMultipleInstancesSpotClient(t *testing.T, region string, sortBy spot.SortBy, sortDesc bool) *MockSpotClient {
-	mockClient := NewMockSpotClient(t)
+func setupMultipleInstancesSpotClient(t *testing.T, region string, sortBy spot.SortBy, sortDesc bool) *mockspotClient {
+	mockClient := newMockspotClient(t)
 
 	// Create base data
 	advice1 := spot.Advice{
@@ -107,52 +103,36 @@ func setupMultipleInstancesSpotClient(t *testing.T, region string, sortBy spot.S
 		advices = []spot.Advice{advice1, advice2}
 	}
 
+	// Mock expects functional options, so we match any options
 	mockClient.EXPECT().GetSpotSavings(
-		mock.Anything,
-		[]string{region},
-		"t2.*",
-		"linux",
-		0, 0, float64(0),
-		sortBy,
-		sortDesc,
+		mock.Anything, // context
+		mock.Anything, // variadic options
 	).Return(advices, nil).Once()
 
 	return mockClient
 }
 
 // setupErrorSpotClient creates a mock client that returns an error
-func setupErrorSpotClient(t *testing.T, expectedError error) *MockSpotClient {
-	mockClient := NewMockSpotClient(t)
+func setupErrorSpotClient(t *testing.T, expectedError error) *mockspotClient {
+	mockClient := newMockspotClient(t)
 
+	// Mock expects functional options, so we match any options
 	mockClient.EXPECT().GetSpotSavings(
-		mock.Anything,
-		mock.Anything,
-		mock.Anything,
-		mock.Anything,
-		mock.Anything,
-		mock.Anything,
-		mock.Anything,
-		mock.Anything,
-		mock.Anything,
+		mock.Anything, // context
+		mock.Anything, // variadic options
 	).Return(nil, expectedError).Once()
 
 	return mockClient
 }
 
 // setupFilteredSpotClient creates a mock client with filtered results
-func setupFilteredSpotClient(t *testing.T, cpu, memory int, maxPrice float64, expectedAdvices []spot.Advice) *MockSpotClient {
-	mockClient := NewMockSpotClient(t)
+func setupFilteredSpotClient(t *testing.T, expectedAdvices []spot.Advice) *mockspotClient {
+	mockClient := newMockspotClient(t)
 
+	// Mock expects functional options, so we match any options
 	mockClient.EXPECT().GetSpotSavings(
-		mock.Anything,
-		mock.Anything,
-		mock.Anything,
-		"linux",
-		cpu,
-		memory,
-		maxPrice,
-		spot.SortByRange,
-		false,
+		mock.Anything, // context
+		mock.Anything, // variadic options
 	).Return(expectedAdvices, nil).Once()
 
 	return mockClient
@@ -172,6 +152,10 @@ func createTestApp(action func(*cli.Context) error) *cli.App {
 			&cli.Float64Flag{Name: "price"},
 			&cli.StringFlag{Name: "sort", Value: "interruption"},
 			&cli.StringFlag{Name: "order", Value: "asc"},
+			&cli.BoolFlag{Name: "with-score"},
+			&cli.IntFlag{Name: "min-score"},
+			&cli.BoolFlag{Name: "az"},
+			&cli.IntFlag{Name: "score-timeout"},
 		},
 	}
 }
@@ -448,7 +432,7 @@ func TestExecMainCmd_FilteringOptions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var output bytes.Buffer
 
-			mockClient := setupFilteredSpotClient(t, tt.cpu, tt.memory, tt.price, tt.expectedAdvices)
+			mockClient := setupFilteredSpotClient(t, tt.expectedAdvices)
 
 			testCtx := context.Background()
 
@@ -553,34 +537,30 @@ func TestExecMainCmd_RegionHandling(t *testing.T) {
 	tests := []struct {
 		name    string
 		regions []string
-		setup   func(*testing.T) *MockSpotClient
+		setup   func(*testing.T) *mockspotClient
 	}{
 		{
 			name:    "single region",
 			regions: []string{"us-east-1"},
-			setup: func(t *testing.T) *MockSpotClient {
+			setup: func(t *testing.T) *mockspotClient {
 				return setupSuccessfulSpotClient(t, "us-east-1", "t2.micro", 50)
 			},
 		},
 		{
 			name:    "multiple regions",
 			regions: []string{"us-east-1", "us-west-2"},
-			setup: func(t *testing.T) *MockSpotClient {
-				mockClient := NewMockSpotClient(t)
+			setup: func(t *testing.T) *mockspotClient {
+				mockClient := newMockspotClient(t)
 
 				advices := []spot.Advice{
 					{Region: "us-east-1", Instance: "t2.micro", Savings: 50},
 					{Region: "us-west-2", Instance: "t2.micro", Savings: 45},
 				}
 
+				// Mock expects functional options, so we match any options
 				mockClient.EXPECT().GetSpotSavings(
-					mock.Anything,
-					[]string{"us-east-1", "us-west-2"},
-					"t2.micro",
-					"linux",
-					0, 0, float64(0),
-					spot.SortByRange,
-					false,
+					mock.Anything, // context
+					mock.Anything, // variadic options
 				).Return(advices, nil).Once()
 
 				return mockClient
@@ -1286,6 +1266,129 @@ func TestMCPServerConfiguration(t *testing.T) {
 }
 
 // TestMainCmd_ErrorHandling tests error scenarios in main command
+func TestExecMainCmd_VisualFormattingBehavior(t *testing.T) {
+	tests := []struct {
+		name           string
+		outputFormat   string
+		instanceType   string
+		region         string
+		withScore      bool
+		validateOutput func(t *testing.T, output string)
+	}{
+		{
+			name:         "table format includes visual formatting",
+			outputFormat: "table",
+			instanceType: "t2.micro",
+			region:       "us-east-1",
+			withScore:    false,
+			validateOutput: func(t *testing.T, output string) {
+				assert.Contains(t, output, "INSTANCE INFO", "Table should contain headers")
+				assert.Contains(t, output, "SAVINGS", "Table should contain savings header")
+				assert.Contains(t, output, "t2.micro", "Table should contain instance type")
+				assert.Contains(t, output, "50%", "Table should contain formatted savings percentage")
+			},
+		},
+		{
+			name:         "CSV format excludes visual formatting",
+			outputFormat: "csv",
+			instanceType: "t2.micro",
+			region:       "us-east-1",
+			withScore:    false,
+			validateOutput: func(t *testing.T, output string) {
+				assert.Contains(t, output, "Instance Info,vCPU,Memory GiB", "Should contain CSV headers")
+				assert.Contains(t, output, "t2.micro,1,1,50,<5%", "Should contain data-only CSV format")
+				// CSV should not contain visual formatting elements like emoji
+				assert.NotContains(t, output, "📊", "CSV should not contain emoji")
+				assert.NotContains(t, output, "🟢", "CSV should not contain status emoji")
+			},
+		},
+		{
+			name:         "table format with scores includes visual elements",
+			outputFormat: "table",
+			instanceType: "t2.micro",
+			region:       "us-east-1",
+			withScore:    true,
+			validateOutput: func(t *testing.T, output string) {
+				assert.Contains(t, output, "INSTANCE INFO", "Table should contain headers")
+				assert.Contains(t, output, "SCORE", "Table should contain score header when scores enabled")
+				assert.Contains(t, output, "t2.micro", "Table should contain instance type")
+			},
+		},
+		{
+			name:         "CSV format with scores excludes visual elements",
+			outputFormat: "csv",
+			instanceType: "t2.micro",
+			region:       "us-east-1",
+			withScore:    true,
+			validateOutput: func(t *testing.T, output string) {
+				assert.Contains(t, output, "Instance Info,vCPU,Memory GiB", "Should contain CSV headers")
+				assert.Contains(t, output, "t2.micro,1,1,50,<5%", "Should contain data-only CSV format")
+				// Even with scores, CSV should remain data-only
+				assert.NotContains(t, output, "📊", "CSV should not contain emoji even with scores")
+				assert.NotContains(t, output, "🟢", "CSV should not contain status emoji even with scores")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var output bytes.Buffer
+
+			// Create mock advice with score if needed
+			advice := []spot.Advice{
+				{
+					Region:   tt.region,
+					Instance: tt.instanceType,
+					Savings:  50,
+					Info:     spot.TypeInfo{Cores: 1, RAM: 1.0, EMR: false},
+					Range:    spot.Range{Label: "<5%", Min: 0, Max: 5},
+					Price:    0.0116,
+				},
+			}
+
+			// Add score if requested
+			if tt.withScore {
+				score := 8
+				advice[0].RegionScore = &score
+				advice[0].ZoneScores = map[string]int{
+					"us-east-1a": 8,
+					"us-east-1b": 7,
+				}
+			}
+
+			mockClient := newMockspotClient(t)
+			mockClient.EXPECT().GetSpotSavings(
+				mock.Anything, // context
+				mock.Anything, // variadic options
+			).Return(advice, nil).Once()
+
+			testCtx := context.Background()
+
+			// Create CLI app and run it with test args
+			app := createTestApp(func(ctx *cli.Context) error {
+				return execMainCmd(ctx, testCtx, mockClient, &output)
+			})
+
+			// Build command line arguments
+			args := []string{"spotinfo"}
+			args = append(args, "--type", tt.instanceType)
+			args = append(args, "--os", "linux")
+			args = append(args, "--region", tt.region)
+			args = append(args, "--output", tt.outputFormat)
+			if tt.withScore {
+				args = append(args, "--with-score")
+			}
+
+			// Execute the CLI app
+			err := app.Run(args)
+			require.NoError(t, err, "CLI app should execute without error")
+
+			tt.validateOutput(t, output.String())
+			mockClient.AssertExpectations(t)
+		})
+	}
+}
+
 func TestMainCmd_ErrorHandling(t *testing.T) {
 	tests := []struct {
 		name          string

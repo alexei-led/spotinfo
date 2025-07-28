@@ -1,7 +1,10 @@
 // Package spot provides functionality for retrieving AWS EC2 Spot instance pricing and advice.
 package spot
 
-import "sort"
+import (
+	"sort"
+	"time"
+)
 
 // Range represents an interruption range for spot instances.
 type Range struct {
@@ -19,13 +22,17 @@ type TypeInfo struct {
 
 // Advice represents spot price advice including interruption range and savings.
 type Advice struct { //nolint:govet
-	Region    string             `json:"region"`
-	Instance  string             `json:"instance"`
-	Range     Range              `json:"range"`
-	Savings   int                `json:"savings"`
-	Info      TypeInfo           `json:"info"`
-	Price     float64            `json:"price"`
-	ZonePrice map[string]float64 `json:"zone_price,omitempty"`
+	Region         string             `json:"region"`
+	Instance       string             `json:"instance"`
+	InstanceType   string             `json:"instance_type"`
+	Range          Range              `json:"range"`
+	Savings        int                `json:"savings"`
+	Info           TypeInfo           `json:"info"`
+	Price          float64            `json:"price"`
+	ZonePrice      map[string]float64 `json:"zone_price,omitempty"`
+	RegionScore    *int               `json:"region_score,omitempty"`
+	ZoneScores     map[string]int     `json:"zone_scores,omitempty"`
+	ScoreFetchedAt *time.Time         `json:"score_fetched_at,omitempty"`
 }
 
 // SortBy defines the sorting criteria for advice results.
@@ -42,6 +49,8 @@ const (
 	SortByPrice
 	// SortByRegion sorts by AWS region name.
 	SortByRegion
+	// SortByScore sorts by spot placement score.
+	SortByScore
 )
 
 // ByRange implements sort.Interface based on the Range.Min field.
@@ -79,6 +88,25 @@ func (a ByRegion) Len() int           { return len(a) }
 func (a ByRegion) Less(i, j int) bool { return a[i].Region < a[j].Region }
 func (a ByRegion) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 
+// ByScore implements sort.Interface based on the RegionScore field with nil-safe comparison.
+type ByScore []Advice
+
+func (a ByScore) Len() int { return len(a) }
+func (a ByScore) Less(i, j int) bool {
+	// Handle nil scores safely
+	if a[i].RegionScore == nil && a[j].RegionScore == nil {
+		return false // Both nil, maintain order
+	}
+	if a[i].RegionScore == nil {
+		return false // nil scores go to end
+	}
+	if a[j].RegionScore == nil {
+		return true // non-nil before nil
+	}
+	return *a[i].RegionScore > *a[j].RegionScore // Higher scores first
+}
+func (a ByScore) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
+
 // sortAdvices sorts the advice slice according to the specified criteria.
 func sortAdvices(advices []Advice, sortBy SortBy, sortDesc bool) {
 	var data sort.Interface
@@ -94,6 +122,8 @@ func sortAdvices(advices []Advice, sortBy SortBy, sortDesc bool) {
 		data = ByPrice(advices)
 	case SortByRegion:
 		data = ByRegion(advices)
+	case SortByScore:
+		data = ByScore(advices)
 	default:
 		data = ByRange(advices)
 	}
@@ -103,6 +133,17 @@ func sortAdvices(advices []Advice, sortBy SortBy, sortDesc bool) {
 	}
 
 	sort.Sort(data)
+}
+
+// filterByMinScore filters advices to only include those with a minimum region score.
+func filterByMinScore(advices []Advice, minScore int) []Advice {
+	var filtered []Advice
+	for _, adv := range advices {
+		if adv.RegionScore != nil && *adv.RegionScore >= minScore {
+			filtered = append(filtered, adv)
+		}
+	}
+	return filtered
 }
 
 // interruptionRange represents AWS spot instance interruption frequency ranges.

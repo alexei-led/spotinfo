@@ -39,8 +39,14 @@ func (_m *mockspotClient) EXPECT() *mockspotClient_Expecter {
 }
 
 // GetSpotSavings provides a mock function for the type mockspotClient
-func (_mock *mockspotClient) GetSpotSavings(ctx context.Context, regions []string, pattern string, instanceOS string, cpu int, memory int, maxPrice float64, sortBy spot.SortBy, sortDesc bool) ([]spot.Advice, error) {
-	ret := _mock.Called(ctx, regions, pattern, instanceOS, cpu, memory, maxPrice, sortBy, sortDesc)
+func (_mock *mockspotClient) GetSpotSavings(ctx context.Context, opts ...spot.GetSpotSavingsOption) ([]spot.Advice, error) {
+	var tmpRet mock.Arguments
+	if len(opts) > 0 {
+		tmpRet = _mock.Called(ctx, opts)
+	} else {
+		tmpRet = _mock.Called(ctx)
+	}
+	ret := tmpRet
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetSpotSavings")
@@ -48,18 +54,18 @@ func (_mock *mockspotClient) GetSpotSavings(ctx context.Context, regions []strin
 
 	var r0 []spot.Advice
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, []string, string, string, int, int, float64, spot.SortBy, bool) ([]spot.Advice, error)); ok {
-		return returnFunc(ctx, regions, pattern, instanceOS, cpu, memory, maxPrice, sortBy, sortDesc)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, ...spot.GetSpotSavingsOption) ([]spot.Advice, error)); ok {
+		return returnFunc(ctx, opts...)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, []string, string, string, int, int, float64, spot.SortBy, bool) []spot.Advice); ok {
-		r0 = returnFunc(ctx, regions, pattern, instanceOS, cpu, memory, maxPrice, sortBy, sortDesc)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, ...spot.GetSpotSavingsOption) []spot.Advice); ok {
+		r0 = returnFunc(ctx, opts...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]spot.Advice)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, []string, string, string, int, int, float64, spot.SortBy, bool) error); ok {
-		r1 = returnFunc(ctx, regions, pattern, instanceOS, cpu, memory, maxPrice, sortBy, sortDesc)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, ...spot.GetSpotSavingsOption) error); ok {
+		r1 = returnFunc(ctx, opts...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -73,66 +79,27 @@ type mockspotClient_GetSpotSavings_Call struct {
 
 // GetSpotSavings is a helper method to define mock.On call
 //   - ctx context.Context
-//   - regions []string
-//   - pattern string
-//   - instanceOS string
-//   - cpu int
-//   - memory int
-//   - maxPrice float64
-//   - sortBy spot.SortBy
-//   - sortDesc bool
-func (_e *mockspotClient_Expecter) GetSpotSavings(ctx interface{}, regions interface{}, pattern interface{}, instanceOS interface{}, cpu interface{}, memory interface{}, maxPrice interface{}, sortBy interface{}, sortDesc interface{}) *mockspotClient_GetSpotSavings_Call {
-	return &mockspotClient_GetSpotSavings_Call{Call: _e.mock.On("GetSpotSavings", ctx, regions, pattern, instanceOS, cpu, memory, maxPrice, sortBy, sortDesc)}
+//   - opts ...spot.GetSpotSavingsOption
+func (_e *mockspotClient_Expecter) GetSpotSavings(ctx interface{}, opts ...interface{}) *mockspotClient_GetSpotSavings_Call {
+	return &mockspotClient_GetSpotSavings_Call{Call: _e.mock.On("GetSpotSavings",
+		append([]interface{}{ctx}, opts...)...)}
 }
 
-func (_c *mockspotClient_GetSpotSavings_Call) Run(run func(ctx context.Context, regions []string, pattern string, instanceOS string, cpu int, memory int, maxPrice float64, sortBy spot.SortBy, sortDesc bool)) *mockspotClient_GetSpotSavings_Call {
+func (_c *mockspotClient_GetSpotSavings_Call) Run(run func(ctx context.Context, opts ...spot.GetSpotSavingsOption)) *mockspotClient_GetSpotSavings_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 []string
-		if args[1] != nil {
-			arg1 = args[1].([]string)
+		var arg1 []spot.GetSpotSavingsOption
+		var variadicArgs []spot.GetSpotSavingsOption
+		if len(args) > 1 {
+			variadicArgs = args[1].([]spot.GetSpotSavingsOption)
 		}
-		var arg2 string
-		if args[2] != nil {
-			arg2 = args[2].(string)
-		}
-		var arg3 string
-		if args[3] != nil {
-			arg3 = args[3].(string)
-		}
-		var arg4 int
-		if args[4] != nil {
-			arg4 = args[4].(int)
-		}
-		var arg5 int
-		if args[5] != nil {
-			arg5 = args[5].(int)
-		}
-		var arg6 float64
-		if args[6] != nil {
-			arg6 = args[6].(float64)
-		}
-		var arg7 spot.SortBy
-		if args[7] != nil {
-			arg7 = args[7].(spot.SortBy)
-		}
-		var arg8 bool
-		if args[8] != nil {
-			arg8 = args[8].(bool)
-		}
+		arg1 = variadicArgs
 		run(
 			arg0,
-			arg1,
-			arg2,
-			arg3,
-			arg4,
-			arg5,
-			arg6,
-			arg7,
-			arg8,
+			arg1...,
 		)
 	})
 	return _c
@@ -143,7 +110,7 @@ func (_c *mockspotClient_GetSpotSavings_Call) Return(advices []spot.Advice, err 
 	return _c
 }
 
-func (_c *mockspotClient_GetSpotSavings_Call) RunAndReturn(run func(ctx context.Context, regions []string, pattern string, instanceOS string, cpu int, memory int, maxPrice float64, sortBy spot.SortBy, sortDesc bool) ([]spot.Advice, error)) *mockspotClient_GetSpotSavings_Call {
+func (_c *mockspotClient_GetSpotSavings_Call) RunAndReturn(run func(ctx context.Context, opts ...spot.GetSpotSavingsOption) ([]spot.Advice, error)) *mockspotClient_GetSpotSavings_Call {
 	_c.Call.Return(run)
 	return _c
 }

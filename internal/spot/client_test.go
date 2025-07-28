@@ -66,12 +66,13 @@ func TestClient_GetSpotSavings(t *testing.T) { //nolint:maintidx // Complex test
 			setupMocks: setupSingleInstanceTest("us-east-1", "t2.micro", "linux"),
 			expectedResult: []Advice{
 				{
-					Region:   "us-east-1",
-					Instance: "t2.micro",
-					Range:    Range{Label: "<5%", Min: 0, Max: 5},
-					Savings:  50,
-					Info:     TypeInfo{Cores: 1, RAM: 1.0, EMR: false},
-					Price:    0.0116,
+					Region:       "us-east-1",
+					Instance:     "t2.micro",
+					InstanceType: "t2.micro",
+					Range:        Range{Label: "<5%", Min: 0, Max: 5},
+					Savings:      50,
+					Info:         TypeInfo{Cores: 1, RAM: 1.0, EMR: false},
+					Price:        0.0116,
 				},
 			},
 			assertMocks: assertStandardMocks,
@@ -106,20 +107,22 @@ func TestClient_GetSpotSavings(t *testing.T) { //nolint:maintidx // Complex test
 			},
 			expectedResult: []Advice{
 				{
-					Region:   "us-east-1",
-					Instance: "t2.micro",
-					Range:    Range{Label: "<5%", Min: 0, Max: 5},
-					Savings:  50,
-					Info:     TypeInfo{Cores: 1, RAM: 1.0, EMR: false},
-					Price:    0.0116,
+					Region:       "us-east-1",
+					Instance:     "t2.micro",
+					InstanceType: "t2.micro",
+					Range:        Range{Label: "<5%", Min: 0, Max: 5},
+					Savings:      50,
+					Info:         TypeInfo{Cores: 1, RAM: 1.0, EMR: false},
+					Price:        0.0116,
 				},
 				{
-					Region:   "us-west-2",
-					Instance: "t2.micro",
-					Range:    Range{Label: "5-10%", Min: 5, Max: 10},
-					Savings:  60,
-					Info:     TypeInfo{Cores: 1, RAM: 1.0, EMR: false},
-					Price:    0.0117,
+					Region:       "us-west-2",
+					Instance:     "t2.micro",
+					InstanceType: "t2.micro",
+					Range:        Range{Label: "5-10%", Min: 5, Max: 10},
+					Savings:      60,
+					Info:         TypeInfo{Cores: 1, RAM: 1.0, EMR: false},
+					Price:        0.0117,
 				},
 			},
 			assertMocks: assertStandardMocks,
@@ -148,12 +151,13 @@ func TestClient_GetSpotSavings(t *testing.T) { //nolint:maintidx // Complex test
 			},
 			expectedResult: []Advice{
 				{
-					Region:   "us-east-1",
-					Instance: "t2.medium",
-					Range:    Range{Label: "5-10%", Min: 5, Max: 10},
-					Savings:  35,
-					Info:     TypeInfo{Cores: 2, RAM: 4.0},
-					Price:    0.0464,
+					Region:       "us-east-1",
+					Instance:     "t2.medium",
+					InstanceType: "t2.medium",
+					Range:        Range{Label: "5-10%", Min: 5, Max: 10},
+					Savings:      35,
+					Info:         TypeInfo{Cores: 2, RAM: 4.0},
+					Price:        0.0464,
 				},
 			},
 			assertMocks: assertStandardMocks,
@@ -180,12 +184,13 @@ func TestClient_GetSpotSavings(t *testing.T) { //nolint:maintidx // Complex test
 			},
 			expectedResult: []Advice{
 				{
-					Region:   "us-east-1",
-					Instance: "t2.medium",
-					Range:    Range{Label: "5-10%", Min: 5, Max: 10},
-					Savings:  35,
-					Info:     TypeInfo{Cores: 2, RAM: 4.0},
-					Price:    0.0464,
+					Region:       "us-east-1",
+					Instance:     "t2.medium",
+					InstanceType: "t2.medium",
+					Range:        Range{Label: "5-10%", Min: 5, Max: 10},
+					Savings:      35,
+					Info:         TypeInfo{Cores: 2, RAM: 4.0},
+					Price:        0.0464,
 				},
 			},
 			assertMocks: assertStandardMocks,
@@ -213,12 +218,13 @@ func TestClient_GetSpotSavings(t *testing.T) { //nolint:maintidx // Complex test
 			},
 			expectedResult: []Advice{
 				{
-					Region:   "us-east-1",
-					Instance: "t2.micro",
-					Range:    Range{Label: "<5%", Min: 0, Max: 5},
-					Savings:  50,
-					Info:     TypeInfo{Cores: 1, RAM: 1.0},
-					Price:    0.0116,
+					Region:       "us-east-1",
+					Instance:     "t2.micro",
+					InstanceType: "t2.micro",
+					Range:        Range{Label: "<5%", Min: 0, Max: 5},
+					Savings:      50,
+					Info:         TypeInfo{Cores: 1, RAM: 1.0},
+					Price:        0.0116,
 				},
 			},
 			assertMocks: assertStandardMocks,
@@ -247,20 +253,22 @@ func TestClient_GetSpotSavings(t *testing.T) { //nolint:maintidx // Complex test
 			},
 			expectedResult: []Advice{
 				{
-					Region:   "us-east-1",
-					Instance: "t2.micro",
-					Range:    Range{Label: "<5%", Min: 0, Max: 5},
-					Savings:  50,
-					Info:     TypeInfo{Cores: 1, RAM: 1.0},
-					Price:    0.0116,
+					Region:       "us-east-1",
+					Instance:     "t2.micro",
+					InstanceType: "t2.micro",
+					Range:        Range{Label: "<5%", Min: 0, Max: 5},
+					Savings:      50,
+					Info:         TypeInfo{Cores: 1, RAM: 1.0},
+					Price:        0.0116,
 				},
 				{
-					Region:   "us-east-1",
-					Instance: "t2.small",
-					Range:    Range{Label: "<5%", Min: 0, Max: 5},
-					Savings:  40,
-					Info:     TypeInfo{Cores: 1, RAM: 2.0},
-					Price:    0.0232,
+					Region:       "us-east-1",
+					Instance:     "t2.small",
+					InstanceType: "t2.small",
+					Range:        Range{Label: "<5%", Min: 0, Max: 5},
+					Savings:      40,
+					Info:         TypeInfo{Cores: 1, RAM: 2.0},
+					Price:        0.0232,
 				},
 			},
 			assertMocks: assertStandardMocks,
@@ -310,12 +318,13 @@ func TestClient_GetSpotSavings(t *testing.T) { //nolint:maintidx // Complex test
 			},
 			expectedResult: []Advice{
 				{
-					Region:   "us-east-1",
-					Instance: "t2.micro",
-					Range:    Range{Label: "<5%", Min: 0, Max: 5},
-					Savings:  50,
-					Info:     TypeInfo{Cores: 1, RAM: 1.0},
-					Price:    0.0116,
+					Region:       "us-east-1",
+					Instance:     "t2.micro",
+					InstanceType: "t2.micro",
+					Range:        Range{Label: "<5%", Min: 0, Max: 5},
+					Savings:      50,
+					Info:         TypeInfo{Cores: 1, RAM: 1.0},
+					Price:        0.0116,
 				},
 			},
 			assertMocks: assertStandardMocks,
@@ -339,17 +348,16 @@ func TestClient_GetSpotSavings(t *testing.T) { //nolint:maintidx // Complex test
 			client := NewWithProviders(mocks.advisor, mocks.pricing)
 
 			// Execute the method under test
-			result, err := client.GetSpotSavings(
-				context.Background(),
-				tt.regions,
-				tt.pattern,
-				tt.instanceOS,
-				tt.cpu,
-				tt.memory,
-				tt.maxPrice,
-				tt.sortBy,
-				tt.sortDesc,
-			)
+			opts := []GetSpotSavingsOption{
+				WithRegions(tt.regions),
+				WithPattern(tt.pattern),
+				WithOS(tt.instanceOS),
+				WithCPU(tt.cpu),
+				WithMemory(tt.memory),
+				WithMaxPrice(tt.maxPrice),
+				WithSort(tt.sortBy, tt.sortDesc),
+			}
+			result, err := client.GetSpotSavings(context.Background(), opts...)
 
 			// Assert results
 			if tt.expectedError != "" {
@@ -472,15 +480,16 @@ func TestClient_GetSpotSavings_SortingBehavior(t *testing.T) {
 
 			// Create client and execute
 			client := NewWithProviders(mocks.advisor, mocks.pricing)
-			result, err := client.GetSpotSavings(
-				context.Background(),
-				[]string{"us-east-1"},
-				"",
-				"linux",
-				0, 0, 0,
-				tt.sortBy,
-				tt.sortDesc,
-			)
+			opts := []GetSpotSavingsOption{
+				WithRegions([]string{"us-east-1"}),
+				WithPattern(""),
+				WithOS("linux"),
+				WithCPU(0),
+				WithMemory(0),
+				WithMaxPrice(0),
+				WithSort(tt.sortBy, tt.sortDesc),
+			}
+			result, err := client.GetSpotSavings(context.Background(), opts...)
 
 			// Assert no error
 			require.NoError(t, err)
@@ -504,15 +513,16 @@ func TestNew_IntegrationWithEmbeddedData(t *testing.T) {
 	defer cancel()
 
 	// This should fallback to embedded data and still work
-	result, err := client.GetSpotSavings(
-		ctx,
-		[]string{"us-east-1"},
-		"t2.micro",
-		"linux",
-		0, 0, 0,
-		SortByInstance,
-		false,
-	)
+	opts := []GetSpotSavingsOption{
+		WithRegions([]string{"us-east-1"}),
+		WithPattern("t2.micro"),
+		WithOS("linux"),
+		WithCPU(0),
+		WithMemory(0),
+		WithMaxPrice(0),
+		WithSort(SortByInstance, false),
+	}
+	result, err := client.GetSpotSavings(ctx, opts...)
 
 	// Should get results from embedded data
 	require.NoError(t, err)
@@ -549,15 +559,16 @@ func TestNewWithOptions_EmbeddedDataMode(t *testing.T) {
 			client := NewWithOptions(100*time.Millisecond, tt.useEmbedded)
 
 			// Test that both configurations can load data
-			result, err := client.GetSpotSavings(
-				context.Background(),
-				[]string{"us-east-1"},
-				"t2.micro",
-				"linux",
-				0, 0, 0,
-				SortByInstance,
-				false,
-			)
+			opts := []GetSpotSavingsOption{
+				WithRegions([]string{"us-east-1"}),
+				WithPattern("t2.micro"),
+				WithOS("linux"),
+				WithCPU(0),
+				WithMemory(0),
+				WithMaxPrice(0),
+				WithSort(SortByInstance, false),
+			}
+			result, err := client.GetSpotSavings(context.Background(), opts...)
 
 			require.NoError(t, err)
 			assert.NotEmpty(t, result)

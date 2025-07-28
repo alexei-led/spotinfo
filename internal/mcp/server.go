@@ -18,12 +18,13 @@ const (
 	defaultLimitParam               = 10
 	maxLimitParam                   = 50
 	totalMCPTools                   = 2
+	maxScoreValue                   = 10
+	maxScoreTimeoutSeconds          = 300
 )
 
 // spotClient interface defined close to consumer for testing (following codebase patterns)
 type spotClient interface {
-	GetSpotSavings(ctx context.Context, regions []string, pattern, instanceOS string,
-		cpu, memory int, maxPrice float64, sortBy spot.SortBy, sortDesc bool) ([]spot.Advice, error)
+	GetSpotSavings(ctx context.Context, opts ...spot.GetSpotSavingsOption) ([]spot.Advice, error)
 }
 
 // Server wraps the MCP server with spotinfo-specific configuration
@@ -93,12 +94,28 @@ func (s *Server) registerTools() {
 			mcp.Description("Maximum acceptable interruption rate percentage (0-100)"),
 			mcp.DefaultNumber(defaultMaxInterruptionRateParam)),
 		mcp.WithString("sort_by",
-			mcp.Description("Sort results by: 'price' (cheapest first), 'reliability' (lowest interruption first), 'savings' (highest savings first)"),
+			mcp.Description("Sort results by: 'price' (cheapest first), 'reliability' (lowest interruption first), 'savings' (highest savings first), 'score' (highest score first)"),
 			mcp.DefaultString("reliability")),
 		mcp.WithNumber("limit",
 			mcp.Description("Maximum number of results to return"),
 			mcp.DefaultNumber(defaultLimitParam),
 			mcp.Max(maxLimitParam)),
+		mcp.WithBoolean("with_score",
+			mcp.Description("Include AWS spot placement scores (experimental)"),
+			mcp.DefaultBool(false)),
+		mcp.WithNumber("min_score",
+			mcp.Description("Filter: minimum spot placement score (1-10)"),
+			mcp.DefaultNumber(0),
+			mcp.Min(0),
+			mcp.Max(maxScoreValue)),
+		mcp.WithBoolean("az",
+			mcp.Description("Request AZ-level scores instead of region-level (use with --with-score)"),
+			mcp.DefaultBool(false)),
+		mcp.WithNumber("score_timeout",
+			mcp.Description("Timeout for score enrichment in seconds"),
+			mcp.DefaultNumber(spot.DefaultScoreTimeoutSeconds),
+			mcp.Min(1),
+			mcp.Max(maxScoreTimeoutSeconds)),
 	)
 
 	findSpotInstancesHandler := NewFindSpotInstancesTool(s.spotClient, s.logger)
