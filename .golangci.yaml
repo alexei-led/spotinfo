@@ -6,14 +6,11 @@ linters:
       enable:
         - shadow
         - fieldalignment
-    revive:
-      min-confidence: 0
     gocyclo:
       min-complexity: 15
     cyclop:
       max-complexity: 15
       package-average: 10.0
-      skip-tests: true
     dupl:
       threshold: 100
     goconst:
@@ -67,13 +64,20 @@ linters:
             - $all
           allow:
             - $gostd
-            - spotinfo/pkg/spot
+            - spotinfo/internal/spot
             - spotinfo/internal
+            - spotinfo/internal/mcp
             - github.com/jedib0t/go-pretty/v6
             - github.com/urfave/cli/v2
             - github.com/stretchr/testify
             - github.com/mark3labs/mcp-go
             - github.com/spf13/cast
+            - github.com/bluele/gcache
+            - golang.org/x/time
+            - github.com/aws/aws-sdk-go-v2
+            - github.com/aws/smithy-go
+            - github.com/jedib0t/go-pretty/v6/table
+            - github.com/jedib0t/go-pretty/v6/text
     testifylint:
       enable-all: true
     tagalign:
@@ -85,53 +89,53 @@ linters:
   default: none
   enable:
     # Essential bug-finding linters
-    - errcheck           # Check for unchecked errors
-    - gosec             # Security issues
-    - govet             # Go vet built-in checks
-    - ineffassign       # Ineffective assignments
-    - staticcheck       # Comprehensive static analysis
-    - unused            # Unused code
-    - errorlint         # Error wrapping issues
-    
+    - errcheck # Check for unchecked errors
+    - gosec # Security issues
+    - govet # Go vet built-in checks
+    - ineffassign # Ineffective assignments
+    - staticcheck # Comprehensive static analysis
+    - unused # Unused code
+    - errorlint # Error wrapping issues
+
     # Code quality and best practices
-    - bodyclose         # HTTP response body close check
-    - contextcheck      # Context usage patterns
-    - copyloopvar       # Loop variable copying issues
-    - cyclop            # Cyclomatic complexity
-    - depguard          # Import restrictions
-    - dupl              # Code duplication
-    - exhaustive        # Switch statement exhaustiveness
-    - funlen            # Function length
-    - goconst           # Repeated strings that could be constants
-    - gocritic          # Comprehensive go code critic
-    - gocyclo           # Cyclomatic complexity
-    - makezero          # Slice initialization
-    - nakedret          # Naked returns
-    - nestif            # Nested if statements
-    - nilerr            # Nil error returns
-    - nilnil            # Nil error and value returns
-    - noctx             # HTTP without context
-    - predeclared       # Predeclared identifier shadowing
-    - rowserrcheck      # SQL rows.Err() check
-    - sqlclosecheck     # SQL close checks
-    - unconvert         # Unnecessary conversions
-    - unparam           # Unused parameters
-    - wastedassign      # Wasted assignments
-    
+    - bodyclose # HTTP response body close check
+    - contextcheck # Context usage patterns
+    - copyloopvar # Loop variable copying issues
+    - cyclop # Cyclomatic complexity
+    - depguard # Import restrictions
+    - dupl # Code duplication
+    - exhaustive # Switch statement exhaustiveness
+    - funlen # Function length
+    - goconst # Repeated strings that could be constants
+    - gocritic # Comprehensive go code critic
+    - gocyclo # Cyclomatic complexity
+    - makezero # Slice initialization
+    - nakedret # Naked returns
+    - nestif # Nested if statements
+    - nilerr # Nil error returns
+    - nilnil # Nil error and value returns
+    # - noctx             # HTTP without context - disabled: too verbose for initialization and error handling code
+    - predeclared # Predeclared identifier shadowing
+    - rowserrcheck # SQL rows.Err() check
+    - sqlclosecheck # SQL close checks
+    - unconvert # Unnecessary conversions
+    - unparam # Unused parameters
+    - wastedassign # Wasted assignments
+
     # Performance-related
-    - prealloc          # Slice preallocation
-    
+    - prealloc # Slice preallocation
+
     # Additional best practices (keep important ones)
-    - durationcheck     # Duration multiplication
-    - errname           # Error naming conventions
-    - interfacebloat    # Interface size
-    - maintidx          # Maintainability index
-    - mirror            # Wrong mirror patterns
-    - mnd               # Magic numbers
-    - nilnesserr        # Nil check patterns
+    - durationcheck # Duration multiplication
+    - errname # Error naming conventions
+    - interfacebloat # Interface size
+    - maintidx # Maintainability index
+    - mirror # Wrong mirror patterns
+    - mnd # Magic numbers
+    - nilnesserr # Nil check patterns
     - nosprintfhostport # Sprintf host:port misuse
-    - reassign          # Package variable reassignment
-    - forcetypeassert   # Type assertion without check
+    - reassign # Package variable reassignment
+    - forcetypeassert # Type assertion without check
 
   # Explicitly disabled linters with reasons
   # - gochecknoglobals  # Too restrictive for CLI apps that need global flags/config
@@ -196,4 +200,6 @@ formatters:
         - default
         - prefix(spotinfo)
     goimports:
-      local-prefixes: spotinfo
+      local-prefixes:
+        - spotinfo
+
