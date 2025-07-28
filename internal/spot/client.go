@@ -12,12 +12,114 @@ import (
 const (
 	// DefaultTimeoutSeconds is the default timeout value in seconds.
 	DefaultTimeoutSeconds = 5
+	// allRegionsKeyword represents the special "all" regions value.
+	allRegionsKeyword = "all"
 )
+
+// getSpotSavingsConfig holds configuration options for GetSpotSavingsWithOptions.
+//
+//nolint:govet // fieldalignment: small config struct, 8-byte optimization not worth the code churn
+type getSpotSavingsConfig struct {
+	regions                []string
+	pattern                string
+	instanceOS             string
+	scoreTimeout           time.Duration
+	maxPrice               float64
+	cpu                    int
+	memory                 int
+	minScore               int
+	sortBy                 SortBy
+	sortDesc               bool
+	withScores             bool
+	singleAvailabilityZone bool
+}
+
+// GetSpotSavingsOption is a functional option for GetSpotSavingsWithOptions.
+type GetSpotSavingsOption func(*getSpotSavingsConfig)
+
+// WithRegions sets the regions to query.
+func WithRegions(regions []string) GetSpotSavingsOption {
+	return func(cfg *getSpotSavingsConfig) {
+		cfg.regions = regions
+	}
+}
+
+// WithPattern sets the instance type pattern filter.
+func WithPattern(pattern string) GetSpotSavingsOption {
+	return func(cfg *getSpotSavingsConfig) {
+		cfg.pattern = pattern
+	}
+}
+
+// WithOS sets the operating system filter.
+func WithOS(instanceOS string) GetSpotSavingsOption {
+	return func(cfg *getSpotSavingsConfig) {
+		cfg.instanceOS = instanceOS
+	}
+}
+
+// WithCPU sets the minimum CPU requirement.
+func WithCPU(cpu int) GetSpotSavingsOption {
+	return func(cfg *getSpotSavingsConfig) {
+		cfg.cpu = cpu
+	}
+}
+
+// WithMemory sets the minimum memory requirement.
+func WithMemory(memory int) GetSpotSavingsOption {
+	return func(cfg *getSpotSavingsConfig) {
+		cfg.memory = memory
+	}
+}
+
+// WithMaxPrice sets the maximum price filter.
+func WithMaxPrice(maxPrice float64) GetSpotSavingsOption {
+	return func(cfg *getSpotSavingsConfig) {
+		cfg.maxPrice = maxPrice
+	}
+}
+
+// WithSort sets the sorting criteria.
+func WithSort(sortBy SortBy, sortDesc bool) GetSpotSavingsOption {
+	return func(cfg *getSpotSavingsConfig) {
+		cfg.sortBy = sortBy
+		cfg.sortDesc = sortDesc
+	}
+}
+
+// WithScores enables spot placement score enrichment.
+func WithScores(enable bool) GetSpotSavingsOption {
+	return func(cfg *getSpotSavingsConfig) {
+		cfg.withScores = enable
+	}
+}
+
+// WithSingleAvailabilityZone enables AZ-level scoring instead of region-level.
+func WithSingleAvailabilityZone(enable bool) GetSpotSavingsOption {
+	return func(cfg *getSpotSavingsConfig) {
+		cfg.singleAvailabilityZone = enable
+	}
+}
+
+// WithMinScore sets the minimum score filter.
+func WithMinScore(minScore int) GetSpotSavingsOption {
+	return func(cfg *getSpotSavingsConfig) {
+		cfg.minScore = minScore
+	}
+}
+
+// WithScoreTimeout sets the timeout for score enrichment operations.
+func WithScoreTimeout(timeout time.Duration) GetSpotSavingsOption {
+	return func(cfg *getSpotSavingsConfig) {
+		cfg.scoreTimeout = timeout
+	}
+}
 
 // Client provides access to AWS EC2 Spot instance pricing and advice.
 type Client struct {
 	advisorProvider advisorProvider
 	pricingProvider pricingProvider
+	scoreProvider   scoreProvider
 	timeout         time.Duration
 	useEmbedded     bool
 }
@@ -35,6 +137,11 @@ type pricingProvider interface {
 	getSpotPrice(instance, region, os string) (float64, error)
 }
 
+// scoreProvider provides access to spot placement scores (private interface close to consumer).
+type scoreProvider interface {
+	enrichWithScores(ctx context.Context, advices []Advice, singleAZ bool, timeout time.Duration) error
+}
+
 // New creates a new spot client with default options.
 func New() *Client {
 	return NewWithOptions(DefaultTimeoutSeconds*time.Second, false)
@@ -45,6 +152,7 @@ func NewWithOptions(timeout time.Duration, useEmbedded bool) *Client {
 	return &Client{
 		advisorProvider: newDefaultAdvisorProvider(timeout),
 		pricingProvider: newDefaultPricingProvider(timeout, useEmbedded),
+		scoreProvider:   newScoreCache(),
 		timeout:         timeout,
 		useEmbedded:     useEmbedded,
 	}
@@ -60,12 +168,25 @@ func NewWithProviders(advisor advisorProvider, pricing pricingProvider) *Client 
 	}
 }
 
-// GetSpotSavings retrieves spot instance advice based on the given criteria.
+// GetSpotSavings retrieves spot instance advice using functional options.
 //
 //nolint:gocyclo,cyclop // Complex business logic that benefits from being in a single function
-func (c *Client) GetSpotSavings(ctx context.Context, regions []string, pattern, instanceOS string, cpu, memory int, maxPrice float64, sortBy SortBy, sortDesc bool) ([]Advice, error) {
+func (c *Client) GetSpotSavings(ctx context.Context, opts ...GetSpotSavingsOption) ([]Advice, error) {
+	// Default configuration
+	cfg := &getSpotSavingsConfig{
+		instanceOS:   "linux",
+		sortBy:       SortByRange,
+		scoreTimeout: defaultScoreTimeout,
+	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	// Handle "all" regions special case
-	if len(regions) == 1 && regions[0] == "all" {
+	regions := cfg.regions
+	if len(regions) == 1 && regions[0] == allRegionsKeyword {
 		regions = c.advisorProvider.getRegions()
 	}
 
@@ -73,7 +194,7 @@ func (c *Client) GetSpotSavings(ctx context.Context, regions []string, pattern, 
 
 	for _, region := range regions {
 		// Get advice for this region and OS
-		advices, err := c.advisorProvider.getRegionAdvice(region, instanceOS)
+		advices, err := c.advisorProvider.getRegionAdvice(region, cfg.instanceOS)
 		if err != nil {
 			return nil, err
 		}
@@ -81,8 +202,8 @@ func (c *Client) GetSpotSavings(ctx context.Context, regions []string, pattern, 
 		// Process each instance type
 		for instance, adv := range advices {
 			// Match instance type pattern
-			if pattern != "" {
-				matched, err := regexp.MatchString(pattern, instance)
+			if cfg.pattern != "" {
+				matched, err := regexp.MatchString(cfg.pattern, instance)
 				if err != nil {
 					return nil, fmt.Errorf("failed to match instance type: %w", err)
 				}
@@ -96,15 +217,15 @@ func (c *Client) GetSpotSavings(ctx context.Context, regions []string, pattern, 
 			if err != nil {
 				continue // Skip instances we don't have type info for
 			}
-			if (cpu != 0 && info.Cores < cpu) || (memory != 0 && info.RAM < float32(memory)) {
+			if (cfg.cpu != 0 && info.Cores < cfg.cpu) || (cfg.memory != 0 && info.RAM < float32(cfg.memory)) {
 				continue
 			}
 
 			// Get spot price
-			spotPrice, err := c.pricingProvider.getSpotPrice(instance, region, instanceOS)
+			spotPrice, err := c.pricingProvider.getSpotPrice(instance, region, cfg.instanceOS)
 			if err == nil {
 				// Filter by max price
-				if maxPrice != 0 && spotPrice > maxPrice {
+				if cfg.maxPrice != 0 && spotPrice > cfg.maxPrice {
 					continue
 				}
 			}
@@ -116,18 +237,32 @@ func (c *Client) GetSpotSavings(ctx context.Context, regions []string, pattern, 
 			}
 
 			result = append(result, Advice{
-				Region:   region,
-				Instance: instance,
-				Range:    rng,
-				Savings:  adv.Savings,
-				Info:     info,
-				Price:    spotPrice,
+				Region:       region,
+				Instance:     instance,
+				InstanceType: instance, // Set InstanceType field
+				Range:        rng,
+				Savings:      adv.Savings,
+				Info:         info,
+				Price:        spotPrice,
 			})
 		}
 	}
 
 	// Sort results
-	sortAdvices(result, sortBy, sortDesc)
+	sortAdvices(result, cfg.sortBy, cfg.sortDesc)
+
+	// Add score enrichment if requested
+	if cfg.withScores {
+		err := c.enrichWithScores(ctx, result, cfg.singleAvailabilityZone, cfg.scoreTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("score enrichment failed: %w", err)
+		}
+	}
+
+	// Filter by minimum score if specified
+	if cfg.minScore > 0 {
+		result = filterByMinScore(result, cfg.minScore)
+	}
 
 	return result, nil
 }
@@ -252,9 +387,10 @@ func (p *defaultPricingProvider) getSpotPrice(instance, region, os string) (floa
 	return p.data.getSpotInstancePrice(instance, region, os)
 }
 
-// GetSpotSavings provides backward compatibility with the old public function.
-// Deprecated: Use Client.GetSpotSavings instead.
-func GetSpotSavings(regions []string, pattern, instanceOS string, cpu, memory int, maxPrice float64, sortBy int, sortDesc bool) ([]Advice, error) {
-	client := New()
-	return client.GetSpotSavings(context.Background(), regions, pattern, instanceOS, cpu, memory, maxPrice, SortBy(sortBy), sortDesc)
+// enrichWithScores delegates score enrichment to the scoreProvider.
+func (c *Client) enrichWithScores(ctx context.Context, advices []Advice, singleAZ bool, timeout time.Duration) error {
+	if c.scoreProvider == nil {
+		c.scoreProvider = newScoreCache()
+	}
+	return c.scoreProvider.enrichWithScores(ctx, advices, singleAZ, timeout)
 }
