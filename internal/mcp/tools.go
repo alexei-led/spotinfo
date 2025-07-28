@@ -45,7 +45,33 @@ func (t *FindSpotInstancesTool) Handle(ctx context.Context, req mcp.CallToolRequ
 	params := parseParameters(req.Params.Arguments)
 	spotSortBy, sortDesc := convertSortParams(params.sortBy)
 
-	advices, err := t.client.GetSpotSavings(ctx, params.regions, params.instanceTypes, "linux", params.minVCPU, params.minMemoryGB, params.maxPrice, spotSortBy, sortDesc)
+	// Build options from parameters
+	opts := []spot.GetSpotSavingsOption{
+		spot.WithRegions(params.regions),
+		spot.WithPattern(params.instanceTypes),
+		spot.WithOS("linux"),
+		spot.WithCPU(params.minVCPU),
+		spot.WithMemory(params.minMemoryGB),
+		spot.WithMaxPrice(params.maxPrice),
+		spot.WithSort(spotSortBy, sortDesc),
+	}
+
+	// Add score-related options if requested
+	if params.withScore {
+		scoreOpts := []spot.GetSpotSavingsOption{
+			spot.WithScores(true),
+			spot.WithSingleAvailabilityZone(params.az),
+		}
+		if params.scoreTimeout > 0 {
+			scoreOpts = append(scoreOpts, spot.WithScoreTimeout(time.Duration(params.scoreTimeout)*time.Second))
+		}
+		opts = append(opts, scoreOpts...)
+	}
+	if params.minScore > 0 {
+		opts = append(opts, spot.WithMinScore(params.minScore))
+	}
+
+	advices, err := t.client.GetSpotSavings(ctx, opts...)
 	if err != nil {
 		t.logger.Error("failed to get spot savings", slog.Any("error", err))
 		return createErrorResult(fmt.Sprintf("Failed to get spot recommendations: %v", err)), nil
@@ -76,6 +102,10 @@ type params struct { //nolint:govet
 	minVCPU         int
 	minMemoryGB     int
 	limit           int
+	withScore       bool
+	minScore        int
+	az              bool
+	scoreTimeout    int
 }
 
 // parseParameters extracts all parameters from the request arguments
@@ -99,6 +129,10 @@ func parseParameters(arguments interface{}) *params {
 		maxInterruption: cast.ToFloat64(args["max_interruption_rate"]),
 		sortBy:          getStringWithDefault(args, "sort_by", "reliability"),
 		limit:           getLimitWithDefault(args, "limit", defaultLimit),
+		withScore:       cast.ToBool(args["with_score"]),
+		minScore:        cast.ToInt(args["min_score"]),
+		az:              cast.ToBool(args["az"]),
+		scoreTimeout:    cast.ToInt(args["score_timeout"]),
 	}
 }
 
@@ -111,6 +145,8 @@ func convertSortParams(sortBy string) (spot.SortBy, bool) {
 		return spot.SortByRange, false
 	case "savings":
 		return spot.SortBySavings, true
+	case "score":
+		return spot.SortByScore, false
 	default:
 		return spot.SortByRange, false
 	}
@@ -148,7 +184,7 @@ func buildResponse(advices []spot.Advice, startTime time.Time) map[string]interf
 		regionsSearched[advice.Region] = true
 		avgInterruption := calculateAvgInterruption(advice.Range)
 
-		results[i] = map[string]interface{}{
+		result := map[string]interface{}{
 			"instance_type":          advice.Instance,
 			"region":                 advice.Region,
 			"spot_price_per_hour":    advice.Price,
@@ -163,6 +199,19 @@ func buildResponse(advices []spot.Advice, startTime time.Time) map[string]interf
 			"specs":                  fmt.Sprintf("%d vCPU, %.0f GB RAM", advice.Info.Cores, advice.Info.RAM),
 			"reliability_score":      calculateReliabilityScore(avgInterruption),
 		}
+
+		// Add score-related fields when available
+		if advice.RegionScore != nil {
+			result["region_score"] = *advice.RegionScore
+		}
+		if len(advice.ZoneScores) > 0 {
+			result["zone_scores"] = advice.ZoneScores
+		}
+		if advice.ScoreFetchedAt != nil {
+			result["score_fetched_at"] = advice.ScoreFetchedAt.Format(time.RFC3339)
+		}
+
+		results[i] = result
 	}
 
 	searchedRegions := make([]string, 0, len(regionsSearched))
@@ -271,7 +320,14 @@ func (t *ListSpotRegionsTool) Handle(ctx context.Context, _ mcp.CallToolRequest)
 
 // fetchRegions gets all available regions from the spot client
 func (t *ListSpotRegionsTool) fetchRegions(ctx context.Context) ([]string, error) {
-	allAdvices, err := t.client.GetSpotSavings(ctx, []string{"all"}, "", "linux", 0, 0, 0, spot.SortByRegion, false)
+	opts := []spot.GetSpotSavingsOption{
+		spot.WithRegions([]string{"all"}),
+		spot.WithPattern(""),
+		spot.WithOS("linux"),
+		spot.WithSort(spot.SortByRegion, false),
+	}
+
+	allAdvices, err := t.client.GetSpotSavings(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
