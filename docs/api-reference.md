@@ -89,8 +89,8 @@ This tool searches the embedded AWS Spot Instance data and returns matching inst
     },
     "sort_by": {
       "type": "string",
-      "enum": ["price", "reliability", "savings"],
-      "description": "Sort results by: 'price' (cheapest first), 'reliability' (lowest interruption first), 'savings' (highest savings first)",
+      "enum": ["price", "reliability", "savings", "score"],
+      "description": "Sort results by: 'price' (cheapest first), 'reliability' (lowest interruption first), 'savings' (highest savings first), 'score' (highest score first)",
       "default": "reliability"
     },
     "limit": {
@@ -99,6 +99,30 @@ This tool searches the embedded AWS Spot Instance data and returns matching inst
       "maximum": 50,
       "description": "Maximum number of results to return",
       "default": 10
+    },
+    "with_score": {
+      "type": "boolean",
+      "description": "Include AWS spot placement scores (experimental)",
+      "default": false
+    },
+    "min_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10,
+      "description": "Filter: minimum spot placement score (1-10)",
+      "default": 0
+    },
+    "az": {
+      "type": "boolean", 
+      "description": "Request AZ-level scores instead of region-level (use with with_score)",
+      "default": false
+    },
+    "score_timeout": {
+      "type": "number",
+      "minimum": 1,
+      "maximum": 300,
+      "description": "Timeout for score enrichment in seconds",
+      "default": 30
     }
   },
   "additionalProperties": false
@@ -180,6 +204,26 @@ This tool searches the embedded AWS Spot Instance data and returns matching inst
             "type": "number",
             "description": "Calculated reliability score (100 - interruption_rate)",
             "example": 92
+          },
+          "region_score": {
+            "type": "number",
+            "description": "AWS spot placement score for the region (1-10, higher is better)",
+            "example": 8
+          },
+          "zone_scores": {
+            "type": "object",
+            "description": "AWS spot placement scores by availability zone (1-10, higher is better)",
+            "example": {
+              "us-east-1a": 9,
+              "us-east-1b": 7,
+              "us-east-1c": 8
+            }
+          },
+          "score_fetched_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Timestamp when scores were fetched from AWS API",
+            "example": "2024-01-15T10:30:00Z"
           }
         },
         "required": [
