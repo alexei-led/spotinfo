@@ -25,6 +25,12 @@
 - **Data formats**: JSON, CSV for automation and scripting
 - **Clean separation**: Visual indicators only in human-readable formats
 
+### 💰 **Live Price Fallback**
+- **Automatic enrichment** for newer instance types missing from the static pricing feed
+- **EC2 DescribeSpotPriceHistory API** fetches current prices when static data shows $0
+- **Price source indicators** show whether prices come from static data or live API
+- **Graceful degradation** — works without AWS credentials, just shows $0 for missing types
+
 ### 🌐 **Network Resilience**
 - **Embedded data** for offline functionality
 - **Graceful fallbacks** when AWS APIs are unavailable
@@ -123,6 +129,23 @@ This is **expected AWS behavior** - providing multiple instance types gives AWS 
 | **[Examples & Use Cases](docs/examples.md)** | Real-world DevOps scenarios and automation patterns |
 | **[MCP Server Setup](docs/mcp-server.md)** | Model Context Protocol integration guide |
 | **[Data Sources](docs/data-sources.md)** | AWS data feeds, caching strategy, and troubleshooting |
+
+## AWS Credentials
+
+AWS credentials are **optional** but recommended for complete functionality:
+
+| Feature | Without Credentials | With Credentials |
+|---------|-------------------|------------------|
+| Spot advisor data | Full access | Full access |
+| Static pricing | Full access | Full access |
+| Live price fallback | Unavailable (shows $0 for missing types) | Fetches current prices via EC2 API |
+| Placement scores | Unavailable | Real-time scores (1-10) |
+
+Required IAM permissions for full functionality:
+- `ec2:DescribeSpotPriceHistory` — live price fallback for newer instance types
+- `ec2:GetSpotPlacementScores` — placement score analysis
+
+Credentials are loaded via the [AWS SDK default credential chain](https://docs.aws.amazon.com/sdk-for-go/v2/developer-guide/configure-gosdk.html) (environment variables, shared config, IAM roles, etc.).
 
 ## Development
 

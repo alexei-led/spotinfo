@@ -23,7 +23,7 @@ Some newer AWS instance types (m8g, r8g, m8gd, r8gd, etc.) show price $0 because
 - [x] Add tests for the new output formatting
 
 ### Task 3: Update embedded data and documentation
-- [ ] Run `make update-data update-price` to refresh embedded data files
-- [ ] Update README.md to document the live price fallback behavior
-- [ ] Add a note about AWS credentials being optional but recommended for complete pricing
-- [ ] Close reference to issue #6 in commit messages
+- [x] Run `make update-data update-price` to refresh embedded data files
+- [x] Update README.md to document the live price fallback behavior
+- [x] Add a note about AWS credentials being optional but recommended for complete pricing
+- [x] Close reference to issue #6 in commit messages

@@ -94,11 +94,14 @@ spotinfo --type "t3.micro" --with-score --output json
       "ram_gb": 1
     },
     "price": 0.0043,
+    "live_price": false,
     "region_score": 9,
     "score_fetched_at": "2025-01-26T10:45:02.844335+03:00"
   }
 ]
 ```
+
+> The `live_price` field indicates whether the price was fetched from the EC2 `DescribeSpotPriceHistory` API (for newer instance types missing from the static pricing feed). When `true`, the price was obtained in real-time via the AWS API.
 
 ### CSV Format
 Data-only format without visual indicators:

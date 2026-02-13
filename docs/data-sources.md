@@ -25,7 +25,21 @@
   - Operating system pricing variations (Linux/Windows)
   - Historical pricing trends
 
-### 3. AWS Spot Placement Scores API
+### 3. AWS EC2 Live Spot Pricing API
+- **Source**: AWS `DescribeSpotPriceHistory` API
+- **Access**: Real-time API calls (requires `ec2:DescribeSpotPriceHistory` permission)
+- **Purpose**: Fills in pricing for newer instance types (e.g., m8g, r8g) missing from the static feed
+- **Trigger**: Only called when instances have advisor data but $0 pricing from the static feed
+- **Contains**:
+  - Current spot prices per instance type and region
+  - Prices from the last hour of trading
+- **Behavior**:
+  - Fetches prices in parallel across regions
+  - Batches requests (up to 50 instance types per call)
+  - Gracefully degrades — if unavailable, prices remain $0
+  - Results marked with `live_price: true` in output
+
+### 4. AWS Spot Placement Scores API
 - **Source**: AWS `GetSpotPlacementScores` API
 - **Access**: Real-time API calls (requires IAM permissions)
 - **Contains**:
@@ -40,18 +54,20 @@
 graph TB
     A[AWS Spot Advisor<br/>JSON Feed] --> D[Data Aggregation]
     B[AWS Spot Pricing<br/>JS Feed] --> D
+    B2[AWS EC2 Live Pricing<br/>DescribeSpotPriceHistory] --> D
     C[AWS Placement Scores<br/>API] --> D
-    
+
     D --> E[spotinfo Engine]
-    
+
     E --> F[Embedded Data<br/>Fallback]
     E --> G[Cached Results]
-    
+
     G --> H[CLI Output]
     F --> H
-    
+
     style A fill:#e1f5fe
     style B fill:#e1f5fe
+    style B2 fill:#fff3e0
     style C fill:#fff3e0
     style F fill:#f3e5f5
     style G fill:#e8f5e8
@@ -68,7 +84,8 @@ graph TB
 ### Fallback Strategy
 1. **Primary**: Fetch fresh data from AWS feeds
 2. **Secondary**: Use embedded data if network unavailable
-3. **Placement Scores**: Graceful degradation to mock scores if API inaccessible
+3. **Live Pricing**: For instance types with $0 in the static feed, fetch current prices via EC2 `DescribeSpotPriceHistory` API (requires AWS credentials)
+4. **Placement Scores**: Graceful degradation to mock scores if API inaccessible
 
 ## Data Processing Pipeline
 
@@ -129,6 +146,14 @@ func fetchData() {
   - Some regions may have delayed updates
   - Embedded data becomes stale over time
 
+### Live Spot Pricing (EC2 API)
+- **Accuracy**: Real-time from AWS API
+- **Limitations**:
+  - Requires `ec2:DescribeSpotPriceHistory` IAM permission
+  - Only triggered for instance types missing from the static feed
+  - Adds latency (parallel fetches with 10s timeout per region)
+  - Prices marked with `live_price: true` in output to distinguish from static data
+
 ### Placement Scores
 - **Accuracy**: Real-time from AWS API
 - **Limitations**:
@@ -169,9 +194,10 @@ make build          # Embeds fresh data in binary
 ## Security Considerations
 
 ### API Access
-- **IAM permissions**: Requires `ec2:GetSpotPlacementScores` permission
+- **IAM permissions**: `ec2:DescribeSpotPriceHistory` (live pricing), `ec2:GetSpotPlacementScores` (placement scores)
 - **Credential management**: Uses AWS SDK default credential chain
 - **Network security**: HTTPS for advisor data, HTTP for pricing (AWS provided)
+- **Optional**: Both API features degrade gracefully without credentials
 
 ### Data Privacy
 - **No personal data**: All data is public AWS pricing information
