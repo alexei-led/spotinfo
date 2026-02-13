@@ -11,6 +11,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 )
 
 //go:embed data/spot-advisor-data.json
@@ -209,6 +214,75 @@ func convertRawPriceData(raw *rawPriceData) *spotPriceData {
 	}
 
 	return pricing
+}
+
+// ec2SpotPriceFetcher abstracts the EC2 DescribeSpotPriceHistory API for testing.
+type ec2SpotPriceFetcher interface {
+	DescribeSpotPriceHistory(ctx context.Context, params *ec2.DescribeSpotPriceHistoryInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSpotPriceHistoryOutput, error)
+}
+
+// newEC2SpotPriceClient creates an EC2 client for spot price lookups in the given region.
+//
+//nolint:contextcheck // Initialization function appropriately uses caller-provided context for AWS config
+func newEC2SpotPriceClient(ctx context.Context, region string) (ec2SpotPriceFetcher, error) { //nolint:unused // Will be used in Task 2 integration
+	ctx, cancel := context.WithTimeout(ctx, httpTimeout)
+	defer cancel()
+
+	cfg, err := awsconfig.LoadDefaultConfig(ctx,
+		awsconfig.WithRegion(region),
+		awsconfig.WithRetryMode(aws.RetryModeStandard),
+		awsconfig.WithRetryMaxAttempts(3), //nolint:mnd
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS config for region %s: %w", region, err)
+	}
+
+	return ec2.NewFromConfig(cfg), nil
+}
+
+// fetchEC2SpotPrices calls EC2 DescribeSpotPriceHistory to get current Linux spot prices.
+func fetchEC2SpotPrices(ctx context.Context, client ec2SpotPriceFetcher, instanceTypes []string) (map[string]float64, error) {
+	ctx, cancel := context.WithTimeout(ctx, httpTimeout)
+	defer cancel()
+
+	ec2InstanceTypes := make([]ec2types.InstanceType, len(instanceTypes))
+	for i, it := range instanceTypes {
+		ec2InstanceTypes[i] = ec2types.InstanceType(it)
+	}
+
+	input := &ec2.DescribeSpotPriceHistoryInput{
+		InstanceTypes:       ec2InstanceTypes,
+		ProductDescriptions: []string{"Linux/UNIX"},
+		StartTime:           aws.Time(time.Now()),
+	}
+
+	prices := make(map[string]float64)
+
+	paginator := ec2.NewDescribeSpotPriceHistoryPaginator(client, input)
+	for paginator.HasMorePages() {
+		output, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("EC2 DescribeSpotPriceHistory failed: %w", err)
+		}
+
+		for _, sp := range output.SpotPriceHistory {
+			it := string(sp.InstanceType)
+			price, err := strconv.ParseFloat(aws.ToString(sp.SpotPrice), 64)
+			if err != nil || price <= 0 {
+				continue
+			}
+			// Keep the first (most recent) price per instance type
+			if _, exists := prices[it]; !exists {
+				prices[it] = price
+			}
+		}
+	}
+
+	slog.Debug("fetched EC2 spot prices",
+		slog.Int("requested", len(instanceTypes)),
+		slog.Int("found", len(prices)))
+
+	return prices, nil
 }
 
 // getSpotInstancePrice retrieves the spot price for a specific instance.

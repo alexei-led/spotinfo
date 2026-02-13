@@ -6,9 +6,30 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type mockEC2SpotPriceFetcher struct {
+	pages []ec2.DescribeSpotPriceHistoryOutput
+	err   error
+	calls int
+}
+
+func (m *mockEC2SpotPriceFetcher) DescribeSpotPriceHistory(_ context.Context, _ *ec2.DescribeSpotPriceHistoryInput, _ ...func(*ec2.Options)) (*ec2.DescribeSpotPriceHistoryOutput, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.calls >= len(m.pages) {
+		return &ec2.DescribeSpotPriceHistoryOutput{}, nil
+	}
+	page := m.pages[m.calls]
+	m.calls++
+	return &page, nil
+}
 
 const (
 	testRegionUSEast1   = "us-east-1"
@@ -343,4 +364,161 @@ func TestDefaultPricingProvider_NetworkFallback(t *testing.T) {
 	// Should still succeed due to fallback
 	require.NoError(t, err)
 	assert.Greater(t, price, 0.0)
+}
+
+func TestFetchEC2SpotPrices(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+
+	tests := []struct {
+		name          string
+		instanceTypes []string
+		mock          *mockEC2SpotPriceFetcher
+		wantPrices    map[string]float64
+		wantErr       bool
+	}{
+		{
+			name:          "single instance returns price",
+			instanceTypes: []string{"m8g.large"},
+			mock: &mockEC2SpotPriceFetcher{
+				pages: []ec2.DescribeSpotPriceHistoryOutput{
+					{
+						SpotPriceHistory: []ec2types.SpotPrice{
+							{
+								InstanceType: ec2types.InstanceTypeM6gLarge,
+								SpotPrice:    aws.String("0.0384"),
+								Timestamp:    &now,
+							},
+						},
+					},
+				},
+			},
+			wantPrices: map[string]float64{"m6g.large": 0.0384},
+		},
+		{
+			name:          "multiple instances returns prices",
+			instanceTypes: []string{"m8g.large", "r8g.xlarge"},
+			mock: &mockEC2SpotPriceFetcher{
+				pages: []ec2.DescribeSpotPriceHistoryOutput{
+					{
+						SpotPriceHistory: []ec2types.SpotPrice{
+							{
+								InstanceType: "m8g.large",
+								SpotPrice:    aws.String("0.0412"),
+								Timestamp:    &now,
+							},
+							{
+								InstanceType: "r8g.xlarge",
+								SpotPrice:    aws.String("0.0891"),
+								Timestamp:    &now,
+							},
+						},
+					},
+				},
+			},
+			wantPrices: map[string]float64{
+				"m8g.large":  0.0412,
+				"r8g.xlarge": 0.0891,
+			},
+		},
+		{
+			name:          "keeps first price per instance type",
+			instanceTypes: []string{"m8g.large"},
+			mock: &mockEC2SpotPriceFetcher{
+				pages: []ec2.DescribeSpotPriceHistoryOutput{
+					{
+						SpotPriceHistory: []ec2types.SpotPrice{
+							{
+								InstanceType: "m8g.large",
+								SpotPrice:    aws.String("0.0412"),
+								Timestamp:    &now,
+							},
+							{
+								InstanceType: "m8g.large",
+								SpotPrice:    aws.String("0.0500"),
+								Timestamp:    &now,
+							},
+						},
+					},
+				},
+			},
+			wantPrices: map[string]float64{"m8g.large": 0.0412},
+		},
+		{
+			name:          "skips zero and negative prices",
+			instanceTypes: []string{"m8g.large", "r8g.large"},
+			mock: &mockEC2SpotPriceFetcher{
+				pages: []ec2.DescribeSpotPriceHistoryOutput{
+					{
+						SpotPriceHistory: []ec2types.SpotPrice{
+							{
+								InstanceType: "m8g.large",
+								SpotPrice:    aws.String("0"),
+								Timestamp:    &now,
+							},
+							{
+								InstanceType: "r8g.large",
+								SpotPrice:    aws.String("-0.01"),
+								Timestamp:    &now,
+							},
+						},
+					},
+				},
+			},
+			wantPrices: map[string]float64{},
+		},
+		{
+			name:          "skips invalid price strings",
+			instanceTypes: []string{"m8g.large"},
+			mock: &mockEC2SpotPriceFetcher{
+				pages: []ec2.DescribeSpotPriceHistoryOutput{
+					{
+						SpotPriceHistory: []ec2types.SpotPrice{
+							{
+								InstanceType: "m8g.large",
+								SpotPrice:    aws.String("not-a-number"),
+								Timestamp:    &now,
+							},
+						},
+					},
+				},
+			},
+			wantPrices: map[string]float64{},
+		},
+		{
+			name:          "empty response returns empty map",
+			instanceTypes: []string{"m8g.large"},
+			mock: &mockEC2SpotPriceFetcher{
+				pages: []ec2.DescribeSpotPriceHistoryOutput{
+					{SpotPriceHistory: []ec2types.SpotPrice{}},
+				},
+			},
+			wantPrices: map[string]float64{},
+		},
+		{
+			name:          "API error returns error",
+			instanceTypes: []string{"m8g.large"},
+			mock: &mockEC2SpotPriceFetcher{
+				err: fmt.Errorf("access denied"),
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			prices, err := fetchEC2SpotPrices(context.Background(), tt.mock, tt.instanceTypes)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantPrices, prices)
+		})
+	}
 }

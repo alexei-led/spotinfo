@@ -27,12 +27,12 @@ Fix: add an EC2 DescribeSpotPriceHistory API fallback for instances with zero/mi
 - Modify: `internal/spot/data.go`
 - Modify: `internal/spot/types.go` (if needed for new types)
 
-- [ ] Add a function `fetchEC2SpotPrices(ctx context.Context, region string, instanceTypes []string) (map[string]float64, error)` that calls EC2 DescribeSpotPriceHistory API to get current spot prices for Linux instances
-- [ ] Use aws-sdk-go-v2 default credential chain (config.LoadDefaultConfig)
-- [ ] Add proper timeout (5s), error handling, and logging consistent with existing patterns
-- [ ] Only fetch the most recent price per instance type (limit results)
-- [ ] Write tests with mocked EC2 client for this function
-- [ ] Run `make test` - must pass before task 2
+- [x] Add a function `fetchEC2SpotPrices(ctx context.Context, region string, instanceTypes []string) (map[string]float64, error)` that calls EC2 DescribeSpotPriceHistory API to get current spot prices for Linux instances
+- [x] Use aws-sdk-go-v2 default credential chain (config.LoadDefaultConfig)
+- [x] Add proper timeout (5s), error handling, and logging consistent with existing patterns
+- [x] Only fetch the most recent price per instance type (limit results)
+- [x] Write tests with mocked EC2 client for this function
+- [x] Run `make test` - must pass before task 2
 
 ### Task 2: Integrate fallback into price lookup
 
