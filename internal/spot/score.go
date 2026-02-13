@@ -287,7 +287,7 @@ func (sc *scoreCache) enrichWithScores(ctx context.Context, advices []Advice,
 			}
 
 			// Convert set to slice
-			var instanceTypes []string
+			instanceTypes := make([]string, 0, len(instanceTypeSet))
 			for instanceType := range instanceTypeSet {
 				instanceTypes = append(instanceTypes, instanceType)
 			}

@@ -260,6 +260,17 @@ func (c *Client) GetSpotSavings(ctx context.Context, opts ...GetSpotSavingsOptio
 	// Enrich instances with missing prices from live AWS API
 	enrichMissingPrices(ctx, result, c.livePriceProvider, cfg.instanceOS, livePriceTimeout)
 
+	// Re-apply maxPrice filter after live price enrichment
+	if cfg.maxPrice != 0 {
+		filtered := result[:0]
+		for _, adv := range result {
+			if adv.Price <= cfg.maxPrice {
+				filtered = append(filtered, adv)
+			}
+		}
+		result = filtered
+	}
+
 	// Sort results
 	sortAdvices(result, cfg.sortBy, cfg.sortDesc)
 

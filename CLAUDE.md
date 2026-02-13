@@ -34,23 +34,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Architecture
 
 ### Core Components
-- `cmd/main.go` - CLI entry point using urfave/cli/v2
-- `public/spot/` - Core business logic package
-  - `info.go` - Spot advisor data processing and filtering
-  - `price.go` - Spot pricing data processing
+- `cmd/spotinfo/main.go` - CLI entry point using urfave/cli/v2
+- `internal/spot/` - Core business logic package
+  - `client.go` - Spot client orchestration and option handling
+  - `liveprice.go` - Live price fallback via EC2 DescribeSpotPriceHistory API
+  - `price.go` - Static spot pricing data processing
+  - `types.go` - Core data types (Advice, TypeInfo, Range, etc.)
+  - `score.go` - Spot placement scores via EC2 API
   - `data/` - Embedded JSON data files from AWS feeds
+- `internal/mcp/` - MCP server tools and handlers
 
 ### Data Sources
-The tool uses two AWS public data feeds:
+The tool uses three data sources:
 1. Spot Instance Advisor data: `https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json`
 2. Spot pricing data: `http://spot-price.s3.amazonaws.com/spot.js`
+3. EC2 DescribeSpotPriceHistory API: Live fallback for newer instance types with $0 in the static feed
 
-Both are embedded in the binary during build for offline capability.
+Sources 1-2 are embedded in the binary during build for offline capability.
 
 ### Key Libraries
 - `github.com/urfave/cli/v2` - CLI framework
 - `github.com/jedib0t/go-pretty/v6` - Table formatting
-- `github.com/pkg/errors` - Error handling
+- `github.com/aws/aws-sdk-go-v2` - AWS SDK for live pricing and placement scores
 - `github.com/stretchr/testify` - Testing framework with assertions
 
 ## Build Requirements

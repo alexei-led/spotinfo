@@ -198,6 +198,7 @@ func buildResponse(advices []spot.Advice, startTime time.Time) map[string]interf
 			"memory_gb":              advice.Info.RAM,
 			"specs":                  fmt.Sprintf("%d vCPU, %.0f GB RAM", advice.Info.Cores, advice.Info.RAM),
 			"reliability_score":      calculateReliabilityScore(avgInterruption),
+			"live_price":             advice.LivePrice,
 		}
 
 		// Add score-related fields when available

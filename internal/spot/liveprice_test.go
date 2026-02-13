@@ -239,18 +239,18 @@ func TestClient_GetSpotSavings_LivePriceWithMaxPriceFilter(t *testing.T) {
 	client := NewWithProviders(mocks.advisor, mocks.pricing)
 	client.SetLivePriceProvider(livePrice)
 
-	// maxPrice filter is applied BEFORE live price enrichment in current flow,
-	// but since price is 0, both pass the filter. After enrichment prices are filled.
+	// maxPrice filter is re-applied after live price enrichment,
+	// so only instances within the price limit are returned.
 	result, err := client.GetSpotSavings(context.Background(),
 		WithRegions([]string{"us-east-1"}),
 		WithOS("linux"),
+		WithMaxPrice(0.15),
 		WithSort(SortByPrice, false),
 	)
 
 	require.NoError(t, err)
-	require.Len(t, result, 2)
+	require.Len(t, result, 1, "Only the affordable instance should pass the maxPrice filter")
+	assert.Equal(t, "m8g.xlarge", result[0].Instance)
 	assert.Equal(t, 0.10, result[0].Price)
-	assert.Equal(t, 0.25, result[1].Price)
 	assert.True(t, result[0].LivePrice)
-	assert.True(t, result[1].LivePrice)
 }

@@ -245,7 +245,8 @@ func TestExecMainCmd_OutputFormats(t *testing.T) {
 			})
 
 			// Build command line arguments
-			args := []string{"spotinfo"}
+			args := make([]string, 0, 9) //nolint:mnd
+			args = append(args, "spotinfo")
 			args = append(args, "--type", tt.instanceType)
 			args = append(args, "--os", "linux")
 			args = append(args, "--region", tt.region)
@@ -330,7 +331,8 @@ func TestExecMainCmd_SortingAndOrdering(t *testing.T) {
 			})
 
 			// Build command line arguments
-			args := []string{"spotinfo"}
+			args := make([]string, 0, 9) //nolint:mnd
+			args = append(args, "spotinfo")
 			args = append(args, "--type", "t2.*")
 			args = append(args, "--sort", tt.sortBy)
 			args = append(args, "--order", tt.order)
