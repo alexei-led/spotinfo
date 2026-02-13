@@ -49,6 +49,7 @@ const (
 	savingsColumn       = "Savings over On-Demand"
 	interruptionColumn  = "Frequency of interruption"
 	priceColumn         = "USD/Hour"
+	priceSourceColumn   = "Price Source"
 	scoreColumn         = "Score"
 	scoreHeaderAZ       = "Placement Score (AZ)"
 	scoreHeaderRegional = "Placement Score (Regional)"
@@ -261,14 +262,25 @@ func printAdvicesText(advices []spot.Advice, region bool, output io.Writer) {
 			scoreStr = fmt.Sprintf(", score=%s", getScoreDisplayValue(&advice))
 		}
 
+		priceStr := formatPrice(advice.Price, advice.LivePrice)
+
 		if region {
-			fmt.Fprintf(output, "region=%s, type=%s, vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s', price=%.2f%s\n", //nolint:errcheck
-				advice.Region, advice.Instance, advice.Info.Cores, advice.Info.RAM, advice.Savings, advice.Range.Label, advice.Price, scoreStr)
+			fmt.Fprintf(output, "region=%s, type=%s, vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s', price=%s%s\n", //nolint:errcheck
+				advice.Region, advice.Instance, advice.Info.Cores, advice.Info.RAM, advice.Savings, advice.Range.Label, priceStr, scoreStr)
 		} else {
-			fmt.Fprintf(output, "type=%s, vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s', price=%.2f%s\n", //nolint:errcheck
-				advice.Instance, advice.Info.Cores, advice.Info.RAM, advice.Savings, advice.Range.Label, advice.Price, scoreStr)
+			fmt.Fprintf(output, "type=%s, vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s', price=%s%s\n", //nolint:errcheck
+				advice.Instance, advice.Info.Cores, advice.Info.RAM, advice.Savings, advice.Range.Label, priceStr, scoreStr)
 		}
 	}
+}
+
+// formatPrice formats a price value with an asterisk suffix for live-fetched prices.
+func formatPrice(price float64, live bool) string {
+	s := fmt.Sprintf("%.4f", price)
+	if live {
+		return s + "*"
+	}
+	return s
 }
 
 func printAdvicesNumber(advices []spot.Advice, region bool, output io.Writer) {
@@ -405,8 +417,11 @@ func determineScoreHeader(info scoreTypeInfo) string {
 }
 
 // buildTableHeader creates the table header row.
-func buildTableHeader(scoreInfo scoreTypeInfo, region bool) table.Row {
+func buildTableHeader(scoreInfo scoreTypeInfo, region, csv bool) table.Row {
 	header := table.Row{instanceTypeColumn, vCPUColumn, memoryColumn, savingsColumn, interruptionColumn, priceColumn}
+	if csv {
+		header = append(header, priceSourceColumn)
+	}
 	if scoreInfo.hasScores {
 		header = append(header, determineScoreHeader(scoreInfo))
 	}
@@ -432,13 +447,22 @@ func WithVisualFormatting() TableRowOption {
 }
 
 // buildTableRow creates a table row for an advice with configurable formatting.
-func buildTableRow(advice *spot.Advice, scoreInfo scoreTypeInfo, region bool, options ...TableRowOption) table.Row {
+func buildTableRow(advice *spot.Advice, scoreInfo scoreTypeInfo, region, csv bool, options ...TableRowOption) table.Row {
 	opts := &tableRowOptions{}
 	for _, opt := range options {
 		opt(opts)
 	}
 
-	row := table.Row{advice.Instance, advice.Info.Cores, advice.Info.RAM, advice.Savings, advice.Range.Label, advice.Price}
+	var priceValue interface{}
+	if csv {
+		priceValue = advice.Price
+	} else {
+		priceValue = formatPrice(advice.Price, advice.LivePrice)
+	}
+	row := table.Row{advice.Instance, advice.Info.Cores, advice.Info.RAM, advice.Savings, advice.Range.Label, priceValue}
+	if csv {
+		row = append(row, priceSource(advice.LivePrice))
+	}
 	if scoreInfo.hasScores {
 		var scoreValue string
 		if opts.includeVisualFormatting {
@@ -452,6 +476,14 @@ func buildTableRow(advice *spot.Advice, scoreInfo scoreTypeInfo, region bool, op
 		row = append(table.Row{advice.Region}, row...)
 	}
 	return row
+}
+
+// priceSource returns a human-readable label for the price data source.
+func priceSource(live bool) string {
+	if live {
+		return "live"
+	}
+	return "static"
 }
 
 // expandAZ converts advices with multiple zone scores into separate rows per AZ.
@@ -493,18 +525,18 @@ func printAdvicesTable(advices []spot.Advice, csv, region bool, output io.Writer
 
 	// Analyze score types and build header
 	scoreInfo := analyzeScoreTypes(advices)
-	header := buildTableHeader(scoreInfo, region)
+	header := buildTableHeader(scoreInfo, region, csv)
 	tbl.AppendHeader(header)
 
 	// Build rows with appropriate formatting
 	for _, advice := range advices {
 		var row table.Row
 		if csv {
-			// CSV output: data only, no visual formatting
-			row = buildTableRow(&advice, scoreInfo, region)
+			// CSV output: data only, no visual formatting, with price source column
+			row = buildTableRow(&advice, scoreInfo, region, csv)
 		} else {
 			// Table output: include visual formatting
-			row = buildTableRow(&advice, scoreInfo, region, WithVisualFormatting())
+			row = buildTableRow(&advice, scoreInfo, region, csv, WithVisualFormatting())
 		}
 		tbl.AppendRow(row)
 	}

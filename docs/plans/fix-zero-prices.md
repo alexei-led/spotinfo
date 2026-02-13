@@ -17,10 +17,10 @@ Some newer AWS instance types (m8g, r8g, m8gd, r8gd, etc.) show price $0 because
 - [x] Add tests with mocked AWS API calls
 
 ### Task 2: Update CLI to show price data source indicator
-- [ ] Add a field to the `Advice` struct indicating if the price came from static data or live API
-- [ ] In table/text output, optionally mark live-fetched prices (e.g., with an asterisk or different formatting)
-- [ ] Update JSON/CSV output to include the price source field
-- [ ] Add tests for the new output formatting
+- [x] Add a field to the `Advice` struct indicating if the price came from static data or live API
+- [x] In table/text output, optionally mark live-fetched prices (e.g., with an asterisk or different formatting)
+- [x] Update JSON/CSV output to include the price source field
+- [x] Add tests for the new output formatting
 
 ### Task 3: Update embedded data and documentation
 - [ ] Run `make update-data update-price` to refresh embedded data files
