@@ -27,3 +27,6 @@ coverage.out
 # ignore data file, downloaded during make
 public/spot/data/*.json
 public/spot/data/*.json-e
+
+# ralphex progress logs
+progress*.txt

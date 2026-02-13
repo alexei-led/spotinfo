@@ -249,8 +249,10 @@ func (c *Client) GetSpotSavings(ctx context.Context, opts ...GetSpotSavingsOptio
 		}
 	}
 
-	// Enrich zero-price instances with EC2 API fallback
-	enrichZeroPrices(ctx, result)
+	// Enrich zero-price instances with EC2 API fallback (fresh context to avoid upstream timeout exhaustion)
+	enrichCtx, enrichCancel := context.WithTimeout(context.Background(), 30*time.Second) //nolint:mnd
+	defer enrichCancel()
+	enrichZeroPrices(enrichCtx, result)
 
 	// Sort results
 	sortAdvices(result, cfg.sortBy, cfg.sortDesc)
