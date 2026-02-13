@@ -117,11 +117,12 @@ func WithScoreTimeout(timeout time.Duration) GetSpotSavingsOption {
 
 // Client provides access to AWS EC2 Spot instance pricing and advice.
 type Client struct {
-	advisorProvider advisorProvider
-	pricingProvider pricingProvider
-	scoreProvider   scoreProvider
-	timeout         time.Duration
-	useEmbedded     bool
+	advisorProvider   advisorProvider
+	pricingProvider   pricingProvider
+	scoreProvider     scoreProvider
+	livePriceProvider livePriceProvider
+	timeout           time.Duration
+	useEmbedded       bool
 }
 
 // advisorProvider provides access to spot advisor data (private interface close to consumer).
@@ -148,13 +149,16 @@ func New() *Client {
 }
 
 // NewWithOptions creates a new spot client with custom options.
+//
+//nolint:contextcheck // Initialization function appropriately uses context.Background() for AWS config
 func NewWithOptions(timeout time.Duration, useEmbedded bool) *Client {
 	return &Client{
-		advisorProvider: newDefaultAdvisorProvider(timeout),
-		pricingProvider: newDefaultPricingProvider(timeout, useEmbedded),
-		scoreProvider:   newScoreCache(),
-		timeout:         timeout,
-		useEmbedded:     useEmbedded,
+		advisorProvider:   newDefaultAdvisorProvider(timeout),
+		pricingProvider:   newDefaultPricingProvider(timeout, useEmbedded),
+		scoreProvider:     newScoreCache(),
+		livePriceProvider: createLivePriceProvider(),
+		timeout:           timeout,
+		useEmbedded:       useEmbedded,
 	}
 }
 
@@ -166,6 +170,11 @@ func NewWithProviders(advisor advisorProvider, pricing pricingProvider) *Client 
 		timeout:         DefaultTimeoutSeconds * time.Second,
 		useEmbedded:     false,
 	}
+}
+
+// SetLivePriceProvider sets the live price provider (for testing).
+func (c *Client) SetLivePriceProvider(p livePriceProvider) {
+	c.livePriceProvider = p
 }
 
 // GetSpotSavings retrieves spot instance advice using functional options.
@@ -247,6 +256,9 @@ func (c *Client) GetSpotSavings(ctx context.Context, opts ...GetSpotSavingsOptio
 			})
 		}
 	}
+
+	// Enrich instances with missing prices from live AWS API
+	enrichMissingPrices(ctx, result, c.livePriceProvider, cfg.instanceOS, livePriceTimeout)
 
 	// Sort results
 	sortAdvices(result, cfg.sortBy, cfg.sortDesc)

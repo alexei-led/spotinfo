@@ -29,6 +29,7 @@ type Advice struct { //nolint:govet
 	Savings        int                `json:"savings"`
 	Info           TypeInfo           `json:"info"`
 	Price          float64            `json:"price"`
+	LivePrice      bool               `json:"live_price,omitempty"`
 	ZonePrice      map[string]float64 `json:"zone_price,omitempty"`
 	RegionScore    *int               `json:"region_score,omitempty"`
 	ZoneScores     map[string]int     `json:"zone_scores,omitempty"`

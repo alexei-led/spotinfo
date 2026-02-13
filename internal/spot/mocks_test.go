@@ -467,6 +467,79 @@ func (_c *mockscoreProvider_enrichWithScores_Call) RunAndReturn(run func(ctx con
 	return _c
 }
 
+// newMocklivePriceProvider creates a new instance of mocklivePriceProvider.
+func newMocklivePriceProvider(t interface {
+	mock.TestingT
+	Cleanup(func())
+}) *mocklivePriceProvider {
+	mock := &mocklivePriceProvider{}
+	mock.Mock.Test(t)
+	t.Cleanup(func() { mock.AssertExpectations(t) })
+	return mock
+}
+
+type mocklivePriceProvider struct {
+	mock.Mock
+}
+
+type mocklivePriceProvider_Expecter struct {
+	mock *mock.Mock
+}
+
+func (_m *mocklivePriceProvider) EXPECT() *mocklivePriceProvider_Expecter {
+	return &mocklivePriceProvider_Expecter{mock: &_m.Mock}
+}
+
+func (_mock *mocklivePriceProvider) fetchLivePrices(ctx context.Context, region string, instanceTypes []string, os string) (map[string]float64, error) {
+	ret := _mock.Called(ctx, region, instanceTypes, os)
+	if len(ret) == 0 {
+		panic("no return value specified for fetchLivePrices")
+	}
+	var r0 map[string]float64
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []string, string) (map[string]float64, error)); ok {
+		return returnFunc(ctx, region, instanceTypes, os)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []string, string) map[string]float64); ok {
+		r0 = returnFunc(ctx, region, instanceTypes, os)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]float64)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []string, string) error); ok {
+		r1 = returnFunc(ctx, region, instanceTypes, os)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+type mocklivePriceProvider_fetchLivePrices_Call struct {
+	*mock.Call
+}
+
+func (_e *mocklivePriceProvider_Expecter) fetchLivePrices(ctx interface{}, region interface{}, instanceTypes interface{}, os interface{}) *mocklivePriceProvider_fetchLivePrices_Call {
+	return &mocklivePriceProvider_fetchLivePrices_Call{Call: _e.mock.On("fetchLivePrices", ctx, region, instanceTypes, os)}
+}
+
+func (_c *mocklivePriceProvider_fetchLivePrices_Call) Run(run func(ctx context.Context, region string, instanceTypes []string, os string)) *mocklivePriceProvider_fetchLivePrices_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].([]string), args[3].(string))
+	})
+	return _c
+}
+
+func (_c *mocklivePriceProvider_fetchLivePrices_Call) Return(prices map[string]float64, err error) *mocklivePriceProvider_fetchLivePrices_Call {
+	_c.Call.Return(prices, err)
+	return _c
+}
+
+func (_c *mocklivePriceProvider_fetchLivePrices_Call) RunAndReturn(run func(context.Context, string, []string, string) (map[string]float64, error)) *mocklivePriceProvider_fetchLivePrices_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // newMockawsAPIProvider creates a new instance of mockawsAPIProvider. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func newMockawsAPIProvider(t interface {
