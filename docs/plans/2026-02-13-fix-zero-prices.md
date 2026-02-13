@@ -40,12 +40,12 @@ Fix: add an EC2 DescribeSpotPriceHistory API fallback for instances with zero/mi
 - Modify: `internal/spot/data.go` (getSpotInstancePrice or the caller)
 - Modify: `internal/spot/client.go` (if price enrichment happens there)
 
-- [ ] After loading prices from the S3 feed/embedded data, identify instances with zero or missing prices that exist in advisor data
-- [ ] For those instances, batch-call the EC2 fallback function per region
-- [ ] Merge EC2 prices into the price map so downstream code works unchanged
-- [ ] If EC2 API fails or returns no data, gracefully keep price as 0 (no regression)
-- [ ] Write tests covering: successful fallback, EC2 API failure, no zero-price instances
-- [ ] Run `make test` - must pass before task 3
+- [x] After loading prices from the S3 feed/embedded data, identify instances with zero or missing prices that exist in advisor data
+- [x] For those instances, batch-call the EC2 fallback function per region
+- [x] Merge EC2 prices into the price map so downstream code works unchanged
+- [x] If EC2 API fails or returns no data, gracefully keep price as 0 (no regression)
+- [x] Write tests covering: successful fallback, EC2 API failure, no zero-price instances
+- [x] Run `make test` - must pass before task 3
 
 ### Task 3: Verify acceptance criteria
 

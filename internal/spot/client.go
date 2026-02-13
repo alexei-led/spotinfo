@@ -3,6 +3,7 @@ package spot
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"sync"
@@ -248,6 +249,9 @@ func (c *Client) GetSpotSavings(ctx context.Context, opts ...GetSpotSavingsOptio
 		}
 	}
 
+	// Enrich zero-price instances with EC2 API fallback
+	enrichZeroPrices(ctx, result)
+
 	// Sort results
 	sortAdvices(result, cfg.sortBy, cfg.sortDesc)
 
@@ -385,6 +389,66 @@ func (p *defaultPricingProvider) getSpotPrice(instance, region, os string) (floa
 		return 0, err
 	}
 	return p.data.getSpotInstancePrice(instance, region, os)
+}
+
+// ec2ClientFactory creates EC2 spot price clients. Replaceable for testing.
+var ec2ClientFactory = newEC2SpotPriceClient
+
+// enrichZeroPrices finds instances with zero prices and attempts to fill them via EC2 API.
+func enrichZeroPrices(ctx context.Context, advices []Advice) {
+	// Group zero-price instance indices by region
+	regionInstances := make(map[string][]int)
+	for i := range advices {
+		if advices[i].Price == 0 {
+			regionInstances[advices[i].Region] = append(regionInstances[advices[i].Region], i)
+		}
+	}
+
+	if len(regionInstances) == 0 {
+		return
+	}
+
+	for region, indices := range regionInstances {
+		if ctx.Err() != nil {
+			return
+		}
+
+		instanceTypes := make([]string, len(indices))
+		for i, idx := range indices {
+			instanceTypes[i] = advices[idx].Instance
+		}
+
+		slog.Debug("fetching EC2 spot prices for zero-price instances",
+			slog.String("region", region),
+			slog.Int("count", len(instanceTypes)))
+
+		client, err := ec2ClientFactory(ctx, region)
+		if err != nil {
+			slog.Warn("failed to create EC2 client for price fallback",
+				slog.String("region", region),
+				slog.Any("error", err))
+			return
+		}
+
+		prices, err := fetchEC2SpotPrices(ctx, client, instanceTypes)
+		if err != nil {
+			slog.Warn("EC2 spot price fallback failed",
+				slog.String("region", region),
+				slog.Any("error", err))
+			return
+		}
+
+		for _, idx := range indices {
+			if price, ok := prices[advices[idx].Instance]; ok {
+				advices[idx].Price = price
+			}
+		}
+
+		slog.Debug("enriched zero-price instances",
+			slog.String("region", region),
+			slog.Int("enriched", len(prices)),
+			slog.Int("total", len(indices)))
+	}
 }
 
 // enrichWithScores delegates score enrichment to the scoreProvider.

@@ -224,7 +224,7 @@ type ec2SpotPriceFetcher interface {
 // newEC2SpotPriceClient creates an EC2 client for spot price lookups in the given region.
 //
 //nolint:contextcheck // Initialization function appropriately uses caller-provided context for AWS config
-func newEC2SpotPriceClient(ctx context.Context, region string) (ec2SpotPriceFetcher, error) { //nolint:unused // Will be used in Task 2 integration
+func newEC2SpotPriceClient(ctx context.Context, region string) (ec2SpotPriceFetcher, error) {
 	ctx, cancel := context.WithTimeout(ctx, httpTimeout)
 	defer cancel()
 

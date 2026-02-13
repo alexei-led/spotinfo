@@ -3,9 +3,13 @@ package spot
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -534,6 +538,151 @@ func TestNew_IntegrationWithEmbeddedData(t *testing.T) {
 	assert.Equal(t, "t2.micro", advice.Instance)
 	assert.NotZero(t, advice.Savings)
 	assert.NotZero(t, advice.Price)
+}
+
+func TestEnrichZeroPrices(t *testing.T) {
+	now := time.Now()
+
+	tests := []struct {
+		name           string
+		advices        []Advice
+		mockFactory    func(ctx context.Context, region string) (ec2SpotPriceFetcher, error)
+		expectedPrices map[string]float64
+	}{
+		{
+			name: "enriches zero-price instances with EC2 prices",
+			advices: []Advice{
+				{Region: "us-east-1", Instance: "m8g.large", Price: 0},
+				{Region: "us-east-1", Instance: "t2.micro", Price: 0.0116},
+				{Region: "us-east-1", Instance: "r8g.xlarge", Price: 0},
+			},
+			mockFactory: func(_ context.Context, _ string) (ec2SpotPriceFetcher, error) {
+				return &mockEC2SpotPriceFetcher{
+					pages: []ec2.DescribeSpotPriceHistoryOutput{
+						{
+							SpotPriceHistory: []ec2types.SpotPrice{
+								{InstanceType: "m8g.large", SpotPrice: aws.String("0.0412"), Timestamp: &now},
+								{InstanceType: "r8g.xlarge", SpotPrice: aws.String("0.0891"), Timestamp: &now},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedPrices: map[string]float64{
+				"m8g.large":  0.0412,
+				"t2.micro":   0.0116,
+				"r8g.xlarge": 0.0891,
+			},
+		},
+		{
+			name: "no zero-price instances skips EC2 call",
+			advices: []Advice{
+				{Region: "us-east-1", Instance: "t2.micro", Price: 0.0116},
+				{Region: "us-east-1", Instance: "t2.small", Price: 0.0232},
+			},
+			mockFactory: func(_ context.Context, _ string) (ec2SpotPriceFetcher, error) {
+				t.Fatal("EC2 client factory should not be called when no zero prices")
+				return nil, fmt.Errorf("should not be called")
+			},
+			expectedPrices: map[string]float64{
+				"t2.micro": 0.0116,
+				"t2.small": 0.0232,
+			},
+		},
+		{
+			name: "EC2 client creation failure keeps price at zero",
+			advices: []Advice{
+				{Region: "us-east-1", Instance: "m8g.large", Price: 0},
+			},
+			mockFactory: func(_ context.Context, _ string) (ec2SpotPriceFetcher, error) {
+				return nil, fmt.Errorf("no AWS credentials")
+			},
+			expectedPrices: map[string]float64{
+				"m8g.large": 0,
+			},
+		},
+		{
+			name: "EC2 API failure keeps price at zero",
+			advices: []Advice{
+				{Region: "us-east-1", Instance: "m8g.large", Price: 0},
+			},
+			mockFactory: func(_ context.Context, _ string) (ec2SpotPriceFetcher, error) {
+				return &mockEC2SpotPriceFetcher{
+					err: fmt.Errorf("access denied"),
+				}, nil
+			},
+			expectedPrices: map[string]float64{
+				"m8g.large": 0,
+			},
+		},
+		{
+			name: "EC2 returns partial results enriches only found instances",
+			advices: []Advice{
+				{Region: "us-east-1", Instance: "m8g.large", Price: 0},
+				{Region: "us-east-1", Instance: "r8g.xlarge", Price: 0},
+			},
+			mockFactory: func(_ context.Context, _ string) (ec2SpotPriceFetcher, error) {
+				return &mockEC2SpotPriceFetcher{
+					pages: []ec2.DescribeSpotPriceHistoryOutput{
+						{
+							SpotPriceHistory: []ec2types.SpotPrice{
+								{InstanceType: "m8g.large", SpotPrice: aws.String("0.0412"), Timestamp: &now},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedPrices: map[string]float64{
+				"m8g.large":  0.0412,
+				"r8g.xlarge": 0,
+			},
+		},
+		{
+			name: "multiple regions handled independently",
+			advices: []Advice{
+				{Region: "us-east-1", Instance: "m8g.large", Price: 0},
+				{Region: "eu-west-1", Instance: "m8g.large", Price: 0},
+			},
+			mockFactory: func(_ context.Context, region string) (ec2SpotPriceFetcher, error) {
+				prices := map[string]string{
+					"us-east-1": "0.0412",
+					"eu-west-1": "0.0398",
+				}
+				return &mockEC2SpotPriceFetcher{
+					pages: []ec2.DescribeSpotPriceHistoryOutput{
+						{
+							SpotPriceHistory: []ec2types.SpotPrice{
+								{InstanceType: "m8g.large", SpotPrice: aws.String(prices[region]), Timestamp: &now},
+							},
+						},
+					},
+				}, nil
+			},
+			expectedPrices: map[string]float64{
+				"m8g.large:us-east-1": 0.0412,
+				"m8g.large:eu-west-1": 0.0398,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origFactory := ec2ClientFactory
+			ec2ClientFactory = tt.mockFactory
+			t.Cleanup(func() { ec2ClientFactory = origFactory })
+
+			enrichZeroPrices(context.Background(), tt.advices)
+
+			for _, adv := range tt.advices {
+				key := adv.Instance
+				if _, ok := tt.expectedPrices[adv.Instance+":"+adv.Region]; ok {
+					key = adv.Instance + ":" + adv.Region
+				}
+				assert.InDelta(t, tt.expectedPrices[key], adv.Price, 0.0001,
+					"price mismatch for %s in %s", adv.Instance, adv.Region)
+			}
+		})
+	}
 }
 
 func TestNewWithOptions_EmbeddedDataMode(t *testing.T) {
