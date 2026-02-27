@@ -323,6 +323,9 @@ func TestConcurrentHelperFunctions(t *testing.T) {
 // TestConcurrentDataProviderInitialization tests the critical sync.Once race condition
 // This is the most important race test - targets real shared state in spot.Client
 func TestConcurrentDataProviderInitialization(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires AWS credentials and real EC2 API calls")
+	}
 	const numGoroutines = 50
 	var wg sync.WaitGroup
 	results := make([]*mcp.CallToolResult, numGoroutines)
