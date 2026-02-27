@@ -67,6 +67,8 @@ linters:
             - spotinfo/internal/spot
             - spotinfo/internal
             - spotinfo/internal/mcp
+            - spotinfo/internal/config
+            - gopkg.in/yaml.v3
             - github.com/jedib0t/go-pretty/v6
             - github.com/urfave/cli/v2
             - github.com/stretchr/testify

@@ -19,6 +19,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/urfave/cli/v2"
 
+	"spotinfo/internal/config"
 	"spotinfo/internal/mcp"
 	"spotinfo/internal/spot"
 )
@@ -554,6 +555,33 @@ func printAdvicesTable(advices []spot.Advice, csv, region bool, output io.Writer
 	}
 }
 
+// applyConfig loads the config file and applies defaults/profile to unset CLI flags.
+func applyConfig(ctx *cli.Context) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	profile := ctx.String("profile")
+	vals, err := cfg.Resolve(profile)
+	if err != nil {
+		return err
+	}
+	if vals == nil {
+		return nil
+	}
+
+	for name, val := range vals {
+		if ctx.IsSet(name) {
+			continue
+		}
+		if err := ctx.Set(name, fmt.Sprintf("%v", val)); err != nil {
+			log.Debug("config: could not set flag", slog.String("flag", name), slog.Any("error", err))
+		}
+	}
+	return nil
+}
+
 func init() {
 	// Initialize logger with default level
 	log = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -584,6 +612,7 @@ func handleSignals() context.Context {
 //nolint:funlen // CLI main functions are inherently long due to comprehensive flag definitions
 func main() {
 	app := &cli.App{
+		EnableBashCompletion: true,
 		Before: func(ctx *cli.Context) error {
 			// Update logger based on flags
 			logLevel := slog.LevelInfo
@@ -600,12 +629,24 @@ func main() {
 				log = slog.New(slog.NewTextHandler(os.Stderr, opts))
 			}
 
+			// Load config file and apply defaults/profile
+			if err := applyConfig(ctx); err != nil {
+				log.Warn("config file error", slog.Any("error", err))
+			}
+
 			return nil
+		},
+		Commands: []*cli.Command{
+			completionCommand(),
 		},
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:  "mcp",
 				Usage: "run as MCP server instead of CLI",
+			},
+			&cli.StringFlag{
+				Name:  "profile",
+				Usage: "use named profile from config file (~/.spotinfo.yaml)",
 			},
 			&cli.BoolFlag{
 				Name:  "debug",
