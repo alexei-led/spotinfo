@@ -248,6 +248,12 @@ func execMainCmd(ctx *cli.Context, execCtx context.Context, client spotClient, o
 		printAdvicesTable(advices, false, printRegion, output)
 	case "csv":
 		printAdvicesTable(advices, true, printRegion, output)
+	case "karpenter":
+		printAdvicesKarpenter(advices, output)
+	case "eksctl":
+		printAdvicesEksctl(advices, output)
+	case "terraform":
+		printAdvicesTerraform(advices, output)
 	default:
 		printAdvicesNumber(advices, printRegion, output)
 	}
@@ -554,6 +560,62 @@ func printAdvicesTable(advices []spot.Advice, csv, region bool, output io.Writer
 	}
 }
 
+func instanceTypes(advices []spot.Advice) []string {
+	types := make([]string, len(advices))
+	for i, a := range advices {
+		types[i] = a.Instance
+	}
+	return types
+}
+
+func printAdvicesKarpenter(advices []spot.Advice, output io.Writer) {
+	types := instanceTypes(advices)
+	fmt.Fprintln(output, "apiVersion: karpenter.sh/v1")                     //nolint:errcheck
+	fmt.Fprintln(output, "kind: NodePool")                                  //nolint:errcheck
+	fmt.Fprintln(output, "metadata:")                                       //nolint:errcheck
+	fmt.Fprintln(output, "  name: spotinfo-generated")                      //nolint:errcheck
+	fmt.Fprintln(output, "spec:")                                           //nolint:errcheck
+	fmt.Fprintln(output, "  template:")                                     //nolint:errcheck
+	fmt.Fprintln(output, "    spec:")                                       //nolint:errcheck
+	fmt.Fprintln(output, "      requirements:")                             //nolint:errcheck
+	fmt.Fprintln(output, "        - key: kubernetes.io/arch")               //nolint:errcheck
+	fmt.Fprintln(output, "          operator: In")                          //nolint:errcheck
+	fmt.Fprintln(output, `          values: ["amd64"]`)                     //nolint:errcheck
+	fmt.Fprintln(output, "        - key: karpenter.sh/capacity-type")       //nolint:errcheck
+	fmt.Fprintln(output, "          operator: In")                          //nolint:errcheck
+	fmt.Fprintln(output, `          values: ["spot"]`)                      //nolint:errcheck
+	fmt.Fprintln(output, "        - key: node.kubernetes.io/instance-type") //nolint:errcheck
+	fmt.Fprintln(output, "          operator: In")                          //nolint:errcheck
+	fmt.Fprintf(output, "          values: [%s]\n", quotedList(types))      //nolint:errcheck
+	fmt.Fprintln(output, "  limits:")                                       //nolint:errcheck
+	fmt.Fprintln(output, "    cpu: 1000")                                   //nolint:errcheck
+}
+
+func printAdvicesEksctl(advices []spot.Advice, output io.Writer) {
+	types := instanceTypes(advices)
+	fmt.Fprintln(output, "managedNodeGroups:")                          //nolint:errcheck
+	fmt.Fprintln(output, "  - name: spot-workers")                      //nolint:errcheck
+	fmt.Fprintf(output, "    instanceTypes: [%s]\n", quotedList(types)) //nolint:errcheck
+	fmt.Fprintln(output, "    spot: true")                              //nolint:errcheck
+	fmt.Fprintln(output, "    minSize: 2")                              //nolint:errcheck
+	fmt.Fprintln(output, "    maxSize: 20")                             //nolint:errcheck
+}
+
+func printAdvicesTerraform(advices []spot.Advice, output io.Writer) {
+	types := instanceTypes(advices)
+	fmt.Fprintln(output, "locals {")                                         //nolint:errcheck
+	fmt.Fprintf(output, "  spot_instance_types = [%s]\n", quotedList(types)) //nolint:errcheck
+	fmt.Fprintln(output, "}")                                                //nolint:errcheck
+}
+
+func quotedList(items []string) string {
+	quoted := make([]string, len(items))
+	for i, item := range items {
+		quoted[i] = fmt.Sprintf("%q", item)
+	}
+	return strings.Join(quoted, ", ")
+}
+
 func init() {
 	// Initialize logger with default level
 	log = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -635,7 +697,7 @@ func main() {
 			},
 			&cli.StringFlag{
 				Name:  "output",
-				Usage: "format output: number|text|json|table|csv",
+				Usage: "format output: number|text|json|table|csv|karpenter|eksctl|terraform",
 				Value: "table",
 			},
 			&cli.IntFlag{
