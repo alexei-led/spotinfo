@@ -227,6 +227,46 @@ func TestExecMainCmd_OutputFormats(t *testing.T) {
 				assert.Contains(t, output, "t2.micro,1,1,50,<5%", "Should contain CSV formatted data")
 			},
 		},
+		{
+			name:         "karpenter format produces NodePool YAML",
+			outputFormat: "karpenter",
+			instanceType: "t2.micro",
+			region:       "us-east-1",
+			validateOutput: func(t *testing.T, output string) {
+				assert.Contains(t, output, "apiVersion: karpenter.sh/v1")
+				assert.Contains(t, output, "kind: NodePool")
+				assert.Contains(t, output, "node.kubernetes.io/instance-type")
+				assert.Contains(t, output, `"t2.micro"`)
+				assert.Contains(t, output, `values: ["spot"]`)
+				assert.Contains(t, output, "cpu: 1000")
+			},
+		},
+		{
+			name:         "eksctl format produces managedNodeGroups YAML",
+			outputFormat: "eksctl",
+			instanceType: "t2.micro",
+			region:       "us-east-1",
+			validateOutput: func(t *testing.T, output string) {
+				assert.Contains(t, output, "managedNodeGroups:")
+				assert.Contains(t, output, "name: spot-workers")
+				assert.Contains(t, output, `"t2.micro"`)
+				assert.Contains(t, output, "spot: true")
+				assert.Contains(t, output, "minSize: 2")
+				assert.Contains(t, output, "maxSize: 20")
+			},
+		},
+		{
+			name:         "terraform format produces HCL locals block",
+			outputFormat: "terraform",
+			instanceType: "t2.micro",
+			region:       "us-east-1",
+			validateOutput: func(t *testing.T, output string) {
+				assert.Contains(t, output, "locals {")
+				assert.Contains(t, output, "spot_instance_types")
+				assert.Contains(t, output, `"t2.micro"`)
+				assert.Contains(t, output, "}")
+			},
+		},
 	}
 
 	for _, tt := range tests {
