@@ -42,8 +42,8 @@
 
 ```bash
 # macOS with Homebrew
-brew tap alexei-led/spotinfo
-brew install spotinfo
+brew tap alexei-led/tap
+brew install alexei-led/tap/spotinfo
 
 # Linux/Windows: Download from releases
 curl -L https://github.com/alexei-led/spotinfo/releases/latest/download/spotinfo_linux_amd64.tar.gz | tar xz

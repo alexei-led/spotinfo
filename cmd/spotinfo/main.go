@@ -285,7 +285,7 @@ func formatPrice(price float64, live bool) string {
 
 func printAdvicesNumber(advices []spot.Advice, region bool, output io.Writer) {
 	if len(advices) == 1 {
-		fmt.Fprintln(output, advices[0].Savings) //nolint:errcheck
+		fmt.Fprintln(output, advices[0].Savings) //nolint:errcheck,gosec // G602: false positive, length checked above
 		return
 	}
 

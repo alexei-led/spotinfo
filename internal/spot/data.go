@@ -50,7 +50,7 @@ func fetchAdvisorData(ctx context.Context) (*advisorData, error) {
 		return loadEmbeddedAdvisorData()
 	}
 
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: spotAdvisorJSONURL is a package-level constant, not user input
 	if err != nil {
 		slog.Warn("failed to fetch advisor data from AWS, using embedded data",
 			slog.String("url", spotAdvisorJSONURL),
@@ -60,7 +60,7 @@ func fetchAdvisorData(ctx context.Context) (*advisorData, error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		slog.Warn("non-200 response from AWS advisor API, using embedded data",
+		slog.Warn("non-200 response from AWS advisor API, using embedded data", //nolint:gosec // G706: status_code is integer from HTTP response, not user-controlled input
 			slog.Int("status_code", resp.StatusCode))
 		return loadEmbeddedAdvisorData()
 	}
@@ -111,7 +111,7 @@ func fetchPricingData(ctx context.Context, useEmbedded bool) (*rawPriceData, err
 		return loadEmbeddedPricingData()
 	}
 
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: spotPriceJSURL is a package-level constant, not user input
 	if err != nil {
 		slog.Warn("failed to fetch pricing data from AWS, using embedded data",
 			slog.String("url", spotPriceJSURL),
@@ -121,7 +121,7 @@ func fetchPricingData(ctx context.Context, useEmbedded bool) (*rawPriceData, err
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		slog.Warn("non-200 response from AWS pricing API, using embedded data",
+		slog.Warn("non-200 response from AWS pricing API, using embedded data", //nolint:gosec // G706: status_code is integer from HTTP response, not user-controlled input
 			slog.Int("status_code", resp.StatusCode))
 		return loadEmbeddedPricingData()
 	}
