@@ -680,8 +680,27 @@ func main() {
 		},
 		Name:    "spotinfo",
 		Usage:   "explore AWS EC2 Spot instances",
-		Action:  mainCmd,
 		Version: Version,
+		Commands: []*cli.Command{
+			{
+				Name:   "recommend",
+				Usage:  "recommend instances for your workload",
+				Action: recommendCmd,
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:  "workload",
+						Usage: "workload type: web|batch|ml|ci",
+						Value: "batch",
+					},
+					&cli.IntFlag{
+						Name:  "top",
+						Usage: "number of top recommendations to show",
+						Value: 3,
+					},
+				},
+			},
+		},
+		Action:  mainCmd,
 	}
 	cli.VersionPrinter = func(_ *cli.Context) {
 		fmt.Printf("spotinfo %s\n", Version)
