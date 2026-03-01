@@ -79,6 +79,9 @@ const (
 	stdioTransport  = "stdio"
 	sseTransport    = "sse"
 	defaultMCPPort  = "8080"
+
+	// Recommendation command defaults
+	defaultTopRecommendations = 3
 )
 
 //nolint:cyclop
@@ -695,7 +698,7 @@ func main() {
 					&cli.IntFlag{
 						Name:  "top",
 						Usage: "number of top recommendations to show",
-						Value: 3,
+						Value: defaultTopRecommendations,
 					},
 				},
 			},

@@ -20,14 +20,49 @@ const (
 	WorkloadCI WorkloadPresetType = "ci"
 )
 
+// Preset weight constants to avoid magic numbers in linters
+const (
+	// Web workload weights
+	webMaxInterruption     = 0.05
+	webPriceWeight         = 0.25
+	webInterruptionWeight  = 0.40
+	webSavingsWeight       = 0.20
+	webPlacementWeight     = 0.15
+
+	// Batch workload weights
+	batchMaxInterruption     = 0.20
+	batchPriceWeight         = 0.45
+	batchInterruptionWeight  = 0.15
+	batchSavingsWeight       = 0.25
+	batchPlacementWeight     = 0.15
+
+	// ML workload weights
+	mlMaxInterruption     = 0.10
+	mlPriceWeight         = 0.25
+	mlInterruptionWeight  = 0.40
+	mlSavingsWeight       = 0.15
+	mlPlacementWeight     = 0.20
+
+	// CI workload weights
+	ciMaxInterruption     = 0.15
+	ciPriceWeight         = 0.40
+	ciInterruptionWeight  = 0.25
+	ciSavingsWeight       = 0.20
+	ciPlacementWeight     = 0.15
+
+	// Scoring constants
+	maxPlacementScore = 10.0
+	interruptionScale = 200.0
+)
+
 // WorkloadPreset defines weight vectors for recommendation scoring.
 type WorkloadPreset struct {
-	Type              WorkloadPresetType
-	MaxInterruption   float64 // max acceptable interruption rate (0-1)
-	PriceWeight       float64 // weight for price in composite score
+	Type               WorkloadPresetType
+	MaxInterruption    float64 // max acceptable interruption rate (0-1)
+	PriceWeight        float64 // weight for price in composite score
 	InterruptionWeight float64 // weight for stability (1 - interruption_rate)
-	SavingsWeight     float64 // weight for savings percentage
-	PlacementWeight   float64 // weight for placement score
+	SavingsWeight      float64 // weight for savings percentage
+	PlacementWeight    float64 // weight for placement score
 }
 
 // GetWorkloadPreset returns the preset configuration for a given workload type.
@@ -35,39 +70,39 @@ func GetWorkloadPreset(workloadType string) *WorkloadPreset {
 	switch WorkloadPresetType(workloadType) {
 	case WorkloadWeb:
 		return &WorkloadPreset{
-			Type:              WorkloadWeb,
-			MaxInterruption:   0.05, // <5%
-			PriceWeight:       0.25,
-			InterruptionWeight: 0.40,
-			SavingsWeight:     0.20,
-			PlacementWeight:   0.15,
+			Type:               WorkloadWeb,
+			MaxInterruption:    webMaxInterruption,
+			PriceWeight:        webPriceWeight,
+			InterruptionWeight: webInterruptionWeight,
+			SavingsWeight:      webSavingsWeight,
+			PlacementWeight:    webPlacementWeight,
 		}
 	case WorkloadBatch:
 		return &WorkloadPreset{
-			Type:              WorkloadBatch,
-			MaxInterruption:   0.20, // <20%
-			PriceWeight:       0.45,
-			InterruptionWeight: 0.15,
-			SavingsWeight:     0.25,
-			PlacementWeight:   0.15,
+			Type:               WorkloadBatch,
+			MaxInterruption:    batchMaxInterruption,
+			PriceWeight:        batchPriceWeight,
+			InterruptionWeight: batchInterruptionWeight,
+			SavingsWeight:      batchSavingsWeight,
+			PlacementWeight:    batchPlacementWeight,
 		}
 	case WorkloadML:
 		return &WorkloadPreset{
-			Type:              WorkloadML,
-			MaxInterruption:   0.10, // <10%
-			PriceWeight:       0.25,
-			InterruptionWeight: 0.40,
-			SavingsWeight:     0.15,
-			PlacementWeight:   0.20,
+			Type:               WorkloadML,
+			MaxInterruption:    mlMaxInterruption,
+			PriceWeight:        mlPriceWeight,
+			InterruptionWeight: mlInterruptionWeight,
+			SavingsWeight:      mlSavingsWeight,
+			PlacementWeight:    mlPlacementWeight,
 		}
 	case WorkloadCI:
 		return &WorkloadPreset{
-			Type:              WorkloadCI,
-			MaxInterruption:   0.15, // <15%
-			PriceWeight:       0.40,
-			InterruptionWeight: 0.25,
-			SavingsWeight:     0.20,
-			PlacementWeight:   0.15,
+			Type:               WorkloadCI,
+			MaxInterruption:    ciMaxInterruption,
+			PriceWeight:        ciPriceWeight,
+			InterruptionWeight: ciInterruptionWeight,
+			SavingsWeight:      ciSavingsWeight,
+			PlacementWeight:    ciPlacementWeight,
 		}
 	default:
 		// Default to batch if unknown
@@ -159,7 +194,7 @@ func (re *RecommendationEngine) scoreAdvice(advice Advice, priceNorm map[string]
 	}
 
 	// Extract interruption rate from range (use midpoint as estimate)
-	interruptionRate := float64(advice.Range.Min+advice.Range.Max) / 200.0 // Convert 1-20 scale to 0-0.20
+	interruptionRate := float64(advice.Range.Min+advice.Range.Max) / interruptionScale // Convert 1-20 scale to 0-0.20
 	item.InterruptionRate = interruptionRate
 
 	// Extract placement score
@@ -174,12 +209,14 @@ func (re *RecommendationEngine) scoreAdvice(advice Advice, priceNorm map[string]
 	stabilityScore := 1.0 - interruptionRate // Higher is better (less interruption)
 	item.BreakdownComponents["stability"] = stabilityScore
 
-	savingsScore := float64(advice.Savings) / 100.0 // Normalize 0-100 to 0-1
+	const savingsScale = 100.0
+	savingsScore := float64(advice.Savings) / savingsScale // Normalize 0-100 to 0-1
 	item.BreakdownComponents["savings"] = savingsScore
 
-	placementScore := 0.5 // Default middle score
+	const defaultPlacementScore = 0.5
+	placementScore := defaultPlacementScore // Default middle score
 	if advice.RegionScore != nil {
-		placementScore = float64(*advice.RegionScore) / 10.0 // Normalize 1-10 to 0-1
+		placementScore = float64(*advice.RegionScore) / maxPlacementScore // Normalize 1-10 to 0-1
 	}
 	item.BreakdownComponents["placement"] = placementScore
 

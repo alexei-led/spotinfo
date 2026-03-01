@@ -125,6 +125,9 @@ func outputRecommendationJSON(rec *spot.Recommendation, output io.Writer) error 
 
 // outputRecommendationTable outputs recommendations in human-readable table format.
 func outputRecommendationTable(rec *spot.Recommendation, output io.Writer, workload string, vCPU, memory int, budget string) error {
+	const scorePercentage = 100
+	const interruptionPercentage = 100
+
 	// Print header
 	fmt.Fprintf(output, "\n")
 	fmt.Fprintf(output, "RECOMMENDATION for: %s", workload)
@@ -148,10 +151,10 @@ func outputRecommendationTable(rec *spot.Recommendation, output io.Writer, workl
 		t.AppendRow(table.Row{
 			item.Rank,
 			item.Instance,
-			fmt.Sprintf("%.1f", item.Score*100),
+			fmt.Sprintf("%.1f", item.Score*scorePercentage),
 			fmt.Sprintf("$%.3f", item.Price),
 			fmt.Sprintf("%d%%", item.Savings),
-			fmt.Sprintf("%.1f%%", item.InterruptionRate*100),
+			fmt.Sprintf("%.1f%%", item.InterruptionRate*interruptionPercentage),
 			item.Rationale,
 		})
 
@@ -172,6 +175,9 @@ func outputRecommendationTable(rec *spot.Recommendation, output io.Writer, workl
 
 // outputRecommendationCSV outputs recommendations in CSV format.
 func outputRecommendationCSV(rec *spot.Recommendation, output io.Writer) error {
+	const scorePercentage = 100
+	const interruptionPercentage = 100
+
 	// Header
 	fmt.Fprintln(output, "Rank,Instance,Score,Price,Savings,InterruptionRate,Rationale")
 
@@ -180,10 +186,10 @@ func outputRecommendationCSV(rec *spot.Recommendation, output io.Writer) error {
 		fmt.Fprintf(output, "%d,%s,%.1f,%.3f,%d,%.1f,\"%s\"\n",
 			item.Rank,
 			item.Instance,
-			item.Score*100,
+			item.Score*scorePercentage,
 			item.Price,
 			item.Savings,
-			item.InterruptionRate*100,
+			item.InterruptionRate*interruptionPercentage,
 			item.Rationale,
 		)
 	}
