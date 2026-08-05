@@ -264,14 +264,22 @@ func (c *Client) GetSpotSavings(ctx context.Context, opts ...GetSpotSavingsOptio
 	// Enrich instances with missing prices from live AWS API
 	enrichMissingPrices(ctx, result, c.livePriceProvider, cfg.instanceOS, livePriceTimeout)
 
-	// Re-apply maxPrice filter after live price enrichment
+	// Re-apply maxPrice filter after live price enrichment.
+	//
+	// A zero price means "unknown" — the instance is absent from the static feed
+	// and live enrichment could not fill it (no credentials, or AWS omits the
+	// region entirely, as it does for me-*). Spot prices are never actually zero,
+	// so an unknown price cannot be asserted to satisfy a price ceiling; drop it
+	// rather than present it as the cheapest option.
 	if cfg.maxPrice != 0 {
 		filtered := result[:0]
+
 		for _, adv := range result {
-			if adv.Price <= cfg.maxPrice {
+			if adv.Price > 0 && adv.Price <= cfg.maxPrice {
 				filtered = append(filtered, adv)
 			}
 		}
+
 		result = filtered
 	}
 
