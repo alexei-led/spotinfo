@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Staged-only checks. Must stay fast; full lint/test live in pre-push.
+# Enable with: make hooks
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+status=0
+note() { printf '%s\n' "$*" >&2; }
+
+# NUL-safe staged paths. --diff-filter=ACMR drops deletions so removed files
+# never reach gofmt. The `+"${arr[@]}"` guard is for bash 3.2 (macOS), where
+# expanding an empty array under `set -u` is an error.
+staged=()
+while IFS= read -r -d '' path; do
+	staged+=("$path")
+done < <(git diff --cached --name-only -z --diff-filter=ACMR)
+
+if [ ${#staged[@]} -eq 0 ]; then
+	exit 0
+fi
+
+go_files=()
+data_staged=0
+for path in ${staged[@]+"${staged[@]}"}; do
+	case "$path" in
+	*.go) go_files+=("$path") ;;
+	internal/spot/data/*) data_staged=1 ;;
+	esac
+done
+
+# gofmt reads the worktree, not the staged blob. Accepted approximation: a
+# partially staged file is judged by its on-disk content.
+if [ ${#go_files[@]} -gt 0 ]; then
+	unformatted=$(gofmt -l -- ${go_files[@]+"${go_files[@]}"})
+	if [ -n "$unformatted" ]; then
+		note "gofmt: unformatted files:"
+		note "$unformatted"
+		note "fix with: make fmt"
+		status=1
+	fi
+fi
+
+# Embedded data is the offline fallback; a corrupt feed must not reach a commit.
+if [ "$data_staged" -eq 1 ]; then
+	make verify-data || status=1
+fi
+
+if command -v gitleaks >/dev/null 2>&1; then
+	gitleaks git --pre-commit --staged --redact --no-banner || status=1
+else
+	note "gitleaks not installed, skipping secret scan (brew install gitleaks)"
+fi
+
+exit "$status"

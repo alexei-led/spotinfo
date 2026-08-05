@@ -15,6 +15,7 @@ coverage.out
 .claude
 .archfit-cache/
 .codegraph/
+.gitnexus/
 progress*.txt
 
 # --- Editors & IDEs ---

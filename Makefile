@@ -34,7 +34,7 @@ export GO111MODULE=on
 export CGO_ENABLED=0
 
 .PHONY: all build test test-verbose test-race test-coverage lint fmt clean help version
-.PHONY: update-data update-price verify-data check-deps setup-tools release mocks
+.PHONY: update-data update-price verify-data check-deps setup-tools release mocks hooks
 
 # Default target
 all: build
@@ -111,6 +111,12 @@ setup-tools:
 	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 	@go install github.com/vektra/mockery/v3@$(MOCKERY_VERSION)
 
+# Opt-in git hooks: staged gofmt/gitleaks on commit, lint+test+gitleaks on push.
+# Local config only, so a clone stays hook-free until a developer runs this.
+hooks:
+	@git config core.hooksPath scripts/git-hooks
+	@echo "git hooks enabled (disable: git config --unset core.hooksPath)"
+
 # Regenerate the testify mocks declared in .mockery.yaml.
 # Every mocked interface must be listed there — a mock that exists only by hand
 # inside the generated file is silently deleted by the next run.
@@ -161,5 +167,6 @@ help:
 	@echo "  release       Build binaries for all platforms"
 	@echo "  clean         Remove build artifacts"
 	@echo "  setup-tools   Install development tools"
+	@echo "  hooks         Enable the pre-commit/pre-push git hooks"
 	@echo "  version       Show version"
 	@echo "  help          Show this help"
