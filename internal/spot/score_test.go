@@ -227,6 +227,53 @@ func TestCreateAPIProviderNeverFabricates(t *testing.T) {
 	assert.True(t, ok, "createAPIProvider must return only *awsScoreProvider or nil, got %T", provider)
 }
 
+// Client.enrichWithScores delegates to its scoreProvider, lazily creating one
+// when absent. Both branches matter: the lazy path is what production uses.
+func TestClientEnrichWithScoresDelegates(t *testing.T) {
+	t.Parallel()
+
+	t.Run("delegates to the configured provider", func(t *testing.T) {
+		t.Parallel()
+
+		advices := []Advice{{Region: testRegionUSEast1, Instance: testInstanceT2Micro}}
+		provider := newMockscoreProvider(t)
+		provider.EXPECT().
+			enrichWithScores(mock.Anything, advices, true, time.Second).
+			Return(nil).
+			Once()
+
+		client := &Client{scoreProvider: provider}
+
+		require.NoError(t, client.enrichWithScores(t.Context(), advices, true, time.Second))
+	})
+
+	t.Run("propagates provider errors", func(t *testing.T) {
+		t.Parallel()
+
+		wantErr := errors.New("scores denied")
+		provider := newMockscoreProvider(t)
+		provider.EXPECT().
+			enrichWithScores(mock.Anything, mock.Anything, false, time.Second).
+			Return(wantErr).
+			Once()
+
+		client := &Client{scoreProvider: provider}
+
+		require.ErrorIs(t, client.enrichWithScores(t.Context(), nil, false, time.Second), wantErr)
+	})
+
+	t.Run("creates a provider when none is set", func(t *testing.T) {
+		t.Parallel()
+
+		client := &Client{}
+
+		// No advices, so nothing is fetched; this pins the lazy-initialisation
+		// branch rather than any particular scoring outcome.
+		require.NoError(t, client.enrichWithScores(t.Context(), nil, false, time.Second))
+		assert.NotNil(t, client.scoreProvider, "a score provider must be created on demand")
+	})
+}
+
 func TestSortAndFilterByScore(t *testing.T) {
 	t.Parallel()
 

@@ -297,6 +297,50 @@ func TestSortAdvices_AllSortTypes(t *testing.T) {
 				assert.Equal(t, "us-west-2", result[1].Region, "us-west-2 should come after us-east-1")
 			},
 		},
+		{
+			name:     "sort_by_range_lowest_interruption_first",
+			sortBy:   SortByRange,
+			sortDesc: false,
+			checkFn: func(t *testing.T, result []Advice) {
+				assert.Equal(t, 5, result[0].Range.Min, "lowest interruption range first")
+				assert.Equal(t, 10, result[1].Range.Min)
+			},
+		},
+		{
+			name:     "sort_by_range_descending",
+			sortBy:   SortByRange,
+			sortDesc: true,
+			checkFn: func(t *testing.T, result []Advice) {
+				assert.Equal(t, 10, result[0].Range.Min, "highest interruption range first when reversed")
+			},
+		},
+		{
+			name:     "sort_by_instance_alphabetical",
+			sortBy:   SortByInstance,
+			sortDesc: false,
+			checkFn: func(t *testing.T, result []Advice) {
+				assert.Equal(t, testInstanceT3Large, result[0].Instance, "t3.large sorts before t3.medium")
+				assert.Equal(t, testInstanceT3Medium, result[1].Instance)
+			},
+		},
+		{
+			name:     "sort_by_price_cheapest_first",
+			sortBy:   SortByPrice,
+			sortDesc: false,
+			checkFn: func(t *testing.T, result []Advice) {
+				assert.InDelta(t, 0.05, result[0].Price, 1e-9, "cheapest first")
+				assert.InDelta(t, 0.10, result[1].Price, 1e-9)
+			},
+		},
+		{
+			name:     "sort_by_savings_highest_first",
+			sortBy:   SortBySavings,
+			sortDesc: true,
+			checkFn: func(t *testing.T, result []Advice) {
+				assert.Equal(t, 50, result[0].Savings, "largest savings first")
+				assert.Equal(t, 30, result[1].Savings)
+			},
+		},
 	}
 
 	for _, tt := range tests {
