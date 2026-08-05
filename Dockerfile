@@ -3,7 +3,7 @@
 #
 # ----- Go Builder Image ------
 #
-FROM --platform=${BUILDPLATFORM} golang:1.24-alpine AS builder
+FROM --platform=${BUILDPLATFORM} golang:1.26-alpine AS builder
 
 # Only install essential tools for building
 RUN apk add --no-cache git make ca-certificates

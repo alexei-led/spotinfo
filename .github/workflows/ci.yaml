@@ -24,7 +24,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v7
       with:
-        go-version: '1.24'
+        go-version: '1.26'
         
     - name: Cache Go modules
       uses: actions/cache@v6
@@ -71,7 +71,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v7
       with:
-        go-version: '1.24'
+        go-version: '1.26'
         
     - name: Build for ${{ matrix.os }}/${{ matrix.arch }}
       env:

@@ -89,6 +89,10 @@ func NewFindSpotInstancesTool(client spotClient, logger *slog.Logger) *FindSpotI
 }
 
 // Handle implements the find_spot_instances tool
+// Signature is fixed by mcp-go's server.ToolHandlerFunc, which takes the request
+// by value, so gocritic's hugeParam suggestion cannot be applied here.
+//
+//nolint:gocritic // hugeParam: signature dictated by mcp-go
 func (t *FindSpotInstancesTool) Handle(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	startTime := time.Now()
 	t.logger.Debug("handling find_spot_instances request", slog.Any("arguments", req.Params.Arguments))
@@ -352,6 +356,8 @@ func NewListSpotRegionsTool(client spotClient, logger *slog.Logger) *ListSpotReg
 }
 
 // Handle implements the list_spot_regions tool
+//
+//nolint:gocritic // hugeParam: signature dictated by mcp-go's server.ToolHandlerFunc
 func (t *ListSpotRegionsTool) Handle(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	t.logger.Debug("handling list_spot_regions request")
 

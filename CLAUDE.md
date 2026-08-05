@@ -67,7 +67,7 @@ Sources 1-2 are embedded in the binary during build for offline capability.
 - `github.com/stretchr/testify` - Testing framework with assertions
 
 ## Build Requirements
-- Go 1.24+
+- Go 1.26+
 - wget (for data updates)
 - golangci-lint (installed via make setup-tools)
 
@@ -77,14 +77,14 @@ The CLI supports multiple output formats: number, text, json, table, csv
 ## CI/CD Pipeline
 
 ### GitHub Actions Workflows
-- **ci.yaml**: Modern CI with Go 1.24, tests, linting, matrix builds for all platforms
+- **ci.yaml**: Modern CI with Go 1.26, tests, linting, matrix builds for all platforms
 - **release.yaml**: Tag-triggered releases with binary uploads using standard Go toolchain
 - **docker.yaml**: Multi-arch Docker images published to GitHub Container Registry (ghcr.io)
 - **auto-release.yaml**: Quarterly automated releases with smart change detection and semantic versioning
 - **update-data.yaml**: Weekly refresh of the embedded AWS feeds; warns on stale feeds and opens a PR. This is the only workflow that touches `internal/spot/data/`.
 
 ### Docker
-- **Build**: `docker build -t spotinfo .` (uses Go 1.24 and `make build`)
+- **Build**: `docker build -t spotinfo .` (uses Go 1.26 and `make build`)
 - **Multi-arch**: Supports linux/amd64 and linux/arm64 platforms
 - **Registry**: Published to `ghcr.io/alexei-led/spotinfo`
 - **Base**: Uses scratch image with ca-certificates for minimal attack surface
@@ -105,7 +105,7 @@ The CLI supports multiple output formats: number, text, json, table, csv
 - Run `make test-verbose` before committing changes
 - Embedded data is refreshed by the weekly `update-data` workflow via PR — see Data Update
   Workflow below before refreshing it by hand
-- Follow Go 1.24 best practices and modern testing patterns
+- Follow Go 1.26 best practices and modern testing patterns
 - NEVER add Claude as co-author to git commit message
 ## Data Update Workflow
 

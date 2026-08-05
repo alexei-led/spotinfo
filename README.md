@@ -149,7 +149,7 @@ Credentials are loaded via the [AWS SDK default credential chain](https://docs.a
 
 ## Development
 
-**Requirements**: Go 1.24+, make, golangci-lint
+**Requirements**: Go 1.26+, make, golangci-lint
 
 ```bash
 # Build and test

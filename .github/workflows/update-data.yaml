@@ -33,7 +33,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.24'
+          go-version: '1.26'
 
       # The legacy spot.js feed silently froze for over two years before anyone
       # noticed. Age is checked explicitly so the next freeze surfaces in weeks.
