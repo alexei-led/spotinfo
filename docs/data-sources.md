@@ -9,7 +9,9 @@
 ### 1. AWS Spot Instance Advisor Data
 - **Source**: [AWS Spot Advisor JSON feed](https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json)
 - **Maintained by**: AWS team
-- **Update frequency**: Regularly updated by AWS
+- **Update frequency**: Irregular — AWS republishes it every few months, so expect the
+  savings and interruption figures to lag the market. The weekly `update-data` workflow
+  warns if this feed has not changed in 180 days.
 - **Contains**:
   - Instance specifications (vCPU, memory, EMR compatibility)
   - Interruption frequency ranges
@@ -17,18 +19,33 @@
   - Regional availability data
 
 ### 2. AWS Spot Pricing Data
-- **Source**: [AWS Spot Pricing JS callback file](http://spot-price.s3.amazonaws.com/spot.js)
+- **Source**: [AWS spot pricing feed](https://website.spot.ec2.aws.a2z.com/spot.json) — the
+  feed behind <https://aws.amazon.com/ec2/spot/pricing/>
 - **Maintained by**: AWS team
-- **Update frequency**: Regularly updated by AWS
+- **Update frequency**: Hourly
+- **Format**: Plain JSON (no JSONP `callback(...)` wrapper)
 - **Contains**:
   - Current spot prices by region and instance type
   - Operating system pricing variations (Linux/Windows)
-  - Historical pricing trends
+- **Coverage**: 40 regions. Note that AWS omits all Middle East (`me-*`) regions from this
+  feed; instances there report `$0` and fall through to the live pricing API below.
+- **Caveat**: This is an undocumented endpoint, not a published AWS API. It can change
+  without notice, which is why every fetch falls back to the embedded copy on failure.
+
+> **Superseded source.** `http://spot-price.s3.amazonaws.com/spot.js` was the original JSONP
+> feed. It has been frozen since **2024-05-13** and is missing every instance family released
+> after that date, so it is no longer used.
+>
+> Mind the extension: the same host as the live feed also serves
+> `website.spot.ec2.aws.a2z.com/spot.**js**`, which is a byte-identical copy of that dead
+> object (same ETag). Only `spot.**json**` is live.
 
 ### 3. AWS EC2 Live Spot Pricing API
 - **Source**: AWS `DescribeSpotPriceHistory` API
 - **Access**: Real-time API calls (requires `ec2:DescribeSpotPriceHistory` permission)
-- **Purpose**: Fills in pricing for newer instance types (e.g., m8g, r8g) missing from the static feed
+- **Purpose**: Fills in pricing for instance types missing from the static feed — the newest
+  families in the days before AWS adds them, plus every instance in the Middle East (`me-*`)
+  regions, which AWS omits from the static feed entirely
 - **Trigger**: Only called when instances have advisor data but $0 pricing from the static feed
 - **Contains**:
   - Current spot prices per instance type and region
@@ -79,7 +96,8 @@ graph TB
 - **Purpose**: Ensure functionality without network connectivity
 - **Implementation**: Data is [embedded](https://golang.org/pkg/embed) into the binary during build
 - **Coverage**: Complete spot advisor and pricing data snapshot
-- **Update process**: Refreshed during each build via `make update-data`
+- **Update process**: Refreshed by the weekly `update-data` workflow, which opens a PR.
+  Builds are hermetic — they embed exactly what is committed and never fetch.
 
 ### Fallback Strategy
 1. **Primary**: Fetch fresh data from AWS feeds
@@ -98,7 +116,7 @@ func fetchData() {
         advisorData = loadEmbeddedAdvisorData()
     }
     
-    pricingData := fetchFromURL("http://spot-price.s3.amazonaws.com/spot.js")
+    pricingData := fetchFromURL("https://website.spot.ec2.aws.a2z.com/spot.json")
     if pricingData == nil {
         pricingData = loadEmbeddedPricingData()
     }
@@ -164,13 +182,20 @@ func fetchData() {
 
 ## Data Update Process
 
-### Build-Time Updates
+### Refreshing the embedded data
+Normally you do not do this by hand: the `update-data` GitHub Actions workflow runs weekly,
+refreshes both feeds, and opens a PR. To do it manually:
+
 ```bash
-# Update embedded data during build
 make update-data    # Updates spot advisor data
 make update-price   # Updates spot pricing data
-make build          # Embeds fresh data in binary
+make verify-data    # Parse gate on the embedded files
+make build          # Embeds the committed data in the binary
 ```
+
+`make build` does **not** download anything — it embeds whatever is on disk. Each update
+target downloads to a `.tmp` file and only replaces the tracked file on success, so a failed
+or truncated download cannot clobber good data.
 
 ### Runtime Data Flow
 1. **Startup**: Load embedded data as baseline
@@ -210,8 +235,8 @@ make build          # Embeds fresh data in binary
 
 **Stale pricing data:**
 ```bash
-# Force fresh data fetch
-make update-data update-price build
+# Refresh the embedded feeds, verify, then rebuild
+make update-data update-price verify-data build
 ```
 
 **Missing placement scores:**

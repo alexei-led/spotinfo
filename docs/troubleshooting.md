@@ -346,7 +346,7 @@ curl -L https://github.com/alexei-led/spotinfo/releases/latest/download/spotinfo
 ```bash
 # Test AWS endpoints
 curl -s https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json | head
-curl -s http://spot-price.s3.amazonaws.com/spot.js | head
+curl -s https://website.spot.ec2.aws.a2z.com/spot.json | head
 
 # Check network connectivity
 ping spot-bid-advisor.s3.amazonaws.com

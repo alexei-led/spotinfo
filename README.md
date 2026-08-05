@@ -155,8 +155,8 @@ Credentials are loaded via the [AWS SDK default credential chain](https://docs.a
 # Build and test
 make all
 
-# Update embedded data
-make update-data update-price
+# Update embedded data (usually unnecessary — a weekly workflow opens a PR for this)
+make update-data update-price verify-data
 
 # Docker build
 docker buildx build --platform=linux/arm64,linux/amd64 -t spotinfo .
