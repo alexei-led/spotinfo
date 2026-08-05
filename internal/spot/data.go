@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -29,6 +30,12 @@ const (
 	responsePrefix = "callback("
 	responseSuffix = ");"
 	httpTimeout    = 5 * time.Second
+)
+
+// Sentinel errors for feed payloads that parse but carry no usable data.
+var (
+	errNoAdvisorRegions = errors.New("advisor data contained no regions")
+	errNoPricingRegions = errors.New("pricing data contained no regions")
 )
 
 // minRange maps interruption range max values to min values
@@ -66,15 +73,31 @@ func fetchAdvisorData(ctx context.Context) (*advisorData, error) {
 		return loadEmbeddedAdvisorData()
 	}
 
-	var result advisorData
-	err = json.Unmarshal(body, &result)
+	result, err := parseAdvisorResponse(body)
 	if err != nil {
-		slog.Warn("failed to parse advisor data from AWS, using embedded data",
+		slog.Warn("unusable advisor data from AWS, using embedded data",
 			slog.Any("error", err))
 		return loadEmbeddedAdvisorData()
 	}
 
 	slog.Debug("successfully fetched advisor data from AWS")
+	return result, nil
+}
+
+// parseAdvisorResponse decodes an advisor feed body and rejects unusable payloads.
+// A 200 carrying valid-but-unexpected JSON (an empty body, renamed keys) unmarshals
+// cleanly into a zero-valued struct, so an empty region set must be an error rather
+// than an advisor that silently knows about nothing.
+func parseAdvisorResponse(body []byte) (*advisorData, error) {
+	var result advisorData
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse advisor data: %w", err)
+	}
+
+	if len(result.Regions) == 0 {
+		return nil, errNoAdvisorRegions
+	}
+
 	return &result, nil
 }
 
@@ -127,19 +150,34 @@ func fetchPricingData(ctx context.Context, useEmbedded bool) (*rawPriceData, err
 		return loadEmbeddedPricingData()
 	}
 
-	// Process JSONP response
-	bodyString := strings.TrimPrefix(string(bodyBytes), responsePrefix)
-	bodyString = strings.TrimSuffix(bodyString, responseSuffix)
-
-	var result rawPriceData
-	err = json.Unmarshal([]byte(bodyString), &result)
+	result, err := parsePricingResponse(bodyBytes)
 	if err != nil {
-		slog.Warn("failed to parse pricing data from AWS, using embedded data",
+		slog.Warn("unusable pricing data from AWS, using embedded data",
 			slog.Any("error", err))
 		return loadEmbeddedPricingData()
 	}
 
 	slog.Debug("successfully fetched pricing data from AWS")
+	return result, nil
+}
+
+// parsePricingResponse decodes a pricing feed body and rejects unusable payloads.
+// An empty region set would otherwise price every instance at $0 with no fallback,
+// which matters because the feed is an undocumented endpoint that may change shape.
+func parsePricingResponse(body []byte) (*rawPriceData, error) {
+	// The current feed is plain JSON; these trims are no-ops unless it is re-wrapped.
+	bodyString := strings.TrimPrefix(string(body), responsePrefix)
+	bodyString = strings.TrimSuffix(bodyString, responseSuffix)
+
+	var result rawPriceData
+	if err := json.Unmarshal([]byte(bodyString), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse pricing data: %w", err)
+	}
+
+	if len(result.Config.Regions) == 0 {
+		return nil, errNoPricingRegions
+	}
+
 	return &result, nil
 }
 
