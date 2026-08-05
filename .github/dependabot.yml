@@ -1,0 +1,42 @@
+version: 2
+# Pins in this repo are deliberate (golang:1.26-alpine3.24, MOCKERY_VERSION,
+# major-version action tags), which means they go stale silently without an
+# update path. These keep them moving.
+updates:
+  # Go module dependencies. Grouped so the AWS SDK's many sibling modules
+  # arrive as one reviewable PR rather than a dozen.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      aws-sdk:
+        patterns:
+          - github.com/aws/aws-sdk-go-v2*
+          - github.com/aws/smithy-go
+      golang-x:
+        patterns:
+          - golang.org/x/*
+    ignore:
+      # Staying on v2 deliberately; see the Key Libraries note in CLAUDE.md.
+      - dependency-name: github.com/urfave/cli/v2
+        update-types:
+          - version-update:semver-major
+  # The builder base image is pinned to an explicit alpine minor.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+  # Action versions are pinned to major tags and were badly stale before.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns:
+          - '*'
