@@ -56,10 +56,12 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: ${{ github.event_name != 'pull_request' }}
           labels: ${{ steps.meta.outputs.labels }}
-          # .git is not in the build context, so the version cannot be derived
-          # inside the container and must be passed in.
+          # .git is not in the build context, so the version stamps cannot be
+          # derived inside the container and must be passed in.
           build-args: |
             VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+            COMMIT=${{ github.sha }}
+            BRANCH=${{ github.ref_name }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
           cache-from: type=gha,scope=${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}

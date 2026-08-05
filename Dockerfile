@@ -27,10 +27,16 @@ FROM --platform=${BUILDPLATFORM} builder AS build
 ARG TARGETOS
 ARG TARGETARCH
 
-# Version is passed in rather than derived from git. The .git directory is not in
-# the build context (30MB of history that the image must never carry), so the
-# Makefile's `git describe` cannot run here and would silently stamp v0.
+# Version stamps are passed in rather than derived from git. The .git directory is
+# not in the build context (30MB of history that the image must never carry), so
+# the Makefile's `git describe` cannot run here and would silently stamp v0.
+# COMMIT and BRANCH must be passed for the same reason: left unset, the Makefile
+# shells out to git, finds no binary, and stamps them empty. Empty defaults are
+# deliberate — an argument-less `docker build` reports "dev" with no commit line
+# rather than inventing one.
 ARG VERSION=dev
+ARG COMMIT=
+ARG BRANCH=
 
 # set working directory
 RUN mkdir -p /go/src/app
@@ -49,7 +55,8 @@ COPY . .
 # names produced a host-architecture binary on every cross-build.
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    GOOS=${TARGETOS} GOARCH=${TARGETARCH} VERSION=${VERSION} make build
+    GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    make build VERSION="${VERSION}" COMMIT="${COMMIT}" BRANCH="${BRANCH}"
 
 
 
