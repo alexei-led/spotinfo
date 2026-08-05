@@ -1,4 +1,4 @@
-# syntax = docker/dockerfile:experimental
+# syntax=docker/dockerfile:1
 
 #
 # ----- Go Builder Image ------
@@ -24,13 +24,17 @@ WORKDIR /go/src/app
 # load dependency
 COPY go.mod .
 COPY go.sum .
-RUN --mount=type=cache,target=/go/mod go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 # copy sources
 COPY . .
 
-# test and build
-RUN --mount=type=cache,target=/root/.cache/go-build TARGETOS=${TARGETOS} TARGETARCH=${TARGETARCH} make build
+# Build for the target platform. GOOS/GOARCH, not TARGETOS/TARGETARCH: the
+# Makefile's build target passes neither to `go build`, so exporting the buildkit
+# names produced a host-architecture binary on every cross-build.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    GOOS=${TARGETOS} GOARCH=${TARGETARCH} make build
 
 
 
