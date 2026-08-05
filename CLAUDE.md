@@ -207,8 +207,10 @@ func WithFoo(foo string) GetSpotSavingsOption {
 
 - **Framework**: testify for assertions; `make test-coverage` for the coverage report
 - **Unit tests** use mock providers from `mocks_test.go` — no AWS credentials needed
-- **Integration tests** require real AWS credentials — skip with `-short` flag
-- **Pattern**: `if testing.Short() { t.Skip("requires AWS credentials") }`
+- **Integration tests**: there are none today — every test runs without AWS credentials
+  or network, so `-short` currently skips nothing. If you add one that needs real AWS,
+  guard it with `if testing.Short() { t.Skip("requires AWS credentials") }` so
+  `go test -short ./...` stays credential-free.
 - **Parallel**: all unit tests use `t.Parallel()` — keep it that way
 - **Table-driven**: use `tc := tc` (loop variable capture) or Go 1.22+ range semantics
 - **Resilient**: assertions tolerate the embedded feeds changing under them
@@ -218,9 +220,10 @@ func WithFoo(foo string) GetSpotSavingsOption {
 
 When adding a new feature:
 
-1. Add mock support in `mocks_test.go` if new interface method needed
+1. Add the interface to `.mockery.yaml` and run `make mocks` if a new mock is needed
 2. Write unit test with mock provider
-3. Optionally add integration test guarded by `testing.Short()`
+3. Only if it genuinely needs live AWS, add an integration test guarded by
+   `testing.Short()` — and expect to be the first, see above
 
 ## Common Mistakes to Avoid
 
