@@ -9,32 +9,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Development Commands
 
 ### Building
+
 - `make build` - Build binary for current OS/arch. Hermetic: embeds the committed data, never downloads.
 - `make all` - Alias for `make build` (nothing more, despite the name)
 - `make release` - Build binaries for multiple platforms
 
 ### Testing
+
 - `make test` - `go test ./...`
 - `make test-verbose` - `go test -v ./...`
 - `make test-race` - Run tests with race detector
 - `make test-coverage` - Run tests with coverage reporting
 
 ### Code Quality
+
 - `make lint` - Run golangci-lint with config from `.golangci.yaml`
 - `make fmt` - `go fmt ./...`
 
 ### Data Updates
+
 - `make update-data` - Update embedded Spot Advisor data from AWS
 - `make update-price` - Update embedded spot pricing data from AWS
 - `make verify-data` - Parse gate: fails if the embedded files are not valid data
 
 ### Dependencies
+
 - `make check-deps` - Verify system has required dependencies (wget)
 - `make setup-tools` - Install golangci-lint (only that; mockery is not installed)
 
 ## Architecture
 
 ### Core Components
+
 - `cmd/spotinfo/main.go` - CLI entry point using urfave/cli/v2
 - `internal/spot/` - Core business logic package
   - `client.go` - Spot client orchestration and option handling
@@ -48,17 +54,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 There is no `price.go`; static pricing lives in `data.go` alongside the advisor parsing.
 
 ### Data Sources
+
 The tool uses three data sources:
+
 1. Spot Instance Advisor data: `https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json`
 2. Spot pricing data: `https://website.spot.ec2.aws.a2z.com/spot.json` (the feed behind
-   https://aws.amazon.com/ec2/spot/pricing/ — replaces the legacy JSONP
+   <https://aws.amazon.com/ec2/spot/pricing/> — replaces the legacy JSONP
    `spot-price.s3.amazonaws.com/spot.js`, frozen since 2024-05-13)
 3. EC2 DescribeSpotPriceHistory API: Live fallback for newer instance types with $0 in the static feed
 
 Sources 1-2 are embedded in the binary during build for offline capability.
 
 ### Key Libraries
-- `github.com/urfave/cli/v2` - CLI framework
+
+- `github.com/urfave/cli/v2` - CLI framework. **Stay on v2.** v3 is stable but the
+  migration rewrites the entire CLI surface (`cli.Command` replaces `cli.App`, changed
+  context and flag access) for no user-visible gain. Do not "upgrade" it as part of a
+  routine dependency bump; revisit only if v2 stops getting security fixes.
 - `github.com/jedib0t/go-pretty/v6` - Table formatting
 - `github.com/aws/aws-sdk-go-v2` - AWS SDK for live pricing and placement scores
 - `github.com/mark3labs/mcp-go` - MCP server implementation (`internal/mcp/`)
@@ -67,16 +79,19 @@ Sources 1-2 are embedded in the binary during build for offline capability.
 - `github.com/stretchr/testify` - Testing framework with assertions
 
 ## Build Requirements
+
 - Go 1.26+
 - wget (for data updates)
 - golangci-lint (installed via make setup-tools)
 
 ## Output Formats
+
 The CLI supports multiple output formats: number, text, json, table, csv
 
 ## CI/CD Pipeline
 
 ### GitHub Actions Workflows
+
 - **ci.yaml**: Modern CI with Go 1.26, tests, linting, matrix builds for all platforms
 - **release.yaml**: Tag-triggered releases with binary uploads using standard Go toolchain
 - **docker.yaml**: Multi-arch Docker images published to GitHub Container Registry (ghcr.io)
@@ -84,36 +99,36 @@ The CLI supports multiple output formats: number, text, json, table, csv
 - **update-data.yaml**: Weekly refresh of the embedded AWS feeds; warns on stale feeds and opens a PR. This is the only workflow that touches `internal/spot/data/`.
 
 ### Docker
+
 - **Build**: `docker build -t spotinfo .` (uses Go 1.26 and `make build`)
 - **Multi-arch**: Supports linux/amd64 and linux/arm64 platforms
 - **Registry**: Published to `ghcr.io/alexei-led/spotinfo`
 - **Base**: Uses scratch image with ca-certificates for minimal attack surface
 
 ### Release Process
+
 1. **Manual Release**: Create and push a tag starting with 'v' (e.g., `git tag v1.2.3 && git push origin v1.2.3`)
 2. **Automated Release**: Runs quarterly (Jan/Apr/Jul/Oct) with automatic version bumping
 3. **Artifacts**: Cross-platform binaries for Linux/macOS/Windows on AMD64/ARM64
 
-## Testing
-- **Framework**: Uses testify for assertions and test structure
-- **Parallel Execution**: Tests run in parallel for better performance
-- **Resilient Patterns**: Tests are resilient to data changes from external feeds
-- **Coverage**: Comprehensive test coverage with `make test-coverage`
-
 ## Development Guidance
+
 - Use `make` commands for all development tasks
 - Run `make test-verbose` before committing changes
 - Embedded data is refreshed by the weekly `update-data` workflow via PR — see Data Update
   Workflow below before refreshing it by hand
 - Follow Go 1.26 best practices and modern testing patterns
 - NEVER add Claude as co-author to git commit message
+
 ## Data Update Workflow
 
 The embedded data files are critical — they provide offline capability:
+
 - `internal/spot/data/spot-advisor-data.json` — Interruption rates, savings % (AWS advisor feed)
 - `internal/spot/data/spot-price-data.json` — Static spot pricing (AWS pricing-page feed, plain JSON)
 
 **Update flow:**
+
 1. `make update-data` — fetches fresh `spot-advisor-data.json`
 2. `make update-price` — fetches fresh `spot-price-data.json`
 3. `make verify-data` — parse gate on the embedded files
@@ -170,8 +185,8 @@ In tests: use `mocks_test.go` which implements all interfaces with controllable 
 > hand inside the generated file is silently deleted by the next run. `livePriceProvider`
 > was in exactly that state and is now declared properly, alongside `advisorProvider`,
 > `pricingProvider`, `scoreProvider`, `awsAPIProvider` and `spotClient`.
-In production: use `NewWithOptions()` which wires up real AWS providers.
-For injection: use `NewWithProviders(advisor, pricing)` + `SetLivePriceProvider()`.
+> In production: use `NewWithOptions()` which wires up real AWS providers.
+> For injection: use `NewWithProviders(advisor, pricing)` + `SetLivePriceProvider()`.
 
 ## Functional Options Pattern
 
@@ -190,13 +205,19 @@ func WithFoo(foo string) GetSpotSavingsOption {
 
 ## Testing Approach
 
+- **Framework**: testify for assertions; `make test-coverage` for the coverage report
 - **Unit tests** use mock providers from `mocks_test.go` — no AWS credentials needed
 - **Integration tests** require real AWS credentials — skip with `-short` flag
 - **Pattern**: `if testing.Short() { t.Skip("requires AWS credentials") }`
 - **Parallel**: all unit tests use `t.Parallel()` — keep it that way
 - **Table-driven**: use `tc := tc` (loop variable capture) or Go 1.22+ range semantics
+- **Resilient**: assertions tolerate the embedded feeds changing under them
+- **No network in unit tests**: build clients via the embedded path and a nil live-price
+  provider. A real client stalls for `livePriceTimeout` (10s) per call on unpriced
+  instances — that alone was 79s of the suite. See `newEmbeddedClient` in `internal/mcp`.
 
 When adding a new feature:
+
 1. Add mock support in `mocks_test.go` if new interface method needed
 2. Write unit test with mock provider
 3. Optionally add integration test guarded by `testing.Short()`
