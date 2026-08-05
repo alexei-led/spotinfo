@@ -2,7 +2,9 @@ package spot
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -31,11 +33,14 @@ const (
 	maxRetryAttempts           = 5
 	DefaultScoreTimeoutSeconds = 30
 	defaultScoreTimeout        = DefaultScoreTimeoutSeconds * time.Second
-
-	// Mock score range for fallback
-	minMockScore = 1
-	maxMockScore = 10
 )
+
+// errScoreProviderUnavailable is returned when placement scores were requested
+// but AWS could not be reached. Reported rather than substituted: a synthetic
+// score is indistinguishable from a real one and would silently misinform
+// capacity decisions.
+var errScoreProviderUnavailable = errors.New(
+	"spot placement scores unavailable: requires AWS credentials and the ec2:GetSpotPlacementScores permission")
 
 // awsAPIProvider provides spot placement scores with different implementations.
 type awsAPIProvider interface {
@@ -46,9 +51,6 @@ type awsAPIProvider interface {
 type awsScoreProvider struct {
 	cfg aws.Config
 }
-
-// mockScoreProvider implements awsAPIProvider using mock scores for fallback.
-type mockScoreProvider struct{}
 
 // CachedScoreData wraps scores with timestamp for freshness tracking.
 type CachedScoreData struct {
@@ -109,16 +111,24 @@ func newScoreCache() *scoreCache {
 	}
 }
 
-// createAPIProvider creates an AWS API provider or falls back to mock.
+// createAPIProvider creates an AWS API provider, or nil when AWS is unavailable.
+//
+// It deliberately does NOT fall back to synthetic scores. Placement scores drive
+// capacity decisions, so an invented number presented as an AWS score is worse
+// than an explicit failure: the caller asked for scores with --with-score and is
+// entitled to know they could not be obtained.
 //
 //nolint:contextcheck // Initialization function appropriately uses context.Background() for AWS config
 func createAPIProvider() awsAPIProvider {
-	// Try to create AWS provider
-	if provider, err := newAWSScoreProvider(context.Background()); err == nil {
-		return provider
+	provider, err := newAWSScoreProvider(context.Background())
+	if err != nil {
+		slog.Debug("placement score provider unavailable",
+			slog.Any("error", err))
+
+		return nil
 	}
-	// Fallback to mock provider
-	return &mockScoreProvider{}
+
+	return provider
 }
 
 // newAWSScoreProvider creates a new AWS score provider with proper configuration.
@@ -187,17 +197,6 @@ func (p *awsScoreProvider) fetchScores(ctx context.Context, region string, insta
 	return scores, nil
 }
 
-// fetchScores implements scoreProvider for mock scores.
-func (p *mockScoreProvider) fetchScores(ctx context.Context, region string, instanceTypes []string, singleAZ bool) (map[string]int, error) {
-	scores := make(map[string]int)
-	for i, instanceType := range instanceTypes {
-		// Generate deterministic mock scores based on instance type and position
-		score := (len(instanceType)*7+i*3)%maxMockScore + minMockScore
-		scores[instanceType] = score
-	}
-	return scores, nil
-}
-
 // getCacheKey creates a consistent cache key for region and instance types.
 func (sc *scoreCache) getCacheKey(region string, instanceTypes []string, singleAZ bool) string {
 	sorted := make([]string, len(instanceTypes))
@@ -215,6 +214,10 @@ func (sc *scoreCache) getCacheKey(region string, instanceTypes []string, singleA
 // getSpotPlacementScores fetches spot placement scores with caching and rate limiting.
 func (sc *scoreCache) getSpotPlacementScores(ctx context.Context, region string,
 	instanceTypes []string, singleAZ bool) (map[string]int, error) {
+
+	if sc.provider == nil {
+		return nil, errScoreProviderUnavailable
+	}
 
 	cacheKey := sc.getCacheKey(region, instanceTypes, singleAZ)
 
@@ -263,7 +266,7 @@ func (sc *scoreCache) enrichWithScores(ctx context.Context, advices []Advice,
 	// Process each region in parallel
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	var errors []string
+	var fetchErrs []string
 
 	for region, regionAdvices := range regionGroups {
 		wg.Add(1)
@@ -300,7 +303,7 @@ func (sc *scoreCache) enrichWithScores(ctx context.Context, advices []Advice,
 			defer mu.Unlock()
 
 			if err != nil {
-				errors = append(errors, fmt.Sprintf("region %s: %v", r, err))
+				fetchErrs = append(fetchErrs, fmt.Sprintf("region %s: %v", r, err))
 				return
 			}
 
@@ -333,8 +336,9 @@ func (sc *scoreCache) enrichWithScores(ctx context.Context, advices []Advice,
 
 	wg.Wait()
 
-	if len(errors) > 0 {
-		return fmt.Errorf("score enrichment failed: %s", strings.Join(errors, "; "))
+	if len(fetchErrs) > 0 {
+		// Caller (GetSpotSavings) already prefixes "score enrichment failed".
+		return fmt.Errorf("%s", strings.Join(fetchErrs, "; "))
 	}
 
 	return nil
