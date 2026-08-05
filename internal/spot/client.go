@@ -14,6 +14,10 @@ const (
 	DefaultTimeoutSeconds = 5
 	// allRegionsKeyword represents the special "all" regions value.
 	allRegionsKeyword = "all"
+	// osLinux and osWindows are the instance OS values accepted by this package.
+	// Compared case-insensitively; stored lowercase.
+	osLinux   = "linux"
+	osWindows = "windows"
 )
 
 // getSpotSavingsConfig holds configuration options for GetSpotSavingsWithOptions.
@@ -183,7 +187,7 @@ func (c *Client) SetLivePriceProvider(p livePriceProvider) {
 func (c *Client) GetSpotSavings(ctx context.Context, opts ...GetSpotSavingsOption) ([]Advice, error) {
 	// Default configuration
 	cfg := &getSpotSavingsConfig{
-		instanceOS:   "linux",
+		instanceOS:   osLinux,
 		sortBy:       SortByRange,
 		scoreTimeout: defaultScoreTimeout,
 	}
@@ -322,7 +326,7 @@ func (p *defaultAdvisorProvider) getRegions() []string {
 
 func (p *defaultAdvisorProvider) getRegionAdvice(region, os string) (map[string]spotAdvice, error) {
 	// Validate OS first before loading data
-	if !strings.EqualFold("windows", os) && !strings.EqualFold("linux", os) {
+	if !strings.EqualFold(osWindows, os) && !strings.EqualFold(osLinux, os) {
 		return nil, fmt.Errorf("invalid instance OS, must be windows/linux")
 	}
 
@@ -336,7 +340,7 @@ func (p *defaultAdvisorProvider) getRegionAdvice(region, os string) (map[string]
 	}
 
 	var advices map[string]spotAdvice
-	if strings.EqualFold("windows", os) {
+	if strings.EqualFold(osWindows, os) {
 		advices = regionData.Windows
 	} else {
 		advices = regionData.Linux

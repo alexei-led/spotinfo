@@ -21,21 +21,15 @@ var embeddedPriceData string
 
 const (
 	spotAdvisorJSONURL = "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json"
-	spotPriceJSURL     = "https://spot-price.s3.amazonaws.com/spot.js"
-	responsePrefix     = "callback("
-	responseSuffix     = ");"
-	httpTimeout        = 5 * time.Second
+	// Feed behind https://aws.amazon.com/ec2/spot/pricing/. The legacy JSONP feed
+	// (spot-price.s3.amazonaws.com/spot.js) has been frozen since 2024-05-13.
+	spotPriceJSURL = "https://website.spot.ec2.aws.a2z.com/spot.json"
+	// This feed serves plain JSON, so the trims below are no-ops. They are kept
+	// because it is still served as application/x-javascript and may be re-wrapped.
+	responsePrefix = "callback("
+	responseSuffix = ");"
+	httpTimeout    = 5 * time.Second
 )
-
-// awsSpotPricingRegions maps non-standard region codes to AWS region codes.
-var awsSpotPricingRegions = map[string]string{
-	"us-east":    "us-east-1",
-	"us-west":    "us-west-1",
-	"eu-ireland": "eu-west-1",
-	"apac-sin":   "ap-southeast-1",
-	"apac-syd":   "ap-southeast-2",
-	"apac-tokyo": "ap-northeast-1",
-}
 
 // minRange maps interruption range max values to min values
 var minRange = map[int]int{5: 0, 11: 6, 16: 12, 22: 17, 100: 23} //nolint:mnd
@@ -146,7 +140,6 @@ func fetchPricingData(ctx context.Context, useEmbedded bool) (*rawPriceData, err
 	}
 
 	slog.Debug("successfully fetched pricing data from AWS")
-	normalizeRegions(&result)
 	return &result, nil
 }
 
@@ -160,17 +153,7 @@ func loadEmbeddedPricingData() (*rawPriceData, error) {
 
 	result.Embedded = true
 	slog.Debug("using embedded pricing data")
-	normalizeRegions(&result)
 	return &result, nil
-}
-
-// normalizeRegions normalizes region codes in the pricing data.
-func normalizeRegions(result *rawPriceData) {
-	for index, r := range result.Config.Regions {
-		if awsRegion, ok := awsSpotPricingRegions[r.Region]; ok {
-			result.Config.Regions[index].Region = awsRegion
-		}
-	}
 }
 
 // convertRawPriceData converts raw pricing data to a more usable format.
@@ -223,7 +206,7 @@ func (s *spotPriceData) getSpotInstancePrice(instance, region, os string) (float
 		return 0, fmt.Errorf("no pricing data for instance: %v", instance)
 	}
 
-	if os == "windows" {
+	if os == osWindows {
 		return price.Windows, nil
 	}
 

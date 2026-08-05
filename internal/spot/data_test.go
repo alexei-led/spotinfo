@@ -24,7 +24,8 @@ func TestFetchAdvisorData_FallbackToEmbedded(t *testing.T) {
 		{
 			name: "timeout forces fallback",
 			ctx: func() context.Context {
-				ctx, _ := context.WithTimeout(context.Background(), 1*time.Millisecond)
+				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+				t.Cleanup(cancel)
 				return ctx
 			}(),
 			description: "very short timeout should force fallback to embedded data",
@@ -74,7 +75,8 @@ func TestFetchPricingData_FallbackToEmbedded(t *testing.T) {
 			name:        "timeout forces fallback",
 			useEmbedded: false,
 			ctx: func() context.Context {
-				ctx, _ := context.WithTimeout(context.Background(), 1*time.Millisecond)
+				ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+				t.Cleanup(cancel)
 				return ctx
 			}(),
 			description: "timeout should force fallback to embedded data",

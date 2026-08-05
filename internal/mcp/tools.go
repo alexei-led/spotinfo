@@ -23,6 +23,57 @@ const (
 	maxReliability  = 100
 )
 
+// MCP sort_by parameter values.
+const (
+	sortByPrice       = "price"
+	sortByReliability = "reliability"
+	sortBySavings     = "savings"
+	sortByScore       = "score"
+)
+
+// MCP request argument keys and their special values.
+const (
+	argRegions = "regions"
+	// allRegions is the "regions" argument value meaning every AWS region.
+	allRegions = "all"
+)
+
+// JSON field names of the MCP tool responses.
+const (
+	fieldInstanceType      = "instance_type"
+	fieldRegion            = "region"
+	fieldSpotPricePerHour  = "spot_price_per_hour"
+	fieldSpotPrice         = "spot_price"
+	fieldSavingsPercentage = "savings_percentage"
+	fieldSavings           = "savings"
+	fieldInterruptionRate  = "interruption_rate"
+	fieldInterruptionFreq  = "interruption_frequency"
+	fieldInterruptionRange = "interruption_range"
+	fieldVCPU              = "vcpu"
+	fieldMemoryGB          = "memory_gb"
+	fieldSpecs             = "specs"
+	fieldReliabilityScore  = "reliability_score"
+	fieldLivePrice         = "live_price"
+	fieldRegionScore       = "region_score"
+	fieldZoneScores        = "zone_scores"
+	fieldScoreFetchedAt    = "score_fetched_at"
+	fieldResults           = "results"
+	fieldMetadata          = "metadata"
+	fieldTotalResults      = "total_results"
+	fieldRegionsSearched   = "regions_searched"
+	fieldQueryTimeMS       = "query_time_ms"
+	fieldDataSource        = "data_source"
+	fieldDataFreshness     = "data_freshness"
+	fieldRegions           = "regions"
+	fieldTotal             = "total"
+)
+
+// Static values reported in the find_spot_instances response metadata.
+const (
+	dataSourceEmbedded   = "embedded"
+	dataFreshnessCurrent = "current"
+)
+
 // FindSpotInstancesTool implements the find_spot_instances MCP tool
 type FindSpotInstancesTool struct {
 	client spotClient
@@ -81,13 +132,13 @@ func (t *FindSpotInstancesTool) Handle(ctx context.Context, req mcp.CallToolRequ
 	limitedAdvices := applyLimit(filteredAdvices, params.limit)
 	response := buildResponse(limitedAdvices, startTime)
 
-	results, ok := response["results"].([]map[string]interface{})
+	results, ok := response[fieldResults].([]map[string]interface{})
 	if !ok {
 		results = []map[string]interface{}{}
 	}
 	t.logger.Debug("find_spot_instances completed",
-		slog.Int("results", len(results)),
-		slog.Int64("query_time_ms", time.Since(startTime).Milliseconds()))
+		slog.Int(fieldResults, len(results)),
+		slog.Int64(fieldQueryTimeMS, time.Since(startTime).Milliseconds()))
 
 	return marshalResponse(response)
 }
@@ -115,9 +166,9 @@ func parseParameters(arguments interface{}) *params {
 		args = make(map[string]interface{})
 	}
 
-	regions := getStringSliceWithDefault(args, "regions", []string{"all"})
-	if len(regions) == 1 && regions[0] == "all" {
-		regions = []string{"all"}
+	regions := getStringSliceWithDefault(args, argRegions, []string{allRegions})
+	if len(regions) == 1 && regions[0] == allRegions {
+		regions = []string{allRegions}
 	}
 
 	return &params{
@@ -127,7 +178,7 @@ func parseParameters(arguments interface{}) *params {
 		minMemoryGB:     cast.ToInt(args["min_memory_gb"]),
 		maxPrice:        cast.ToFloat64(args["max_price_per_hour"]),
 		maxInterruption: cast.ToFloat64(args["max_interruption_rate"]),
-		sortBy:          getStringWithDefault(args, "sort_by", "reliability"),
+		sortBy:          getStringWithDefault(args, "sort_by", sortByReliability),
 		limit:           getLimitWithDefault(args, "limit", defaultLimit),
 		withScore:       cast.ToBool(args["with_score"]),
 		minScore:        cast.ToInt(args["min_score"]),
@@ -139,13 +190,13 @@ func parseParameters(arguments interface{}) *params {
 // convertSortParams converts string sort parameter to internal types
 func convertSortParams(sortBy string) (spot.SortBy, bool) {
 	switch sortBy {
-	case "price":
+	case sortByPrice:
 		return spot.SortByPrice, false
-	case "reliability":
+	case sortByReliability:
 		return spot.SortByRange, false
-	case "savings":
+	case sortBySavings:
 		return spot.SortBySavings, true
-	case "score":
+	case sortByScore:
 		return spot.SortByScore, false
 	default:
 		return spot.SortByRange, false
@@ -185,31 +236,31 @@ func buildResponse(advices []spot.Advice, startTime time.Time) map[string]interf
 		avgInterruption := calculateAvgInterruption(advice.Range)
 
 		result := map[string]interface{}{
-			"instance_type":          advice.Instance,
-			"region":                 advice.Region,
-			"spot_price_per_hour":    advice.Price,
-			"spot_price":             fmt.Sprintf("$%.4f/hour", advice.Price),
-			"savings_percentage":     advice.Savings,
-			"savings":                fmt.Sprintf("%d%% cheaper than on-demand", advice.Savings),
-			"interruption_rate":      avgInterruption,
-			"interruption_frequency": advice.Range.Label,
-			"interruption_range":     fmt.Sprintf("%d-%d%%", advice.Range.Min, advice.Range.Max),
-			"vcpu":                   advice.Info.Cores,
-			"memory_gb":              advice.Info.RAM,
-			"specs":                  fmt.Sprintf("%d vCPU, %.0f GB RAM", advice.Info.Cores, advice.Info.RAM),
-			"reliability_score":      calculateReliabilityScore(avgInterruption),
-			"live_price":             advice.LivePrice,
+			fieldInstanceType:      advice.Instance,
+			fieldRegion:            advice.Region,
+			fieldSpotPricePerHour:  advice.Price,
+			fieldSpotPrice:         fmt.Sprintf("$%.4f/hour", advice.Price),
+			fieldSavingsPercentage: advice.Savings,
+			fieldSavings:           fmt.Sprintf("%d%% cheaper than on-demand", advice.Savings),
+			fieldInterruptionRate:  avgInterruption,
+			fieldInterruptionFreq:  advice.Range.Label,
+			fieldInterruptionRange: fmt.Sprintf("%d-%d%%", advice.Range.Min, advice.Range.Max),
+			fieldVCPU:              advice.Info.Cores,
+			fieldMemoryGB:          advice.Info.RAM,
+			fieldSpecs:             fmt.Sprintf("%d vCPU, %.0f GB RAM", advice.Info.Cores, advice.Info.RAM),
+			fieldReliabilityScore:  calculateReliabilityScore(avgInterruption),
+			fieldLivePrice:         advice.LivePrice,
 		}
 
 		// Add score-related fields when available
 		if advice.RegionScore != nil {
-			result["region_score"] = *advice.RegionScore
+			result[fieldRegionScore] = *advice.RegionScore
 		}
 		if len(advice.ZoneScores) > 0 {
-			result["zone_scores"] = advice.ZoneScores
+			result[fieldZoneScores] = advice.ZoneScores
 		}
 		if advice.ScoreFetchedAt != nil {
-			result["score_fetched_at"] = advice.ScoreFetchedAt.Format(time.RFC3339)
+			result[fieldScoreFetchedAt] = advice.ScoreFetchedAt.Format(time.RFC3339)
 		}
 
 		results[i] = result
@@ -221,13 +272,13 @@ func buildResponse(advices []spot.Advice, startTime time.Time) map[string]interf
 	}
 
 	return map[string]interface{}{
-		"results": results,
-		"metadata": map[string]interface{}{
-			"total_results":    len(results),
-			"regions_searched": searchedRegions,
-			"query_time_ms":    time.Since(startTime).Milliseconds(),
-			"data_source":      "embedded",
-			"data_freshness":   "current",
+		fieldResults: results,
+		fieldMetadata: map[string]interface{}{
+			fieldTotalResults:    len(results),
+			fieldRegionsSearched: searchedRegions,
+			fieldQueryTimeMS:     time.Since(startTime).Milliseconds(),
+			fieldDataSource:      dataSourceEmbedded,
+			fieldDataFreshness:   dataFreshnessCurrent,
 		},
 	}
 }
@@ -311,8 +362,8 @@ func (t *ListSpotRegionsTool) Handle(ctx context.Context, _ mcp.CallToolRequest)
 	}
 
 	response := map[string]interface{}{
-		"regions": regions,
-		"total":   len(regions),
+		fieldRegions: regions,
+		fieldTotal:   len(regions),
 	}
 
 	t.logger.Debug("list_spot_regions completed", slog.Int("total", len(regions)))
@@ -322,7 +373,7 @@ func (t *ListSpotRegionsTool) Handle(ctx context.Context, _ mcp.CallToolRequest)
 // fetchRegions gets all available regions from the spot client
 func (t *ListSpotRegionsTool) fetchRegions(ctx context.Context) ([]string, error) {
 	opts := []spot.GetSpotSavingsOption{
-		spot.WithRegions([]string{"all"}),
+		spot.WithRegions([]string{allRegions}),
 		spot.WithPattern(""),
 		spot.WithOS("linux"),
 		spot.WithSort(spot.SortByRegion, false),

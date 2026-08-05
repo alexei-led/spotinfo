@@ -18,6 +18,11 @@ const (
 	livePriceTimeout  = 10 * time.Second
 	maxPriceBatchSize = 50
 	livePriceMaxPages = 5
+
+	// EC2 DescribeSpotPriceHistory product descriptions. These are AWS API wire
+	// values, unlike the osLinux/osWindows names they are derived from.
+	productDescWindows = "Windows"
+	productDescLinux   = "Linux/UNIX"
 )
 
 // livePriceProvider fetches current spot prices from the EC2 DescribeSpotPriceHistory API
@@ -117,10 +122,10 @@ func createLivePriceProvider() livePriceProvider {
 
 // osToProductDescription maps OS names to EC2 product description strings.
 func osToProductDescription(os string) string {
-	if strings.EqualFold(os, "windows") {
-		return "Windows"
+	if strings.EqualFold(os, osWindows) {
+		return productDescWindows
 	}
-	return "Linux/UNIX"
+	return productDescLinux
 }
 
 // enrichMissingPrices fills in zero-priced Advice entries using the live price API.

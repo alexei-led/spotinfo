@@ -76,7 +76,7 @@ func (s *Server) registerTools() {
 	// Register find_spot_instances tool - combines search and lookup functionality
 	findSpotInstancesTool := mcp.NewTool("find_spot_instances",
 		mcp.WithDescription("Search for AWS EC2 Spot Instance options based on requirements. Returns pricing, savings, and interruption data."),
-		mcp.WithArray("regions",
+		mcp.WithArray(argRegions,
 			mcp.Description("AWS regions to search (e.g., ['us-east-1', 'eu-west-1']). Use ['all'] or omit to search all regions"),
 			mcp.Items(map[string]any{"type": "string"})),
 		mcp.WithString("instance_types",
@@ -95,7 +95,7 @@ func (s *Server) registerTools() {
 			mcp.DefaultNumber(defaultMaxInterruptionRateParam)),
 		mcp.WithString("sort_by",
 			mcp.Description("Sort results by: 'price' (cheapest first), 'reliability' (lowest interruption first), 'savings' (highest savings first), 'score' (highest score first)"),
-			mcp.DefaultString("reliability")),
+			mcp.DefaultString(sortByReliability)),
 		mcp.WithNumber("limit",
 			mcp.Description("Maximum number of results to return"),
 			mcp.DefaultNumber(defaultLimitParam),
