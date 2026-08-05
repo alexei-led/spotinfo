@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-
-	"spotinfo/internal/spot"
 )
 
 // TestStdioTransport_ContextCancellation tests that stdio transport respects context cancellation
@@ -16,7 +14,7 @@ func TestStdioTransport_ContextCancellation(t *testing.T) {
 	cfg := Config{
 		Version:    "1.0.0",
 		Logger:     slog.Default(),
-		SpotClient: spot.New(),
+		SpotClient: newEmbeddedClient(),
 	}
 
 	server, err := NewServer(cfg)

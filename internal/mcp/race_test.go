@@ -19,7 +19,7 @@ import (
 // This tests the real shared state in spot.Client (sync.Once, cached data)
 func TestConcurrentSameClient(t *testing.T) {
 	// Use real client to test actual shared state concurrency issues
-	realClient := spot.New() // Has internal sync.Once and shared data providers
+	realClient := newEmbeddedClient() // Has internal sync.Once and shared data providers
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	findTool := NewFindSpotInstancesTool(realClient, logger)
@@ -66,7 +66,7 @@ func TestConcurrentSameClient(t *testing.T) {
 
 // TestConcurrentDifferentParameters tests concurrent calls with different parameters
 func TestConcurrentDifferentParameters(t *testing.T) {
-	realClient := spot.New()
+	realClient := newEmbeddedClient()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	findTool := NewFindSpotInstancesTool(realClient, logger)
 
@@ -104,7 +104,7 @@ func TestConcurrentDifferentParameters(t *testing.T) {
 
 // TestConcurrentRegionsToolAccess tests concurrent access to regions tool
 func TestConcurrentRegionsToolAccess(t *testing.T) {
-	realClient := spot.New()
+	realClient := newEmbeddedClient()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	regionsTool := NewListSpotRegionsTool(realClient, logger)
 
@@ -150,7 +150,7 @@ func TestConcurrentServerCreation(t *testing.T) {
 			cfg := Config{
 				Version:    "1.0.0",
 				Logger:     slog.Default(),
-				SpotClient: spot.New(), // Each gets its own client
+				SpotClient: newEmbeddedClient(), // Each gets its own client
 			}
 			server, err := NewServer(cfg)
 			servers[index] = server
@@ -335,7 +335,7 @@ func TestConcurrentDataProviderInitialization(t *testing.T) {
 			defer wg.Done()
 
 			// Create fresh client for each goroutine to trigger initialization race
-			freshClient := spot.New()
+			freshClient := newEmbeddedClient()
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 			tool := NewFindSpotInstancesTool(freshClient, logger)
 
@@ -361,7 +361,7 @@ func TestConcurrentDataProviderInitialization(t *testing.T) {
 
 // TestConcurrentMixedOperations tests different operations triggering different code paths
 func TestConcurrentMixedOperations(t *testing.T) {
-	sharedClient := spot.New()
+	sharedClient := newEmbeddedClient()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	findTool := NewFindSpotInstancesTool(sharedClient, logger)
@@ -417,7 +417,7 @@ func TestConcurrentMixedOperations(t *testing.T) {
 
 // TestConcurrentContextCancellation tests concurrent context cancellation scenarios
 func TestConcurrentContextCancellation(t *testing.T) {
-	client := spot.New()
+	client := newEmbeddedClient()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	tool := NewFindSpotInstancesTool(client, logger)
 
@@ -465,7 +465,7 @@ func TestConcurrentContextCancellation(t *testing.T) {
 
 // TestConcurrentLargeDatasets tests concurrent access with realistic large datasets
 func TestConcurrentLargeDatasets(t *testing.T) {
-	client := spot.New()
+	client := newEmbeddedClient()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	tool := NewFindSpotInstancesTool(client, logger)
 
