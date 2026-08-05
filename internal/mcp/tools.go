@@ -383,7 +383,7 @@ func (t *ListSpotRegionsTool) Handle(ctx context.Context, _ mcp.CallToolRequest)
 		fieldTotal:   len(regions),
 	}
 
-	t.logger.Debug("list_spot_regions completed", slog.Int("total", len(regions)))
+	t.logger.Debug("list_spot_regions completed", slog.Int(fieldTotal, len(regions)))
 	return marshalResponse(response)
 }
 

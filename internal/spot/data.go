@@ -215,7 +215,7 @@ func convertRawPriceData(raw *rawPriceData) *spotPriceData {
 						price = 0
 					}
 
-					if os.Name == "mswin" {
+					if os.Name == priceColumnWindows {
 						ip.Windows = price
 					} else {
 						ip.Linux = price

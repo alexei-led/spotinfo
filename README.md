@@ -152,8 +152,8 @@ Credentials are loaded via the [AWS SDK default credential chain](https://docs.a
 **Requirements**: Go 1.26+, make, golangci-lint
 
 ```bash
-# Build and test
-make all
+# Build (alias for `make build`; run tests separately)
+make build
 
 # Update embedded data (usually unnecessary — a weekly workflow opens a PR for this)
 make update-data update-price verify-data

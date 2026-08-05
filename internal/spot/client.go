@@ -18,6 +18,9 @@ const (
 	// Compared case-insensitively; stored lowercase.
 	osLinux   = "linux"
 	osWindows = "windows"
+	// priceColumnWindows is the price feed's own name for the Windows column,
+	// distinct from the osWindows value users pass on the command line.
+	priceColumnWindows = "mswin"
 )
 
 // getSpotSavingsConfig holds configuration options for GetSpotSavingsWithOptions.
