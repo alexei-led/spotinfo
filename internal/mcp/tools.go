@@ -147,9 +147,9 @@ func (t *FindSpotInstancesTool) Handle(ctx context.Context, req mcp.CallToolRequ
 	limitedAdvices := applyLimit(filteredAdvices, params.limit)
 	response := buildResponse(limitedAdvices, startTime)
 
-	results, ok := response[fieldResults].([]map[string]interface{})
+	results, ok := response[fieldResults].([]map[string]any)
 	if !ok {
-		results = []map[string]interface{}{}
+		results = []map[string]any{}
 	}
 	t.logger.Debug("find_spot_instances completed",
 		slog.Int(fieldResults, len(results)),
@@ -175,10 +175,10 @@ type params struct { //nolint:govet
 }
 
 // parseParameters extracts all parameters from the request arguments
-func parseParameters(arguments interface{}) *params {
-	args, ok := arguments.(map[string]interface{})
+func parseParameters(arguments any) *params {
+	args, ok := arguments.(map[string]any)
 	if !ok {
-		args = make(map[string]interface{})
+		args = make(map[string]any)
 	}
 
 	regions := getStringSliceWithDefault(args, argRegions, []string{allRegions})
@@ -242,15 +242,15 @@ func applyLimit(advices []spot.Advice, limit int) []spot.Advice {
 }
 
 // buildResponse creates the response map from filtered advices
-func buildResponse(advices []spot.Advice, startTime time.Time) map[string]interface{} {
-	results := make([]map[string]interface{}, len(advices))
+func buildResponse(advices []spot.Advice, startTime time.Time) map[string]any {
+	results := make([]map[string]any, len(advices))
 	regionsSearched := make(map[string]bool)
 
 	for i, advice := range advices {
 		regionsSearched[advice.Region] = true
 		avgInterruption := calculateAvgInterruption(advice.Range)
 
-		result := map[string]interface{}{
+		result := map[string]any{
 			fieldInstanceType:      advice.Instance,
 			fieldRegion:            advice.Region,
 			fieldSpotPricePerHour:  advice.Price,
@@ -286,9 +286,9 @@ func buildResponse(advices []spot.Advice, startTime time.Time) map[string]interf
 		searchedRegions = append(searchedRegions, region)
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		fieldResults: results,
-		fieldMetadata: map[string]interface{}{
+		fieldMetadata: map[string]any{
 			fieldTotalResults:    len(results),
 			fieldRegionsSearched: searchedRegions,
 			fieldQueryTimeMS:     time.Since(startTime).Milliseconds(),
@@ -313,7 +313,7 @@ func calculateReliabilityScore(avgInterruption float64) int {
 }
 
 // marshalResponse marshals response to JSON and creates MCP result
-func marshalResponse(response interface{}) (*mcp.CallToolResult, error) {
+func marshalResponse(response any) (*mcp.CallToolResult, error) {
 	jsonData, err := json.Marshal(response)
 	if err != nil {
 		return createErrorResult(fmt.Sprintf("failed to marshal response: %v", err)), nil
@@ -327,14 +327,14 @@ func createErrorResult(message string) *mcp.CallToolResult {
 }
 
 // Helper functions using spf13/cast with defaults
-func getStringWithDefault(args map[string]interface{}, key, defaultValue string) string {
+func getStringWithDefault(args map[string]any, key, defaultValue string) string {
 	if val := cast.ToString(args[key]); val != "" {
 		return val
 	}
 	return defaultValue
 }
 
-func getLimitWithDefault(args map[string]interface{}, key string, defaultValue int) int {
+func getLimitWithDefault(args map[string]any, key string, defaultValue int) int {
 	limit := cast.ToInt(args[key])
 	if limit <= 0 {
 		limit = defaultValue
@@ -345,7 +345,7 @@ func getLimitWithDefault(args map[string]interface{}, key string, defaultValue i
 	return limit
 }
 
-func getStringSliceWithDefault(args map[string]interface{}, key string, defaultValue []string) []string {
+func getStringSliceWithDefault(args map[string]any, key string, defaultValue []string) []string {
 	if slice := cast.ToStringSlice(args[key]); len(slice) > 0 {
 		return slice
 	}
@@ -378,7 +378,7 @@ func (t *ListSpotRegionsTool) Handle(ctx context.Context, _ mcp.CallToolRequest)
 		return createErrorResult(fmt.Sprintf("Failed to retrieve regions: %v", err)), nil
 	}
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		fieldRegions: regions,
 		fieldTotal:   len(regions),
 	}

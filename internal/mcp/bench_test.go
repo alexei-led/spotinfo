@@ -15,8 +15,8 @@ import (
 
 // BenchmarkParseParameters benchmarks parameter parsing performance
 func BenchmarkParseParameters(b *testing.B) {
-	args := map[string]interface{}{
-		"regions":               []interface{}{"us-east-1", "eu-west-1", "ap-south-1"},
+	args := map[string]any{
+		"regions":               []any{"us-east-1", "eu-west-1", "ap-south-1"},
 		"instance_types":        "m5.large",
 		"min_vcpu":              4,
 		"min_memory_gb":         16,
@@ -74,8 +74,8 @@ func BenchmarkBuildResponse(b *testing.B) {
 
 // BenchmarkMarshalResponse benchmarks JSON marshaling performance
 func BenchmarkMarshalResponse(b *testing.B) {
-	response := map[string]interface{}{
-		"results": []map[string]interface{}{
+	response := map[string]any{
+		"results": []map[string]any{
 			{
 				"instance_type":          "m5.large",
 				"region":                 "us-east-1",
@@ -92,7 +92,7 @@ func BenchmarkMarshalResponse(b *testing.B) {
 				"specs":                  "2 vCPU, 8 GB RAM",
 			},
 		},
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"total_results":    1,
 			"regions_searched": []string{"us-east-1"},
 			"query_time_ms":    int64(123),
@@ -180,10 +180,10 @@ func BenchmarkCalculateReliabilityScore(b *testing.B) {
 
 // BenchmarkHelperFunctions benchmarks helper function performance
 func BenchmarkHelperFunctions(b *testing.B) {
-	args := map[string]interface{}{
+	args := map[string]any{
 		"string_key": "test_value",
 		"limit_key":  25,
-		"slice_key":  []interface{}{"item1", "item2", "item3"},
+		"slice_key":  []any{"item1", "item2", "item3"},
 	}
 
 	b.Run("getStringWithDefault", func(b *testing.B) {
@@ -220,8 +220,8 @@ func BenchmarkToolHandlerComplete(b *testing.B) {
 
 	req := mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
-			Arguments: map[string]interface{}{
-				"regions":        []interface{}{"us-east-1"},
+			Arguments: map[string]any{
+				"regions":        []any{"us-east-1"},
 				"instance_types": "t2.micro",
 				"sort_by":        "price",
 				"limit":          5,
@@ -242,8 +242,8 @@ func BenchmarkToolHandlerComplete(b *testing.B) {
 
 // BenchmarkJSONOperations benchmarks JSON marshal/unmarshal operations
 func BenchmarkJSONOperations(b *testing.B) {
-	testData := map[string]interface{}{
-		"results": []map[string]interface{}{
+	testData := map[string]any{
+		"results": []map[string]any{
 			{
 				"instance_type":       "m5.large",
 				"region":              "us-east-1",
@@ -253,7 +253,7 @@ func BenchmarkJSONOperations(b *testing.B) {
 				"reliability_score":   92,
 			},
 		},
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"total_results": 1,
 			"data_source":   "embedded",
 		},
@@ -278,7 +278,7 @@ func BenchmarkJSONOperations(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			var result map[string]interface{}
+			var result map[string]any
 			err := json.Unmarshal(jsonData, &result)
 			if err != nil {
 				b.Fatal(err)
@@ -314,8 +314,8 @@ func BenchmarkColdVsWarmStartup(b *testing.B) {
 
 			req := mcp.CallToolRequest{
 				Params: mcp.CallToolParams{
-					Arguments: map[string]interface{}{
-						"regions": []interface{}{"us-east-1"},
+					Arguments: map[string]any{
+						"regions": []any{"us-east-1"},
 						"limit":   3,
 					},
 				},
@@ -338,8 +338,8 @@ func BenchmarkColdVsWarmStartup(b *testing.B) {
 		// Warm up call
 		req := mcp.CallToolRequest{
 			Params: mcp.CallToolParams{
-				Arguments: map[string]interface{}{
-					"regions": []interface{}{"us-east-1"},
+				Arguments: map[string]any{
+					"regions": []any{"us-east-1"},
 					"limit":   3,
 				},
 			},
@@ -367,40 +367,40 @@ func BenchmarkDatasetSizes(b *testing.B) {
 	// Warm up
 	req := mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
-			Arguments: map[string]interface{}{"regions": []interface{}{"us-east-1"}, "limit": 1},
+			Arguments: map[string]any{"regions": []any{"us-east-1"}, "limit": 1},
 		},
 	}
 	_, _ = tool.Handle(context.Background(), req)
 
 	testCases := []struct {
 		name    string
-		request map[string]interface{}
+		request map[string]any
 	}{
 		{
 			name: "SmallDataset",
-			request: map[string]interface{}{
-				"regions": []interface{}{"us-east-1"},
+			request: map[string]any{
+				"regions": []any{"us-east-1"},
 				"limit":   5,
 			},
 		},
 		{
 			name: "MediumDataset",
-			request: map[string]interface{}{
-				"regions": []interface{}{"us-east-1", "us-west-2", "eu-west-1"},
+			request: map[string]any{
+				"regions": []any{"us-east-1", "us-west-2", "eu-west-1"},
 				"limit":   20,
 			},
 		},
 		{
 			name: "LargeDataset",
-			request: map[string]interface{}{
-				"regions": []interface{}{"all"},
+			request: map[string]any{
+				"regions": []any{"all"},
 				"limit":   50,
 			},
 		},
 		{
 			name: "FilteredLargeDataset",
-			request: map[string]interface{}{
-				"regions":        []interface{}{"all"},
+			request: map[string]any{
+				"regions":        []any{"all"},
 				"instance_types": "t.*",
 				"min_vcpu":       2,
 				"limit":          30,
@@ -435,8 +435,8 @@ func BenchmarkConcurrentThroughput(b *testing.B) {
 
 	req := mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
-			Arguments: map[string]interface{}{
-				"regions": []interface{}{"us-east-1"},
+			Arguments: map[string]any{
+				"regions": []any{"us-east-1"},
 				"limit":   10,
 			},
 		},
@@ -476,8 +476,8 @@ func BenchmarkMemoryAllocations(b *testing.B) {
 	}
 
 	b.Run("ParameterParsing", func(b *testing.B) {
-		args := map[string]interface{}{
-			"regions":        []interface{}{"us-east-1", "eu-west-1", "ap-south-1"},
+		args := map[string]any{
+			"regions":        []any{"us-east-1", "eu-west-1", "ap-south-1"},
 			"instance_types": "m5.*",
 			"min_vcpu":       4,
 			"min_memory_gb":  16,

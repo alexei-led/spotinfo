@@ -20,13 +20,13 @@ import (
 func TestParseParameters(t *testing.T) {
 	tests := []struct {
 		name     string
-		args     interface{}
+		args     any
 		expected *params
 	}{
 		{
 			name: "complete parameters including score options",
-			args: map[string]interface{}{
-				"regions":               []interface{}{"us-east-1", "eu-west-1"},
+			args: map[string]any{
+				"regions":               []any{"us-east-1", "eu-west-1"},
 				"instance_types":        "m5.large",
 				"min_vcpu":              4,
 				"min_memory_gb":         8,
@@ -56,7 +56,7 @@ func TestParseParameters(t *testing.T) {
 		},
 		{
 			name: "empty parameters use defaults",
-			args: map[string]interface{}{},
+			args: map[string]any{},
 			expected: &params{
 				regions:         []string{"all"},
 				instanceTypes:   "",
@@ -74,7 +74,7 @@ func TestParseParameters(t *testing.T) {
 		},
 		{
 			name: "score sorting option",
-			args: map[string]interface{}{
+			args: map[string]any{
 				"sort_by":    "score",
 				"with_score": true,
 			},
@@ -95,7 +95,7 @@ func TestParseParameters(t *testing.T) {
 		},
 		{
 			name: "limit exceeds maximum",
-			args: map[string]interface{}{
+			args: map[string]any{
 				"limit": 100,
 			},
 			expected: &params{
@@ -231,7 +231,7 @@ func TestBuildResponse(t *testing.T) {
 	assert.Contains(t, response, "metadata")
 
 	// Check results
-	results, ok := response["results"].([]map[string]interface{})
+	results, ok := response["results"].([]map[string]any)
 	assert.True(t, ok, "results should be a slice of maps")
 	assert.Len(t, results, 2)
 
@@ -245,7 +245,7 @@ func TestBuildResponse(t *testing.T) {
 	assert.Equal(t, 92, firstResult["reliability_score"])  // 100-7.5
 
 	// Check metadata
-	metadata, ok := response["metadata"].(map[string]interface{})
+	metadata, ok := response["metadata"].(map[string]any)
 	assert.True(t, ok, "metadata should be a map")
 	assert.Equal(t, 2, metadata["total_results"])
 	assert.Equal(t, "embedded", metadata["data_source"])
@@ -294,14 +294,14 @@ func TestCalculateReliabilityScore(t *testing.T) {
 func TestFindSpotInstancesTool_Handle(t *testing.T) {
 	tests := []struct {
 		name           string
-		arguments      interface{}
+		arguments      any
 		mockSetup      func(*mockspotClient)
 		validateResult func(*testing.T, *mcp.CallToolResult)
 	}{
 		{
 			name: "basic request with price sorting",
-			arguments: map[string]interface{}{
-				"regions":        []interface{}{"us-east-1"},
+			arguments: map[string]any{
+				"regions":        []any{"us-east-1"},
 				"instance_types": "t3.micro",
 				"sort_by":        "price",
 			},
@@ -329,15 +329,15 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 				textContent, ok := result.Content[0].(mcp.TextContent)
 				require.True(t, ok)
 
-				var response map[string]interface{}
+				var response map[string]any
 				err := json.Unmarshal([]byte(textContent.Text), &response)
 				require.NoError(t, err)
 
-				results, ok := response["results"].([]interface{})
+				results, ok := response["results"].([]any)
 				require.True(t, ok)
 				assert.Len(t, results, 1)
 
-				firstResult, ok := results[0].(map[string]interface{})
+				firstResult, ok := results[0].(map[string]any)
 				require.True(t, ok)
 				assert.Equal(t, "t3.micro", firstResult["instance_type"])
 				assert.Equal(t, "$0.0104/hour", firstResult["spot_price"])
@@ -345,8 +345,8 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 		},
 		{
 			name: "request with score enrichment",
-			arguments: map[string]interface{}{
-				"regions":        []interface{}{"us-west-2"},
+			arguments: map[string]any{
+				"regions":        []any{"us-west-2"},
 				"instance_types": "m5.large",
 				"with_score":     true,
 				"min_score":      7,
@@ -386,7 +386,7 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				require.False(t, result.IsError)
 
-				var response map[string]interface{}
+				var response map[string]any
 				textContent, ok := result.Content[0].(mcp.TextContent)
 				require.True(t, ok)
 				err := json.Unmarshal([]byte(textContent.Text), &response)
@@ -394,15 +394,15 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 
 				// No results because filterByMinScore is not implemented in tools.go
 				// This test verifies the parameters are parsed correctly
-				results, ok := response["results"].([]interface{})
+				results, ok := response["results"].([]any)
 				require.True(t, ok)
 				assert.Len(t, results, 2) // Both should be returned since filtering happens in client
 			},
 		},
 		{
 			name: "request with AZ-level scores",
-			arguments: map[string]interface{}{
-				"regions":       []interface{}{"eu-west-1"},
+			arguments: map[string]any{
+				"regions":       []any{"eu-west-1"},
 				"with_score":    true,
 				"az":            true,
 				"score_timeout": 60,
@@ -433,21 +433,21 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				require.False(t, result.IsError)
 
-				var response map[string]interface{}
+				var response map[string]any
 				textContent, ok := result.Content[0].(mcp.TextContent)
 				require.True(t, ok)
 				err := json.Unmarshal([]byte(textContent.Text), &response)
 				require.NoError(t, err)
 
-				results, ok := response["results"].([]interface{})
+				results, ok := response["results"].([]any)
 				require.True(t, ok)
 				assert.Len(t, results, 1)
 			},
 		},
 		{
 			name: "interruption rate filtering",
-			arguments: map[string]interface{}{
-				"regions":               []interface{}{"us-east-1"},
+			arguments: map[string]any{
+				"regions":               []any{"us-east-1"},
 				"max_interruption_rate": 7.5,
 			},
 			mockSetup: func(m *mockspotClient) {
@@ -475,24 +475,24 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				require.False(t, result.IsError)
 
-				var response map[string]interface{}
+				var response map[string]any
 				textContent, ok := result.Content[0].(mcp.TextContent)
 				require.True(t, ok)
 				err := json.Unmarshal([]byte(textContent.Text), &response)
 				require.NoError(t, err)
 
-				results, ok := response["results"].([]interface{})
+				results, ok := response["results"].([]any)
 				require.True(t, ok)
 				assert.Len(t, results, 1, "Should filter out high interruption instances")
 
-				firstResult, ok := results[0].(map[string]interface{})
+				firstResult, ok := results[0].(map[string]any)
 				require.True(t, ok)
 				assert.Equal(t, "t3.micro", firstResult["instance_type"])
 			},
 		},
 		{
 			name:      "error handling",
-			arguments: map[string]interface{}{"regions": []interface{}{"invalid-region"}},
+			arguments: map[string]any{"regions": []any{"invalid-region"}},
 			mockSetup: func(m *mockspotClient) {
 				m.EXPECT().GetSpotSavings(
 					mock.Anything,
@@ -509,7 +509,7 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 		},
 		{
 			name:      "empty results",
-			arguments: map[string]interface{}{"instance_types": "z99.mega"},
+			arguments: map[string]any{"instance_types": "z99.mega"},
 			mockSetup: func(m *mockspotClient) {
 				m.EXPECT().GetSpotSavings(
 					mock.Anything,
@@ -519,17 +519,17 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				require.False(t, result.IsError)
 
-				var response map[string]interface{}
+				var response map[string]any
 				textContent, ok := result.Content[0].(mcp.TextContent)
 				require.True(t, ok)
 				err := json.Unmarshal([]byte(textContent.Text), &response)
 				require.NoError(t, err)
 
-				results, ok := response["results"].([]interface{})
+				results, ok := response["results"].([]any)
 				require.True(t, ok)
 				assert.Empty(t, results)
 
-				metadata, ok := response["metadata"].(map[string]interface{})
+				metadata, ok := response["metadata"].(map[string]any)
 				require.True(t, ok)
 				assert.Equal(t, float64(0), metadata["total_results"])
 			},
@@ -585,13 +585,13 @@ func TestListSpotRegionsTool_Handle(t *testing.T) {
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				require.False(t, result.IsError)
 
-				var response map[string]interface{}
+				var response map[string]any
 				textContent, ok := result.Content[0].(mcp.TextContent)
 				require.True(t, ok)
 				err := json.Unmarshal([]byte(textContent.Text), &response)
 				require.NoError(t, err)
 
-				regions, ok := response["regions"].([]interface{})
+				regions, ok := response["regions"].([]any)
 				require.True(t, ok)
 				assert.Len(t, regions, 4, "Should deduplicate regions")
 
@@ -619,13 +619,13 @@ func TestListSpotRegionsTool_Handle(t *testing.T) {
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				require.False(t, result.IsError)
 
-				var response map[string]interface{}
+				var response map[string]any
 				textContent, ok := result.Content[0].(mcp.TextContent)
 				require.True(t, ok)
 				err := json.Unmarshal([]byte(textContent.Text), &response)
 				require.NoError(t, err)
 
-				regions, ok := response["regions"].([]interface{})
+				regions, ok := response["regions"].([]any)
 				require.True(t, ok)
 				assert.Empty(t, regions)
 				assert.Equal(t, float64(0), response["total"])
@@ -661,7 +661,7 @@ func TestListSpotRegionsTool_Handle(t *testing.T) {
 
 			req := mcp.CallToolRequest{
 				Params: mcp.CallToolParams{
-					Arguments: map[string]interface{}{},
+					Arguments: map[string]any{},
 				},
 			}
 

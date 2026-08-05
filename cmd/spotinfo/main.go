@@ -406,7 +406,7 @@ func addFreshnessInfo(scoreStr string, fetchedAt *time.Time) string {
 	return scoreStr
 }
 
-func printAdvicesJSON(advices interface{}, output io.Writer) {
+func printAdvicesJSON(advices any, output io.Writer) {
 	bytes, err := json.MarshalIndent(advices, "", "  ")
 	if err != nil {
 		panic(err)
@@ -492,7 +492,7 @@ func buildTableRow(advice *spot.Advice, scoreInfo scoreTypeInfo, region, csv boo
 		opt(opts)
 	}
 
-	var priceValue interface{}
+	var priceValue any
 	if csv {
 		priceValue = advice.Price
 	} else {

@@ -180,10 +180,7 @@ func enrichMissingPrices(ctx context.Context, advices []Advice, provider livePri
 
 			// Batch if needed
 			for start := 0; start < len(types); start += maxPriceBatchSize {
-				end := start + maxPriceBatchSize
-				if end > len(types) {
-					end = len(types)
-				}
+				end := min(start+maxPriceBatchSize, len(types))
 				batch := types[start:end]
 
 				prices, err := provider.fetchLivePrices(enrichCtx, r, batch, os)

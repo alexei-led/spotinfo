@@ -208,7 +208,7 @@ func TestSSEConcurrentAccess(t *testing.T) {
 	errChan := make(chan error, numGoroutines)
 
 	// Start multiple SSE servers concurrently (they should all fail with port binding)
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 			defer cancel()
@@ -222,7 +222,7 @@ func TestSSEConcurrentAccess(t *testing.T) {
 
 	// Collect results
 	var errors []error
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		err := <-errChan
 		if err != nil {
 			errors = append(errors, err)
