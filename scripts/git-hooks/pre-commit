@@ -32,8 +32,12 @@ done
 # gofmt reads the worktree, not the staged blob. Accepted approximation: a
 # partially staged file is judged by its on-disk content.
 if [ ${#go_files[@]} -gt 0 ]; then
-	unformatted=$(gofmt -l -- ${go_files[@]+"${go_files[@]}"})
-	if [ -n "$unformatted" ]; then
+	if ! command -v gofmt >/dev/null 2>&1; then
+		note "gofmt not on PATH, skipping format check"
+	elif ! unformatted=$(gofmt -l -- ${go_files[@]+"${go_files[@]}"}); then
+		note "gofmt failed on staged files (syntax error?)"
+		status=1
+	elif [ -n "$unformatted" ]; then
 		note "gofmt: unformatted files:"
 		note "$unformatted"
 		note "fix with: make fmt"
