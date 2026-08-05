@@ -1,28 +1,23 @@
 name: Update embedded data
-
 # Refreshes the embedded AWS feeds and opens a PR when they change.
 #
 # Data enters the repo ONLY through this workflow (or a manual
 # `make update-data update-price`). Build, test and release workflows
 # deliberately do not refresh the feeds, so every build embeds exactly
 # what is committed and reviewed.
-
 on:
   schedule:
     # Weekly, Monday 06:00 UTC. The price feed updates hourly, the advisor
     # feed every few months, so weekly keeps drift small without churn.
-    - cron: '0 6 * * 1'
+    - cron: 0 6 * * 1
   workflow_dispatch:
-
 permissions:
   contents: write
   pull-requests: write
-
 # A second run must not race the first for the shared bot branch.
 concurrency:
   group: update-data
   cancel-in-progress: false
-
 jobs:
   update:
     name: Refresh AWS spot data
@@ -30,12 +25,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.26'
-
+          go-version: "1.26"
       # The legacy spot.js feed silently froze for over two years before anyone
       # noticed. Age is checked explicitly so the next freeze surfaces in weeks.
       # Advisory only — this step must never fail the run. A transient network
@@ -63,16 +56,12 @@ jobs:
           }
           check "spot advisor feed" "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json" 180
           check "spot price feed"   "https://website.spot.ec2.aws.a2z.com/spot.json" 30
-
       - name: Refresh feeds
         run: make update-data update-price
-
       - name: Verify embedded data parses
         run: make verify-data
-
       - name: Run tests
         run: go test ./... -count=1
-
       - name: Open or update pull request
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -93,10 +82,22 @@ jobs:
           git add internal/spot/data/
           git commit -m "chore: refresh embedded AWS spot data"
 
-          # Plain --force is correct here: this branch is owned solely by this
-          # workflow, and a shallow checkout has no remote-tracking ref for
-          # --force-with-lease to compare against.
-          git push --force origin "HEAD:refs/heads/$branch"
+          # A long-lived PR branch is exactly where a maintainer pushes a review
+          # fix, so never blind-force over it. Fetch first (a shallow checkout has
+          # no remote-tracking ref, which is what --force-with-lease compares
+          # against), bail out if the tip is not ours, and keep the lease as a
+          # second line of defence against a race with a concurrent run.
+          git fetch origin "$branch" || true
+
+          if git rev-parse --verify -q "refs/remotes/origin/$branch" >/dev/null 2>&1; then
+            tip_author=$(git log -1 --format='%an' "refs/remotes/origin/$branch")
+            if [ "$tip_author" != "github-actions[bot]" ]; then
+              echo "::warning::$branch tip is authored by '$tip_author', not this workflow. Refusing to overwrite it — merge or close the open PR first."
+              exit 0
+            fi
+          fi
+
+          git push --force-with-lease -u origin "HEAD:refs/heads/$branch"
 
           state=$(gh pr view "$branch" --json state --jq .state 2>/dev/null || echo "")
           if [ "$state" = "OPEN" ]; then
