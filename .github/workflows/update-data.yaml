@@ -1,0 +1,125 @@
+name: Update embedded data
+
+# Refreshes the embedded AWS feeds and opens a PR when they change.
+#
+# Data enters the repo ONLY through this workflow (or a manual
+# `make update-data update-price`). Build, test and release workflows
+# deliberately do not refresh the feeds, so every build embeds exactly
+# what is committed and reviewed.
+
+on:
+  schedule:
+    # Weekly, Monday 06:00 UTC. The price feed updates hourly, the advisor
+    # feed every few months, so weekly keeps drift small without churn.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# A second run must not race the first for the shared bot branch.
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Refresh AWS spot data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.24'
+
+      # The legacy spot.js feed silently froze for over two years before anyone
+      # noticed. Age is checked explicitly so the next freeze surfaces in weeks.
+      # Advisory only — this step must never fail the run. A transient network
+      # error here must not block an otherwise healthy refresh.
+      - name: Check feed freshness
+        run: |
+          check() {
+            name="$1"; url="$2"; max_days="$3"
+            lm=$(curl -sSI --max-time 30 "$url" 2>/dev/null | tr -d '\r' \
+                 | awk 'tolower($1)=="last-modified:"{sub(/^[^ ]+ /,""); print}') || true
+            if [ -z "$lm" ]; then
+              echo "::warning::$name: no Last-Modified header, cannot check freshness"
+              return 0
+            fi
+            epoch=$(date -u -d "$lm" +%s 2>/dev/null) || epoch=""
+            if [ -z "$epoch" ]; then
+              echo "::warning::$name: unparseable Last-Modified '$lm'"
+              return 0
+            fi
+            age=$(( ( $(date -u +%s) - epoch ) / 86400 ))
+            echo "$name: last modified $lm (${age}d ago)"
+            if [ "$age" -gt "$max_days" ]; then
+              echo "::warning::$name has not changed in ${age} days (threshold ${max_days}). The feed may be abandoned — verify the source URL."
+            fi
+          }
+          check "spot advisor feed" "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json" 180
+          check "spot price feed"   "https://website.spot.ec2.aws.a2z.com/spot.json" 30
+
+      - name: Refresh feeds
+        run: make update-data update-price
+
+      - name: Verify embedded data parses
+        run: make verify-data
+
+      - name: Run tests
+        run: go test ./... -count=1
+
+      - name: Open or update pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- internal/spot/data/; then
+            echo "Feeds unchanged, nothing to do."
+            exit 0
+          fi
+
+          # One long-lived bot branch, so there is a single PR that always carries
+          # the latest data — rather than a new PR every week that nobody closes.
+          branch="chore/update-spot-data"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add internal/spot/data/
+          git commit -m "chore: refresh embedded AWS spot data"
+
+          # Plain --force is correct here: this branch is owned solely by this
+          # workflow, and a shallow checkout has no remote-tracking ref for
+          # --force-with-lease to compare against.
+          git push --force origin "HEAD:refs/heads/$branch"
+
+          state=$(gh pr view "$branch" --json state --jq .state 2>/dev/null || echo "")
+          if [ "$state" = "OPEN" ]; then
+            echo "PR already open for $branch; pushed the latest data to it."
+            exit 0
+          fi
+
+          cat > "${RUNNER_TEMP}/pr-body.md" <<'EOF'
+          Automated refresh of the embedded AWS spot data feeds.
+
+          - Advisor: https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json
+          - Pricing: https://website.spot.ec2.aws.a2z.com/spot.json
+
+          The embedded files were verified to parse and the full test suite passed
+          before this PR was opened.
+
+          Check the **Check feed freshness** step for stale-feed warnings — a frozen
+          feed is how the previous pricing source rotted unnoticed for two years.
+
+          Note: PRs opened with `GITHUB_TOKEN` do not trigger CI workflows, so the
+          checks below may appear empty. The data was validated by this workflow.
+          EOF
+
+          gh pr create \
+            --head "$branch" \
+            --title "chore: refresh embedded AWS spot data" \
+            --body-file "${RUNNER_TEMP}/pr-body.md"

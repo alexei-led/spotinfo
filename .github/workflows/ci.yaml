@@ -19,15 +19,15 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v7
       with:
         go-version: '1.24'
         
     - name: Cache Go modules
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cache/go-build
@@ -38,9 +38,6 @@ jobs:
           
     - name: Download dependencies
       run: go mod download
-      
-    - name: Update embedded data
-      run: make update-data update-price
       
     - name: Run tests with coverage
       run: go test -cover -v ./...
@@ -69,16 +66,13 @@ jobs:
             
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v7
       with:
         go-version: '1.24'
         
-    - name: Update embedded data
-      run: make update-data update-price
-      
     - name: Build for ${{ matrix.os }}/${{ matrix.arch }}
       env:
         GOOS: ${{ matrix.os }}

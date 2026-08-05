@@ -19,20 +19,30 @@ ARCHITECTURES = amd64 arm64
 
 # Data URLs
 SPOT_ADVISOR_URL = "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json"
-SPOT_PRICE_URL = "http://spot-price.s3.amazonaws.com/spot.js"
+# Feed behind https://aws.amazon.com/ec2/spot/pricing/. Replaces the legacy JSONP
+# spot-price.s3.amazonaws.com/spot.js, frozen since 2024-05-13 and missing every
+# instance family newer than that. Undocumented endpoint: runtime falls back to
+# embedded data on any failure (see internal/spot/data.go).
+SPOT_PRICE_URL = "https://website.spot.ec2.aws.a2z.com/spot.json"
+# must match the //go:embed paths in internal/spot/data.go
+DATA_DIR = internal/spot/data
 
 # Go environment
 export GO111MODULE=on
 export CGO_ENABLED=0
 
 .PHONY: all build test test-verbose test-race test-coverage lint fmt clean help version
-.PHONY: update-data update-price check-deps setup-tools release
+.PHONY: update-data update-price verify-data check-deps setup-tools release
 
 # Default target
 all: build
 
-# Build binary for current platform
-build: update-data update-price
+# Build binary for current platform.
+# Deliberately does NOT depend on update-data/update-price: the build must be
+# hermetic and embed exactly the committed data. Refreshing the feeds is a
+# separate, explicit step (make update-data update-price, or the scheduled
+# update-data workflow that opens a PR).
+build:
 	@echo "Building binary..."
 	@go build -tags release -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(shell basename $(MODULE)) ./cmd/spotinfo
 
@@ -69,17 +79,29 @@ check-deps:
 	@command -v wget > /dev/null 2>&1 || (echo "Error: wget is required" && exit 1)
 	@echo "Dependencies satisfied"
 
+# Both targets download to .tmp and only replace the tracked file on success.
+# wget -O truncates its target before it knows the HTTP status, so writing
+# straight to the embedded file would clobber good data on a 403 or a dropped
+# connection. wget also exits non-zero on an incomplete transfer, which is the
+# guard against a truncated-but-non-empty download that `test -s` would pass.
 update-data: check-deps
 	@echo "Updating spot advisor data..."
-	@mkdir -p public/spot/data
-	@wget -nv $(SPOT_ADVISOR_URL) -O public/spot/data/spot-advisor-data.json
+	@wget -nv $(SPOT_ADVISOR_URL) -O $(DATA_DIR)/spot-advisor-data.json.tmp || (rm -f $(DATA_DIR)/spot-advisor-data.json.tmp; exit 1)
+	@test -s $(DATA_DIR)/spot-advisor-data.json.tmp || (rm -f $(DATA_DIR)/spot-advisor-data.json.tmp; echo "Error: empty advisor download"; exit 1)
+	@mv $(DATA_DIR)/spot-advisor-data.json.tmp $(DATA_DIR)/spot-advisor-data.json
 
 update-price: check-deps
 	@echo "Updating spot pricing data..."
-	@mkdir -p public/spot/data
-	@wget -nv $(SPOT_PRICE_URL) -O public/spot/data/spot-price-data.json
-	@sed -i'' -e "s/callback(//g" public/spot/data/spot-price-data.json
-	@sed -i'' -e "s/);//g" public/spot/data/spot-price-data.json
+	@wget -nv $(SPOT_PRICE_URL) -O $(DATA_DIR)/spot-price-data.json.tmp || (rm -f $(DATA_DIR)/spot-price-data.json.tmp; exit 1)
+	@test -s $(DATA_DIR)/spot-price-data.json.tmp || (rm -f $(DATA_DIR)/spot-price-data.json.tmp; echo "Error: empty price download"; exit 1)
+	@mv $(DATA_DIR)/spot-price-data.json.tmp $(DATA_DIR)/spot-price-data.json
+
+# Parse gate: proves the embedded files are valid JSON in the expected shape.
+# Deliberately only the LoadEmbedded tests — they read the //go:embed strings directly,
+# so the result is deterministic and does not depend on AWS being reachable.
+verify-data:
+	@echo "Verifying embedded data parses..."
+	@go test ./internal/spot/ -run 'TestLoadEmbeddedAdvisorData|TestLoadEmbeddedPricingData' -count=1
 
 # Development tools
 setup-tools:
@@ -122,6 +144,7 @@ help:
 	@echo "  fmt           Format Go code"
 	@echo "  update-data   Update embedded spot advisor data"
 	@echo "  update-price  Update embedded spot pricing data"
+	@echo "  verify-data   Verify the embedded data files parse"
 	@echo "  release       Build binaries for all platforms"
 	@echo "  clean         Remove build artifacts"
 	@echo "  setup-tools   Install development tools"

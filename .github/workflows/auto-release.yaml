@@ -29,23 +29,21 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v7
         with:
           go-version: '1.24'
-      - name: Update embedded data
-        run: make update-data update-price
       - name: Run tests
         run: make test-verbose
       - name: Get latest tag
         id: get-latest-tag
         run: |
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          echo "latest-tag=${LATEST_TAG}" >> $GITHUB_OUTPUT
+          echo "latest-tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
           echo "Latest tag: ${LATEST_TAG}"
       - name: Calculate next version
         id: next-version
@@ -67,19 +65,19 @@ jobs:
             patch) NEW_VERSION="v${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
           esac
 
-          echo "new-version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "new-version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
           echo "Next version: ${NEW_VERSION}"
       - name: Check for changes since last release
         id: check-changes
         run: |
           LATEST_TAG="${{ steps.get-latest-tag.outputs.latest-tag }}"
-          if git rev-list ${LATEST_TAG}..HEAD --count | grep -q "^0$"; then
+          if git rev-list "${LATEST_TAG}..HEAD" --count | grep -q "^0$"; then
             echo "No changes since last release"
-            echo "has-changes=false" >> $GITHUB_OUTPUT
+            echo "has-changes=false" >> "$GITHUB_OUTPUT"
           else
-            CHANGE_COUNT=$(git rev-list ${LATEST_TAG}..HEAD --count)
+            CHANGE_COUNT=$(git rev-list "${LATEST_TAG}..HEAD" --count)
             echo "Found ${CHANGE_COUNT} changes since last release"
-            echo "has-changes=true" >> $GITHUB_OUTPUT
+            echo "has-changes=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Generate changelog
         if: steps.check-changes.outputs.has-changes == 'true'
