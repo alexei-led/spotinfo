@@ -80,9 +80,9 @@ type mockspotClient_GetSpotSavings_Call struct {
 // GetSpotSavings is a helper method to define mock.On call
 //   - ctx context.Context
 //   - opts ...spot.GetSpotSavingsOption
-func (_e *mockspotClient_Expecter) GetSpotSavings(ctx interface{}, opts ...interface{}) *mockspotClient_GetSpotSavings_Call {
+func (_e *mockspotClient_Expecter) GetSpotSavings(ctx any, opts ...any) *mockspotClient_GetSpotSavings_Call {
 	return &mockspotClient_GetSpotSavings_Call{Call: _e.mock.On("GetSpotSavings",
-		append([]interface{}{ctx}, opts...)...)}
+		append([]any{ctx}, opts...)...)}
 }
 
 func (_c *mockspotClient_GetSpotSavings_Call) Run(run func(ctx context.Context, opts ...spot.GetSpotSavingsOption)) *mockspotClient_GetSpotSavings_Call {

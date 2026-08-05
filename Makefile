@@ -26,13 +26,15 @@ SPOT_ADVISOR_URL = "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.
 SPOT_PRICE_URL = "https://website.spot.ec2.aws.a2z.com/spot.json"
 # must match the //go:embed paths in internal/spot/data.go
 DATA_DIR = internal/spot/data
+# Pinned so every developer and CI regenerate byte-identical mocks.
+MOCKERY_VERSION = v3.7.2
 
 # Go environment
 export GO111MODULE=on
 export CGO_ENABLED=0
 
 .PHONY: all build test test-verbose test-race test-coverage lint fmt clean help version
-.PHONY: update-data update-price verify-data check-deps setup-tools release
+.PHONY: update-data update-price verify-data check-deps setup-tools release mocks
 
 # Default target
 all: build
@@ -107,6 +109,16 @@ verify-data:
 setup-tools:
 	@echo "Installing development tools..."
 	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	@go install github.com/vektra/mockery/v3@$(MOCKERY_VERSION)
+
+# Regenerate the testify mocks declared in .mockery.yaml.
+# Every mocked interface must be listed there — a mock that exists only by hand
+# inside the generated file is silently deleted by the next run.
+mocks:
+	@echo "Regenerating mocks..."
+	@command -v mockery > /dev/null 2>&1 || go install github.com/vektra/mockery/v3@$(MOCKERY_VERSION)
+	@mockery
+	@go build ./... && echo "mocks regenerated and compiling"
 
 # Multi-platform release
 release: clean
@@ -145,6 +157,7 @@ help:
 	@echo "  update-data   Update embedded spot advisor data"
 	@echo "  update-price  Update embedded spot pricing data"
 	@echo "  verify-data   Verify the embedded data files parse"
+	@echo "  mocks         Regenerate testify mocks from .mockery.yaml"
 	@echo "  release       Build binaries for all platforms"
 	@echo "  clean         Remove build artifacts"
 	@echo "  setup-tools   Install development tools"
