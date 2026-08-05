@@ -15,6 +15,15 @@
 .gitignore
 *.todo
 
+# agent/tooling caches — large and irrelevant to the build context.
+# Note .git is deliberately NOT excluded: the build stamps VCS info,
+# which is why the builder stage installs git.
+.claude
+.archfit-cache
+.archfit.yaml
+.codegraph
+llms.txt
+
 # documentation
 *.md
 docs

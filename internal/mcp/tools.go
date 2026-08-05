@@ -33,7 +33,18 @@ const (
 
 // MCP request argument keys and their special values.
 const (
-	argRegions = "regions"
+	argRegions             = "regions"
+	argInstanceTypes       = "instance_types"
+	argMinVCPU             = "min_vcpu"
+	argMinMemoryGB         = "min_memory_gb"
+	argMaxPricePerHour     = "max_price_per_hour"
+	argMaxInterruptionRate = "max_interruption_rate"
+	argSortBy              = "sort_by"
+	argLimit               = "limit"
+	argWithScore           = "with_score"
+	argMinScore            = "min_score"
+	argAZ                  = "az"
+	argScoreTimeout        = "score_timeout"
 	// allRegions is the "regions" argument value meaning every AWS region.
 	allRegions = "all"
 )
@@ -177,17 +188,17 @@ func parseParameters(arguments interface{}) *params {
 
 	return &params{
 		regions:         regions,
-		instanceTypes:   cast.ToString(args["instance_types"]),
-		minVCPU:         cast.ToInt(args["min_vcpu"]),
-		minMemoryGB:     cast.ToInt(args["min_memory_gb"]),
-		maxPrice:        cast.ToFloat64(args["max_price_per_hour"]),
-		maxInterruption: cast.ToFloat64(args["max_interruption_rate"]),
-		sortBy:          getStringWithDefault(args, "sort_by", sortByReliability),
-		limit:           getLimitWithDefault(args, "limit", defaultLimit),
-		withScore:       cast.ToBool(args["with_score"]),
-		minScore:        cast.ToInt(args["min_score"]),
-		az:              cast.ToBool(args["az"]),
-		scoreTimeout:    cast.ToInt(args["score_timeout"]),
+		instanceTypes:   cast.ToString(args[argInstanceTypes]),
+		minVCPU:         cast.ToInt(args[argMinVCPU]),
+		minMemoryGB:     cast.ToInt(args[argMinMemoryGB]),
+		maxPrice:        cast.ToFloat64(args[argMaxPricePerHour]),
+		maxInterruption: cast.ToFloat64(args[argMaxInterruptionRate]),
+		sortBy:          getStringWithDefault(args, argSortBy, sortByReliability),
+		limit:           getLimitWithDefault(args, argLimit, defaultLimit),
+		withScore:       cast.ToBool(args[argWithScore]),
+		minScore:        cast.ToInt(args[argMinScore]),
+		az:              cast.ToBool(args[argAZ]),
+		scoreTimeout:    cast.ToInt(args[argScoreTimeout]),
 	}
 }
 
