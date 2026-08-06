@@ -25,6 +25,7 @@
 - Workload interruption caps are conservative and explicit: web `<5%`, CI `<=15%`, batch `<=20%`
 - The default concise table includes deterministic rationale codes; `--output json` emits a versioned request-and-results wrapper
 - Ranking uses price, interruption, and right-sizing excess; savings is displayed but never used to rank
+- Repeated recommendation regions are deduplicated; `all` cannot be mixed with explicit regions
 
 ### 📊 **Multiple Output Formats**
 - **Visual formats**: Table with emoji indicators, plain text
@@ -168,6 +169,7 @@ Credentials are loaded via the [AWS SDK default credential chain](https://docs.a
 make build
 
 # Update embedded data (usually unnecessary — a weekly workflow opens a PR for this)
+# verify-data also checks reviewed architecture snapshot metadata and Advisor-family coverage.
 make update-data update-price verify-data
 
 # Docker build

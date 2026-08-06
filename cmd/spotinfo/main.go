@@ -229,17 +229,26 @@ type recommendationReport struct {
 	Recommendations []spot.Recommendation `json:"recommendations"`
 }
 
-func normalizedRegions(regions []string) []string {
+// normalizeRecommendationRegions validates and deterministically deduplicates
+// recommendation regions before candidate acquisition and report rendering.
+func normalizeRecommendationRegions(regions []string) ([]string, error) {
 	unique := make(map[string]struct{}, len(regions))
 	for _, region := range regions {
+		if strings.TrimSpace(region) == "" {
+			return nil, fmt.Errorf("%w: region must not be empty", spot.ErrInvalidRecommendationInput)
+		}
 		unique[region] = struct{}{}
 	}
+	if _, hasAll := unique[allRegions]; hasAll && len(unique) > 1 {
+		return nil, fmt.Errorf("%w: region all cannot be combined with explicit regions", spot.ErrInvalidRecommendationInput)
+	}
+
 	normalized := make([]string, 0, len(unique))
 	for region := range unique {
 		normalized = append(normalized, region)
 	}
 	sort.Strings(normalized)
-	return normalized
+	return normalized, nil
 }
 
 func recommendationRankingPolicy() []string {
@@ -378,17 +387,24 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, client spotClie
 		return err
 	}
 
+	regions, err := normalizeRecommendationRegions(ctx.StringSlice(flagRegion))
+	if err != nil {
+		return err
+	}
+
 	lookup, err := spot.LoadEmbeddedArchitectureLookup()
 	if err != nil {
 		return fmt.Errorf("load recommendation architecture data: %w", err)
 	}
 
-	regions := ctx.StringSlice(flagRegion)
 	queryOpts := []spot.GetSpotSavingsOption{
 		spot.WithRegions(regions),
 		spot.WithOS(opts.OS),
 		spot.WithCPU(opts.CPU),
 		spot.WithMemory(opts.Memory),
+	}
+	if opts.Instance != "" {
+		queryOpts = append(queryOpts, spot.WithPattern(opts.Instance))
 	}
 	if opts.Budget > 0 {
 		queryOpts = append(queryOpts, spot.WithMaxPrice(opts.Budget))
@@ -409,7 +425,7 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, client spotClie
 		Request: recommendationRequest{
 			Architecture:     opts.Architecture,
 			InstanceRegexp:   opts.Instance,
-			Regions:          normalizedRegions(regions),
+			Regions:          regions,
 			OS:               opts.OS,
 			MinimumVCPU:      opts.CPU,
 			MinimumMemoryGiB: opts.Memory,
@@ -788,14 +804,16 @@ func handleSignals() context.Context {
 	return ctx
 }
 
-//nolint:funlen // CLI main functions are inherently long due to comprehensive flag definitions
-func recommendCommand() *cli.Command {
+func defaultRecommendAction(ctx *cli.Context) error {
+	return execRecommendCmd(ctx, mainCtx, spot.New(), os.Stdout)
+}
+
+//nolint:funlen // CLI flag declarations are intentionally kept together.
+func recommendCommand(action cli.ActionFunc) *cli.Command {
 	return &cli.Command{
-		Name:  recommendCommandName,
-		Usage: "recommend individual Spot instances by architecture and workload",
-		Action: func(ctx *cli.Context) error {
-			return execRecommendCmd(ctx, mainCtx, spot.New(), os.Stdout)
-		},
+		Name:   recommendCommandName,
+		Usage:  "recommend individual Spot instances by architecture and workload",
+		Action: action,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: flagArchitecture, Usage: "required instance architecture: x86_64|arm64", Required: true},
 			&cli.StringFlag{Name: flagInstance, Usage: "instance type RE2 regexp (combined with architecture)"},
@@ -811,9 +829,13 @@ func recommendCommand() *cli.Command {
 	}
 }
 
+// newSpotinfoApp assembles the production root and recommend command wiring.
+// Actions are injected so assembly tests exercise the production flags and commands
+// without opening network clients or writing to process stdout.
+//
 //nolint:funlen // CLI flag declarations are intentionally kept together.
-func main() {
-	app := &cli.App{
+func newSpotinfoApp(rootAction, recommendationAction cli.ActionFunc) *cli.App {
+	return &cli.App{
 		Before: func(ctx *cli.Context) error {
 			// Update logger based on flags
 			logLevel := slog.LevelInfo
@@ -910,31 +932,37 @@ func main() {
 		},
 		Name:     appName,
 		Usage:    "explore AWS EC2 Spot instances",
-		Action:   mainCmd,
-		Commands: []*cli.Command{recommendCommand()},
+		Action:   rootAction,
+		Commands: []*cli.Command{recommendCommand(recommendationAction)},
 		Version:  Version,
 	}
-	cli.VersionPrinter = func(_ *cli.Context) {
-		fmt.Printf("spotinfo %s\n", Version)
+}
 
-		if GitHubRelease != "" {
-			fmt.Printf("  GitHub release: %s\n", GitHubRelease)
-		}
+func printVersion(_ *cli.Context) {
+	fmt.Printf("spotinfo %s\n", Version)
 
-		if BuildDate != "" && BuildDate != unknownBuildValue {
-			fmt.Printf("  Build date: %s\n", BuildDate)
-		}
-
-		if GitCommit != "" {
-			fmt.Printf("  Git commit: %s\n", GitCommit)
-		}
-
-		if GitBranch != "" {
-			fmt.Printf("  Git branch: %s\n", GitBranch)
-		}
-
-		fmt.Printf("  Built with: %s\n", runtime.Version())
+	if GitHubRelease != "" {
+		fmt.Printf("  GitHub release: %s\n", GitHubRelease)
 	}
+
+	if BuildDate != "" && BuildDate != unknownBuildValue {
+		fmt.Printf("  Build date: %s\n", BuildDate)
+	}
+
+	if GitCommit != "" {
+		fmt.Printf("  Git commit: %s\n", GitCommit)
+	}
+
+	if GitBranch != "" {
+		fmt.Printf("  Git branch: %s\n", GitBranch)
+	}
+
+	fmt.Printf("  Built with: %s\n", runtime.Version())
+}
+
+func main() {
+	app := newSpotinfoApp(mainCmd, defaultRecommendAction)
+	cli.VersionPrinter = printVersion
 
 	if err := app.Run(os.Args); err != nil {
 		log.Error("application failed", slog.Any("error", err))

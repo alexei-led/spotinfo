@@ -98,12 +98,12 @@ update-price: check-deps
 	@test -s $(DATA_DIR)/spot-price-data.json.tmp || (rm -f $(DATA_DIR)/spot-price-data.json.tmp; echo "Error: empty price download"; exit 1)
 	@mv $(DATA_DIR)/spot-price-data.json.tmp $(DATA_DIR)/spot-price-data.json
 
-# Parse gate: proves the embedded files are valid JSON in the expected shape.
-# Deliberately only the LoadEmbedded tests — they read the //go:embed strings directly,
-# so the result is deterministic and does not depend on AWS being reachable.
+# Deterministic embedded-data gate. The architecture snapshot test validates its
+# review metadata and fail-closed coverage of every Advisor family, so a feed refresh
+# surfaces families that require a manual reviewed snapshot update.
 verify-data:
-	@echo "Verifying embedded data parses..."
-	@go test ./internal/spot/ -run 'TestLoadEmbeddedAdvisorData|TestLoadEmbeddedPricingData' -count=1
+	@echo "Verifying embedded data and reviewed architecture coverage..."
+	@go test ./internal/spot/ -run 'TestLoadEmbeddedAdvisorData|TestLoadEmbeddedPricingData|TestLoadEmbeddedArchitectureLookup_ClassifiesAdvisorFamiliesAndReviewedRegressions|TestParseArchitectureSnapshotRejectsInvalidData' -count=1
 
 # Development tools
 setup-tools:
@@ -162,7 +162,7 @@ help:
 	@echo "  fmt           Format Go code"
 	@echo "  update-data   Update embedded spot advisor data"
 	@echo "  update-price  Update embedded spot pricing data"
-	@echo "  verify-data   Verify the embedded data files parse"
+	@echo "  verify-data   Verify embedded data and reviewed architecture coverage"
 	@echo "  mocks         Regenerate testify mocks from .mockery.yaml"
 	@echo "  release       Build binaries for all platforms"
 	@echo "  clean         Remove build artifacts"

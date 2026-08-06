@@ -61,7 +61,7 @@
 - **Purpose**: Classifies Advisor instance families as `x86_64` or `arm64` for `spotinfo recommend`; it does not select an OS price stream
 - **Reviewed exceptions**: G6, G6e, G6f, and Hpc8a are AMD EPYC (`x86_64`), despite nearby family naming patterns that could be misleading. Arm families are listed explicitly too.
 - **Runtime behavior**: Embedded only; `recommend` never calls AWS metadata APIs to discover architecture. Its command-local `--os linux|windows` is passed only to the existing Spot price lookup.
-- **Safety and freshness**: A family absent from the reviewed snapshot is not guessed and cannot become a recommendation. The snapshot is committed separately from the Advisor feed, so a newly published family may be omitted until a reviewed update is committed. The snapshot records its review date and provenance; this manual review is the principal freshness limitation.
+- **Safety and freshness**: A family absent from the reviewed snapshot is not guessed and cannot become a recommendation. The snapshot is committed separately from the Advisor feed, so a newly published family may be omitted until a reviewed update is committed. `provenance` must be non-empty and `reviewed_at` must be a valid `YYYY-MM-DD` date; malformed snapshots are rejected. This manual review is the principal freshness limitation.
 
 ### 5. AWS Spot Placement Scores API
 - **Source**: AWS `GetSpotPlacementScores` API
@@ -198,13 +198,20 @@ refreshes both feeds, and opens a PR. To do it manually:
 ```bash
 make update-data    # Updates spot advisor data
 make update-price   # Updates spot pricing data
-make verify-data    # Parse gate on the embedded files
+make verify-data    # Validates embedded data, snapshot metadata, and family coverage
 make build          # Embeds the committed data in the binary
 ```
 
 `make build` does **not** download anything — it embeds whatever is on disk. Each update
 target downloads to a `.tmp` file and only replaces the tracked file on success, so a failed
 or truncated download cannot clobber good data.
+
+If `make verify-data` reports an Advisor family missing from the architecture snapshot, do not
+infer or generate an architecture mapping. Manually review the family in AWS EC2 processor
+architecture documentation, add the reviewed family mapping to
+`internal/spot/data/architecture-snapshot.json`, update its non-empty `provenance` and
+`reviewed_at` (`YYYY-MM-DD`), then rerun `make verify-data`. The snapshot is intentionally
+committed review evidence; no runtime metadata call or automatic unreviewed generator exists.
 
 ### Runtime Data Flow
 1. **Startup**: Load embedded data as baseline

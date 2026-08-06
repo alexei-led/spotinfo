@@ -77,7 +77,7 @@ spotinfo recommend --architecture x86_64|arm64 --cpu N --memory N [flags]
 | `--top N` | Maximum candidates returned | `3` |
 | `--output table|json` | Recommendation output format | `table` |
 
-`web` accepts only the Advisor `<5%` label. `ci` accepts Advisor labels through `10-15%` (at most 15%), and `batch` accepts labels through `15-20%` (at most 20%). `--cpu` and `--memory` are inclusive minima, as is `--budget`; a supplied budget must be greater than zero. Prices of zero, missing prices, and non-finite prices are never candidates; existing live-price enrichment can provide a usable positive price. `--os` selects Linux or Windows pricing before ranking.
+`web` accepts only the Advisor `<5%` label. `ci` accepts Advisor labels through `10-15%` (at most 15%), and `batch` accepts labels through `15-20%` (at most 20%). `--cpu` and `--memory` are inclusive minima, as is `--budget`; a supplied budget must be greater than zero. Prices of zero, missing prices, and non-finite prices are never candidates; existing live-price enrichment can provide a usable positive price. `--os` selects Linux or Windows pricing before ranking. Repeated `--region` values are deduplicated and sorted before fetching and reporting; repeated `--region all` becomes one `all`, while `all` combined with an explicit region (or an empty region value) is rejected before fetching.
 
 The default `table` output is concise and has rank, region, instance, architecture, vCPU, memory GiB, USD/hour, savings, interruption, and `WHY`. `WHY` is a comma-separated list of deterministic rationale codes such as `ARCHITECTURE_MATCH`, `KNOWN_POSITIVE_PRICE`, `VCPU_MINIMUM_MET`, `MEMORY_MINIMUM_MET`, `WORKLOAD_CI_CAP_MET`, and, when applicable, `BUDGET_CAP_MET`. These are facts and policy checks, not generated prose.
 
@@ -89,6 +89,8 @@ spotinfo recommend --architecture arm64 --instance '^m[678]g\.' --vcpu 2 --memor
 ```
 
 Use `--output json` for a deterministic versioned wrapper rather than a bare array. The normalized request has explicit units, sorted regions, OS, workload, and top; `recommendations` is always an array.
+
+The following JSON example abridges each recommendation item to its identifying fields and rationale; actual items also include region, architecture, vCPU, memory GiB, price, savings, and interruption frequency.
 
 ```json
 {
@@ -109,7 +111,7 @@ Use `--output json` for a deterministic versioned wrapper rather than a bare arr
 }
 ```
 
-v1 does not use placement scores, GPUs, ML, Markdown output, composite scores, or savings ranking. Architecture comes from a committed reviewed family snapshot; unknown families fail closed and no runtime AWS metadata call is made. See [Data Sources](data-sources.md) for provenance and freshness limitations.
+v1 does not use placement scores, GPUs, ML, Markdown output, composite scores, or savings ranking. Architecture comes from a committed reviewed family snapshot; unknown families fail closed and no runtime AWS metadata call is made. Snapshot `provenance` must be non-empty and `reviewed_at` must be a valid `YYYY-MM-DD` date. See [Data Sources](data-sources.md) for the manual reviewed update procedure and freshness limitations.
 
 ## Output Formats
 

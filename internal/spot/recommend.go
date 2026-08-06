@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 //go:embed data/architecture-snapshot.json
@@ -84,7 +85,9 @@ type ArchitectureLookup struct {
 }
 
 type architectureSnapshot struct {
-	Families map[string]Architecture `json:"families"`
+	Families   map[string]Architecture `json:"families"`
+	Provenance string                  `json:"provenance"`
+	ReviewedAt string                  `json:"reviewed_at"`
 }
 
 var (
@@ -110,6 +113,15 @@ func parseArchitectureSnapshot(contents []byte) (*ArchitectureLookup, error) {
 	var snapshot architectureSnapshot
 	if err := json.Unmarshal(contents, &snapshot); err != nil {
 		return nil, fmt.Errorf("parse architecture snapshot: %w", err)
+	}
+	if strings.TrimSpace(snapshot.Provenance) == "" {
+		return nil, errors.New("architecture snapshot has no provenance")
+	}
+	if strings.TrimSpace(snapshot.ReviewedAt) == "" {
+		return nil, errors.New("architecture snapshot has no reviewed_at date")
+	}
+	if _, err := time.Parse(time.DateOnly, snapshot.ReviewedAt); err != nil {
+		return nil, fmt.Errorf("invalid architecture snapshot reviewed_at %q: %w", snapshot.ReviewedAt, err)
 	}
 	if len(snapshot.Families) == 0 {
 		return nil, errors.New("architecture snapshot contains no families")

@@ -37,13 +37,24 @@ func TestLoadEmbeddedArchitectureLookup_ClassifiesAdvisorFamiliesAndReviewedRegr
 }
 
 func TestParseArchitectureSnapshotRejectsInvalidData(t *testing.T) {
-	_, err := parseArchitectureSnapshot([]byte(`{"families":{"m5":"riscv"}}`))
+	validMetadata := `"provenance":"reviewed manually","reviewed_at":"2026-08-06",`
+
+	_, err := parseArchitectureSnapshot([]byte(`{` + validMetadata + `"families":{"m5":"riscv"}}`))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid architecture")
 
-	_, err = parseArchitectureSnapshot([]byte(`{"families":{}}`))
+	_, err = parseArchitectureSnapshot([]byte(`{` + validMetadata + `"families":{}}`))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no families")
+
+	for _, contents := range [][]byte{
+		[]byte(`{"reviewed_at":"2026-08-06","families":{"m5":"x86_64"}}`),
+		[]byte(`{"provenance":"reviewed manually","families":{"m5":"x86_64"}}`),
+		[]byte(`{"provenance":"reviewed manually","reviewed_at":"not-a-date","families":{"m5":"x86_64"}}`),
+	} {
+		_, err = parseArchitectureSnapshot(contents)
+		require.Error(t, err)
+	}
 }
 
 func recommendationOptions() *RecommendationOptions {
@@ -69,6 +80,13 @@ func advice(instance string, price float64, cpu int, memory float32, interruptio
 		Region: "us-east-1", Instance: instance, Price: price, Savings: 70,
 		Info: TypeInfo{Cores: cpu, RAM: memory}, Range: Range{Label: "test", Max: interruption},
 	}
+}
+
+func TestRecommend_NoCandidatesReturnsSentinel(t *testing.T) {
+	recommendations, err := Recommend(nil, recommendationOptions(), testLookup())
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrNoRecommendationCandidates))
+	assert.Nil(t, recommendations)
 }
 
 func TestRecommend_ArchitectureAndInstanceUseANDSemantics(t *testing.T) {
