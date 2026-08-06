@@ -47,7 +47,7 @@ func TestAWSScoreProviderFetchScores(t *testing.T) {
 
 	types := []string{"m5.large", "c5.large"}
 
-	t.Run("maps a returned score onto the requested types", func(t *testing.T) {
+	t.Run("returns the score for the requested region", func(t *testing.T) {
 		t.Parallel()
 
 		api := &fakeScoresAPI{pages: []*ec2.GetSpotPlacementScoresOutput{{
@@ -59,7 +59,7 @@ func TestAWSScoreProviderFetchScores(t *testing.T) {
 		got, err := scoreProviderWith(api).fetchScores(t.Context(), testRegionUSEast1, types, false)
 
 		require.NoError(t, err)
-		assert.Equal(t, map[string]int{"m5.large": 9, "c5.large": 9}, got)
+		assert.Equal(t, []placementScore{{placement: testRegionUSEast1, score: 9}}, got)
 	})
 
 	// Regression guard: unscored types used to be back-filled with a literal 5,
@@ -75,6 +75,26 @@ func TestAWSScoreProviderFetchScores(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Empty(t, got, "unscored types must be absent, never defaulted")
+	})
+
+	// GetSpotPlacementScores can return a score per Region. Only the requested
+	// region's score is meaningful here; taking whichever arrived first would
+	// report another region's capacity under this region's name.
+	t.Run("uses the requested region's score, not whichever arrived first", func(t *testing.T) {
+		t.Parallel()
+
+		api := &fakeScoresAPI{pages: []*ec2.GetSpotPlacementScoresOutput{{
+			SpotPlacementScores: []ec2types.SpotPlacementScore{
+				{Region: aws.String("us-west-2"), Score: aws.Int32(2)},
+				{Region: aws.String(testRegionUSEast1), Score: aws.Int32(9)},
+			},
+		}}}
+
+		got, err := scoreProviderWith(api).fetchScores(t.Context(), testRegionUSEast1, []string{"m5.large"}, false)
+
+		require.NoError(t, err)
+		assert.Equal(t, []placementScore{{placement: testRegionUSEast1, score: 9}}, got,
+			"must report the us-east-1 score of 9, not us-west-2's 2")
 	})
 
 	t.Run("propagates API errors with the region named", func(t *testing.T) {
@@ -242,4 +262,25 @@ func TestAWSLivePriceProviderPropagatesErrors(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), testRegionUSEast1)
 	assert.Nil(t, got)
+}
+
+// The AZ name used to be synthesised as region+"a", so any zone AWS actually
+// scored was reported under the wrong name.
+func TestAWSScoreProviderUsesAWSZoneIDs(t *testing.T) {
+	t.Parallel()
+
+	api := &fakeScoresAPI{pages: []*ec2.GetSpotPlacementScoresOutput{{
+		SpotPlacementScores: []ec2types.SpotPlacementScore{
+			{AvailabilityZoneId: aws.String("use1-az4"), Score: aws.Int32(7)},
+			{AvailabilityZoneId: aws.String("use1-az6"), Score: aws.Int32(3)},
+		},
+	}}}
+
+	got, err := scoreProviderWith(api).fetchScores(t.Context(), testRegionUSEast1, []string{"m5.large"}, true)
+
+	require.NoError(t, err)
+	assert.Equal(t, []placementScore{
+		{placement: "use1-az4", score: 7},
+		{placement: "use1-az6", score: 3},
+	}, got, "zones must come from AWS, not be derived from the region name")
 }

@@ -602,23 +602,23 @@ func (_m *mockawsAPIProvider) EXPECT() *mockawsAPIProvider_Expecter {
 }
 
 // fetchScores provides a mock function for the type mockawsAPIProvider
-func (_mock *mockawsAPIProvider) fetchScores(ctx context.Context, region string, instanceTypes []string, singleAZ bool) (map[string]int, error) {
+func (_mock *mockawsAPIProvider) fetchScores(ctx context.Context, region string, instanceTypes []string, singleAZ bool) ([]placementScore, error) {
 	ret := _mock.Called(ctx, region, instanceTypes, singleAZ)
 
 	if len(ret) == 0 {
 		panic("no return value specified for fetchScores")
 	}
 
-	var r0 map[string]int
+	var r0 []placementScore
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []string, bool) (map[string]int, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []string, bool) ([]placementScore, error)); ok {
 		return returnFunc(ctx, region, instanceTypes, singleAZ)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []string, bool) map[string]int); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []string, bool) []placementScore); ok {
 		r0 = returnFunc(ctx, region, instanceTypes, singleAZ)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]int)
+			r0 = ret.Get(0).([]placementScore)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []string, bool) error); ok {
@@ -671,12 +671,12 @@ func (_c *mockawsAPIProvider_fetchScores_Call) Run(run func(ctx context.Context,
 	return _c
 }
 
-func (_c *mockawsAPIProvider_fetchScores_Call) Return(stringToInt map[string]int, err error) *mockawsAPIProvider_fetchScores_Call {
-	_c.Call.Return(stringToInt, err)
+func (_c *mockawsAPIProvider_fetchScores_Call) Return(placementScoreMoqParams []placementScore, err error) *mockawsAPIProvider_fetchScores_Call {
+	_c.Call.Return(placementScoreMoqParams, err)
 	return _c
 }
 
-func (_c *mockawsAPIProvider_fetchScores_Call) RunAndReturn(run func(ctx context.Context, region string, instanceTypes []string, singleAZ bool) (map[string]int, error)) *mockawsAPIProvider_fetchScores_Call {
+func (_c *mockawsAPIProvider_fetchScores_Call) RunAndReturn(run func(ctx context.Context, region string, instanceTypes []string, singleAZ bool) ([]placementScore, error)) *mockawsAPIProvider_fetchScores_Call {
 	_c.Call.Return(run)
 	return _c
 }

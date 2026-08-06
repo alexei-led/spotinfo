@@ -54,7 +54,7 @@ func TestEnrichWithScores(t *testing.T) {
 	tests := []struct {
 		name       string
 		singleAZ   bool
-		fetch      map[string]int
+		fetch      []placementScore
 		fetchErr   error
 		wantErr    bool
 		wantRegion *int
@@ -62,13 +62,13 @@ func TestEnrichWithScores(t *testing.T) {
 	}{
 		{
 			name:       "region level score applied",
-			fetch:      map[string]int{testInstanceT2Micro: 8},
+			fetch:      []placementScore{{placement: testRegionUSEast1, score: 8}},
 			wantRegion: new(8),
 		},
 		{
 			name:     "az level score applied",
 			singleAZ: true,
-			fetch:    map[string]int{testInstanceT2Micro: 6},
+			fetch:    []placementScore{{placement: testRegionUSEast1 + "a", score: 6}},
 			wantZone: map[string]int{testRegionUSEast1 + "a": 6},
 		},
 		{
@@ -125,7 +125,7 @@ func TestGetSpotPlacementScores_CachesByKey(t *testing.T) {
 	provider := newMockawsAPIProvider(t)
 	provider.EXPECT().
 		fetchScores(mock.Anything, testRegionUSEast1, []string{testInstanceT2Micro}, false).
-		Return(map[string]int{testInstanceT2Micro: 4}, nil).
+		Return([]placementScore{{placement: testRegionUSEast1, score: 4}}, nil).
 		Once()
 
 	sc := newTestScoreCache(provider)

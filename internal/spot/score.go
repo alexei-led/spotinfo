@@ -42,9 +42,22 @@ const (
 var errScoreProviderUnavailable = errors.New(
 	"spot placement scores unavailable: requires AWS credentials and the ec2:GetSpotPlacementScores permission")
 
+// placementScore is one score AWS returned, together with the placement it
+// applies to: a Region normally, or an AvailabilityZoneId when singleAZ was
+// requested. Carrying the identity through avoids reconstructing it — the AZ
+// name used to be synthesised as region+"a", which was wrong whenever AWS
+// scored any zone other than the first.
+//
+// AWS scores the request as a whole, not each instance type, so one score
+// applies to every instance type in that request.
+type placementScore struct {
+	placement string
+	score     int
+}
+
 // awsAPIProvider provides spot placement scores with different implementations.
 type awsAPIProvider interface {
-	fetchScores(ctx context.Context, region string, instanceTypes []string, singleAZ bool) (map[string]int, error)
+	fetchScores(ctx context.Context, region string, instanceTypes []string, singleAZ bool) ([]placementScore, error)
 }
 
 // awsScoreProvider implements awsAPIProvider using real AWS API calls.
@@ -69,8 +82,8 @@ func (p *awsScoreProvider) scoresClient(region string) ec2.GetSpotPlacementScore
 
 // CachedScoreData wraps scores with timestamp for freshness tracking.
 type CachedScoreData struct {
-	Scores    map[string]int
 	FetchTime time.Time
+	Scores    []placementScore
 }
 
 // FreshnessLevel indicates how fresh the cached data is.
@@ -163,7 +176,7 @@ func newAWSScoreProvider(ctx context.Context) (*awsScoreProvider, error) {
 }
 
 // fetchScores implements awsAPIProvider for AWS API calls.
-func (p *awsScoreProvider) fetchScores(ctx context.Context, region string, instanceTypes []string, singleAZ bool) (map[string]int, error) {
+func (p *awsScoreProvider) fetchScores(ctx context.Context, region string, instanceTypes []string, singleAZ bool) ([]placementScore, error) {
 	client := p.scoresClient(region)
 
 	input := &ec2.GetSpotPlacementScoresInput{
@@ -173,7 +186,8 @@ func (p *awsScoreProvider) fetchScores(ctx context.Context, region string, insta
 		MaxResults:             aws.Int32(defaultMaxResults),
 	}
 
-	scores := make(map[string]int)
+	var scores []placementScore
+
 	paginator := ec2.NewGetSpotPlacementScoresPaginator(client, input)
 
 	for paginator.HasMorePages() {
@@ -182,26 +196,30 @@ func (p *awsScoreProvider) fetchScores(ctx context.Context, region string, insta
 			return nil, fmt.Errorf("failed to get spot placement scores for region %s: %w", region, err)
 		}
 
-		// Process each score result
 		for _, result := range output.SpotPlacementScores {
 			score := int(aws.ToInt32(result.Score))
 
-			// Map scores to the requested instance types
-			// AWS may return scores for a subset of requested types
-			for _, instanceType := range instanceTypes {
-				// In practice, AWS returns results that correspond to the input
-				// For simplicity, we'll assign the score to each requested type
-				if _, exists := scores[instanceType]; !exists {
-					scores[instanceType] = score
+			if singleAZ {
+				// AWS identifies the zone; keep only scored zones.
+				if az := aws.ToString(result.AvailabilityZoneId); az != "" {
+					scores = append(scores, placementScore{placement: az, score: score})
 				}
+
+				continue
+			}
+
+			// Region mode returns a score per Region, and AWS may evaluate more
+			// than the one asked for. Anything else would report a different
+			// region's capacity under this region's name.
+			if aws.ToString(result.Region) == region {
+				scores = append(scores, placementScore{placement: region, score: score})
 			}
 		}
 	}
 
-	// Instance types AWS did not score are deliberately left absent rather than
-	// filled with a middle-of-the-range default. A synthesised 5 is
-	// indistinguishable from a real score and would misreport capacity for
-	// exactly the types AWS declined to rate.
+	// A placement AWS did not score is deliberately absent rather than filled
+	// with a middle-of-the-range default: a synthesised score is
+	// indistinguishable from a real one.
 	return scores, nil
 }
 
@@ -221,7 +239,7 @@ func (sc *scoreCache) getCacheKey(region string, instanceTypes []string, singleA
 
 // getSpotPlacementScores fetches spot placement scores with caching and rate limiting.
 func (sc *scoreCache) getSpotPlacementScores(ctx context.Context, region string,
-	instanceTypes []string, singleAZ bool) (map[string]int, error) {
+	instanceTypes []string, singleAZ bool) ([]placementScore, error) {
 
 	if sc.provider == nil {
 		return nil, errScoreProviderUnavailable
@@ -315,27 +333,21 @@ func (sc *scoreCache) enrichWithScores(ctx context.Context, advices []Advice,
 				return
 			}
 
-			// Apply scores to advices
-			if singleAZ {
-				// For AZ-level scores, store in ZoneScores map
-				for instanceType, score := range scores {
-					for _, adv := range typeToAdvices[instanceType] {
+			// AWS scores the request as a whole, so each returned placement score
+			// applies to every instance type that was asked about in this region.
+			for _, adv := range advs {
+				for _, ps := range scores {
+					if singleAZ {
 						if adv.ZoneScores == nil {
 							adv.ZoneScores = make(map[string]int)
 						}
-						azID := fmt.Sprintf("%sa", r) // Mock AZ: us-east-1a, etc.
-						adv.ZoneScores[azID] = score
-						adv.ScoreFetchedAt = &fetchTime
+						// ps.placement is AWS's own AvailabilityZoneId.
+						adv.ZoneScores[ps.placement] = ps.score
+					} else {
+						adv.RegionScore = &ps.score
 					}
-				}
-			} else {
-				// For region-level scores, store in RegionScore field
-				for instanceType, score := range scores {
-					for _, adv := range typeToAdvices[instanceType] {
-						scoreVal := score
-						adv.RegionScore = &scoreVal
-						adv.ScoreFetchedAt = &fetchTime
-					}
+
+					adv.ScoreFetchedAt = &fetchTime
 				}
 			}
 
