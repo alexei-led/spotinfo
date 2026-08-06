@@ -234,7 +234,8 @@ type recommendationReport struct {
 func normalizeRecommendationRegions(regions []string) ([]string, error) {
 	unique := make(map[string]struct{}, len(regions))
 	for _, region := range regions {
-		if strings.TrimSpace(region) == "" {
+		region = strings.TrimSpace(region)
+		if region == "" {
 			return nil, fmt.Errorf("%w: region must not be empty", spot.ErrInvalidRecommendationInput)
 		}
 		unique[region] = struct{}{}
@@ -251,15 +252,33 @@ func normalizeRecommendationRegions(regions []string) ([]string, error) {
 	return normalized, nil
 }
 
-func recommendationRankingPolicy() []string {
-	return []string{
-		"price_usd_per_hour_ascending",
-		"interruption_frequency_ascending",
-		"excess_vcpu_ascending",
-		"excess_memory_gib_ascending",
-		"region_ascending",
-		"instance_ascending",
+// recommendationFlagContext returns the nearest context that explicitly set one
+// of names. This preserves root flags placed before recommend without allowing
+// command defaults to shadow them.
+func recommendationFlagContext(ctx *cli.Context, names ...string) *cli.Context {
+	for _, candidate := range ctx.Lineage() {
+		for _, setName := range candidate.LocalFlagNames() {
+			for _, name := range names {
+				if setName == name {
+					return candidate
+				}
+			}
+		}
 	}
+
+	return ctx
+}
+
+func recommendationString(ctx *cli.Context, name string) string {
+	return recommendationFlagContext(ctx, name).String(name)
+}
+
+func recommendationStringSlice(ctx *cli.Context, name string) []string {
+	return recommendationFlagContext(ctx, name).StringSlice(name)
+}
+
+func recommendationInt(ctx *cli.Context, name string, aliases ...string) int {
+	return recommendationFlagContext(ctx, append([]string{name}, aliases...)...).Int(name)
 }
 
 // execMainCmd is the testable version of mainCmd that accepts dependencies.
@@ -368,7 +387,7 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, client spotClie
 	if ctx.IsSet(flagTop) && ctx.Int(flagTop) <= 0 {
 		return fmt.Errorf("%w: top must be positive", spot.ErrInvalidRecommendationInput)
 	}
-	outputFormat := ctx.String(flagOutput)
+	outputFormat := recommendationString(ctx, flagOutput)
 	if outputFormat != outputTable && outputFormat != outputJSON {
 		return fmt.Errorf("%w: output must be table or json", spot.ErrInvalidRecommendationInput)
 	}
@@ -376,9 +395,9 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, client spotClie
 	opts := spot.RecommendationOptions{
 		Architecture: spot.Architecture(ctx.String(flagArchitecture)),
 		Instance:     ctx.String(flagInstance),
-		OS:           ctx.String(flagOS),
-		CPU:          ctx.Int(flagCPU),
-		Memory:       ctx.Int(flagMemory),
+		OS:           recommendationString(ctx, flagOS),
+		CPU:          recommendationInt(ctx, flagCPU, "vcpu"),
+		Memory:       recommendationInt(ctx, flagMemory, "memory-gib"),
 		Budget:       budget,
 		Workload:     spot.Workload(ctx.String(flagWorkload)),
 		Top:          ctx.Int(flagTop),
@@ -387,7 +406,7 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, client spotClie
 		return err
 	}
 
-	regions, err := normalizeRecommendationRegions(ctx.StringSlice(flagRegion))
+	regions, err := normalizeRecommendationRegions(recommendationStringSlice(ctx, flagRegion))
 	if err != nil {
 		return err
 	}
@@ -432,7 +451,7 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, client spotClie
 			Workload:         opts.Workload,
 			Top:              opts.Top,
 		},
-		RankingPolicy:   recommendationRankingPolicy(),
+		RankingPolicy:   spot.RecommendationRankingPolicy(),
 		Recommendations: recommendations,
 	}
 	if opts.Budget > 0 {
@@ -818,8 +837,8 @@ func recommendCommand(action cli.ActionFunc) *cli.Command {
 			&cli.StringFlag{Name: flagArchitecture, Usage: "required instance architecture: x86_64|arm64", Required: true},
 			&cli.StringFlag{Name: flagInstance, Usage: "instance type RE2 regexp (combined with architecture)"},
 			&cli.StringSliceFlag{Name: flagRegion, Usage: regionFlagUsage, Value: cli.NewStringSlice("us-east-1")},
-			&cli.IntFlag{Name: flagCPU, Aliases: []string{"vcpu"}, Usage: "required minimum vCPU cores", Required: true},
-			&cli.IntFlag{Name: flagMemory, Aliases: []string{"memory-gib"}, Usage: "required minimum memory GiB", Required: true},
+			&cli.IntFlag{Name: flagCPU, Aliases: []string{"vcpu"}, Usage: "required minimum vCPU cores"},
+			&cli.IntFlag{Name: flagMemory, Aliases: []string{"memory-gib"}, Usage: "required minimum memory GiB"},
 			&cli.Float64Flag{Name: flagBudget, Usage: "positive maximum USD per candidate instance-hour"},
 			&cli.StringFlag{Name: flagOS, Usage: "instance operating system: linux|windows", Value: spot.OperatingSystemLinux},
 			&cli.StringFlag{Name: flagWorkload, Usage: "interruption cap: web|ci|batch", Value: string(spot.WorkloadWeb)},

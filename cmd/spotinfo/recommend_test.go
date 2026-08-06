@@ -69,7 +69,7 @@ func TestExecRecommendCmd_ProducesVersionedJSONReport(t *testing.T) {
 	assert.Equal(t, spot.WorkloadCI, report.Request.Workload)
 	require.NotNil(t, report.Request.MaximumUSDPerInstanceHour)
 	assert.Equal(t, 0.04, *report.Request.MaximumUSDPerInstanceHour)
-	assert.Equal(t, recommendationRankingPolicy(), report.RankingPolicy)
+	assert.Equal(t, spot.RecommendationRankingPolicy(), report.RankingPolicy)
 	require.Len(t, report.Recommendations, 1)
 	assert.NotNil(t, report.Recommendations[0].RationaleCodes)
 }
@@ -83,6 +83,9 @@ func TestNormalizeRecommendationRegions(t *testing.T) {
 	}{
 		{name: "duplicate explicit regions", regions: []string{"us-west-2", "us-east-1", "us-east-1"}, want: []string{"us-east-1", "us-west-2"}},
 		{name: "duplicate all", regions: []string{"all", "all"}, want: []string{"all"}},
+		{name: "trimmed all", regions: []string{" all "}, want: []string{"all"}},
+		{name: "trimmed duplicate explicit region", regions: []string{" us-east-1 ", "us-east-1"}, want: []string{"us-east-1"}},
+		{name: "trimmed all mixed with explicit region", regions: []string{" all ", "us-east-1"}, wantErr: true},
 		{name: "all mixed with explicit region", regions: []string{"all", "us-east-1"}, wantErr: true},
 		{name: "empty region", regions: []string{""}, wantErr: true},
 	} {
@@ -110,7 +113,7 @@ func TestExecRecommendCmd_NormalizesDuplicateRegionsAndAppliesInstancePattern(t 
 	var output bytes.Buffer
 
 	err := recommendTestApp(client, &output).Run(recommendArgs(
-		"--instance", "^m6i\\.large$", "--region", "us-west-2", "--region", "us-east-1", "--region", "us-east-1", "--output", "json",
+		"--instance", "^m6i\\.large$", "--region", " us-west-2 ", "--region", " us-east-1 ", "--region", "us-east-1", "--output", "json",
 	))
 	require.NoError(t, err)
 
@@ -118,6 +121,50 @@ func TestExecRecommendCmd_NormalizesDuplicateRegionsAndAppliesInstancePattern(t 
 	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
 	assert.Equal(t, []string{"us-east-1", "us-west-2"}, report.Request.Regions)
 	assert.Len(t, report.Recommendations, 1, "duplicate regions cannot duplicate recommendations")
+}
+
+func TestRecommendCommandResolvesSharedFlagsAcrossContextLineage(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+		want recommendationRequest
+	}{
+		{
+			name: "root flags before recommend",
+			args: []string{
+				"spotinfo", "--output", "json", "--region", " us-west-2 ", "--os", "windows", "--cpu", "2", "--memory", "8",
+				"recommend", "--architecture", "x86_64",
+			},
+			want: recommendationRequest{Regions: []string{"us-west-2"}, OS: "windows", MinimumVCPU: 2, MinimumMemoryGiB: 8},
+		},
+		{
+			name: "command flags after recommend override root flags",
+			args: []string{
+				"spotinfo", "--output", "table", "--region", "us-east-1", "--os", "linux", "--cpu", "2", "--memory", "8",
+				"recommend", "--architecture", "x86_64", "--output", "json", "--region", "us-west-2", "--os", "windows", "--vcpu", "4", "--memory-gib", "16",
+			},
+			want: recommendationRequest{Regions: []string{"us-west-2"}, OS: "windows", MinimumVCPU: 4, MinimumMemoryGiB: 16},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := newMockspotClient(t)
+			client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return([]spot.Advice{{
+				Region: "us-west-2", Instance: "m6i.xlarge", Price: 0.04, Savings: 72,
+				Info: spot.TypeInfo{Cores: 4, RAM: 16}, Range: spot.Range{Label: "<5%", Max: 5},
+			}}, nil).Once()
+			var output bytes.Buffer
+
+			err := recommendTestApp(client, &output).Run(test.args)
+			require.NoError(t, err)
+
+			var report recommendationReport
+			require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+			assert.Equal(t, test.want.Regions, report.Request.Regions)
+			assert.Equal(t, test.want.OS, report.Request.OS)
+			assert.Equal(t, test.want.MinimumVCPU, report.Request.MinimumVCPU)
+			assert.Equal(t, test.want.MinimumMemoryGiB, report.Request.MinimumMemoryGiB)
+		})
+	}
 }
 
 func TestRecommendCommandRejectsInvalidInputsBeforeFetching(t *testing.T) {

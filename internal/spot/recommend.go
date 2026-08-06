@@ -39,6 +39,8 @@ const (
 	// DefaultRecommendationTop is the number of candidates returned when --top is omitted.
 	DefaultRecommendationTop = 3
 
+	// Advisor range Max values are exclusive internal bucket boundaries:
+	// <5%=5, 5-10%=11, 10-15%=16, 15-20%=22, >20%=100.
 	webMaxInterruption   = 5
 	ciMaxInterruption    = 16
 	batchMaxInterruption = 22
@@ -95,6 +97,15 @@ var (
 	ErrInvalidRecommendationInput = errors.New("invalid recommendation input")
 	// ErrNoRecommendationCandidates identifies a valid query with no matching instance.
 	ErrNoRecommendationCandidates = errors.New("no recommendation candidates")
+
+	recommendationRankingPolicy = []string{
+		"price_usd_per_hour_ascending",
+		"interruption_frequency_ascending",
+		"excess_vcpu_ascending",
+		"excess_memory_gib_ascending",
+		"region_ascending",
+		"instance_ascending",
+	}
 )
 
 // LoadEmbeddedArchitectureLookup parses the committed, reviewed architecture
@@ -191,6 +202,12 @@ func ValidateRecommendationOptions(opts *RecommendationOptions) error { //nolint
 	}
 
 	return nil
+}
+
+// RecommendationRankingPolicy returns the ordered, canonical ranking criteria.
+// A fresh slice prevents callers from mutating the package policy.
+func RecommendationRankingPolicy() []string {
+	return append([]string(nil), recommendationRankingPolicy...)
 }
 
 // Recommend filters and ranks individual Advisor entries without performing I/O.
@@ -326,9 +343,9 @@ func knownPositivePrice(price float64) bool {
 func workloadMaxInterruption(workload Workload) int {
 	switch workload {
 	case WorkloadCI:
-		return ciMaxInterruption // Advisor's 10-15% range
+		return ciMaxInterruption // includes Advisor's 10-15% bucket
 	case WorkloadBatch:
-		return batchMaxInterruption // Advisor's 15-20% range
+		return batchMaxInterruption // includes Advisor's 15-20% bucket
 	default:
 		return webMaxInterruption // Advisor's <5% range
 	}

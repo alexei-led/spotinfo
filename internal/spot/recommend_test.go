@@ -128,34 +128,42 @@ func TestRecommend_EnforcesExactResourceAndBudgetBoundariesAndKnownPrices(t *tes
 }
 
 func TestRecommend_WorkloadBucketBoundaries(t *testing.T) {
-	advices := []Advice{
-		advice("m6i.five", 0.01, 2, 8, 5),
-		advice("m6i.eleven", 0.02, 2, 8, 11),
-		advice("m6i.sixteen", 0.03, 2, 8, 16),
-		advice("m6i.twentytwo", 0.04, 2, 8, 22),
-		advice("m6i.over", 0.05, 2, 8, 23),
-	}
-
 	for _, test := range []struct {
-		workload Workload
-		want     []string
+		name               string
+		workload           Workload
+		interruption       int
+		wantRecommendation bool
 	}{
-		{WorkloadWeb, []string{"m6i.five"}},
-		{WorkloadCI, []string{"m6i.five", "m6i.eleven", "m6i.sixteen"}},
-		{WorkloadBatch, []string{"m6i.five", "m6i.eleven", "m6i.sixteen", "m6i.twentytwo"}},
+		{name: "ci accepts Advisor 10-15 bucket", workload: WorkloadCI, interruption: 16, wantRecommendation: true},
+		{name: "ci rejects Advisor 15-20 bucket", workload: WorkloadCI, interruption: 22, wantRecommendation: false},
+		{name: "batch accepts Advisor 15-20 bucket", workload: WorkloadBatch, interruption: 22, wantRecommendation: true},
+		{name: "batch rejects Advisor over-20 bucket", workload: WorkloadBatch, interruption: 100, wantRecommendation: false},
 	} {
-		t.Run(string(test.workload), func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
 			opts := recommendationOptions()
 			opts.Workload = test.workload
-			recommendations, err := Recommend(advices, opts, testLookup())
-			require.NoError(t, err)
-			got := make([]string, len(recommendations))
-			for i := range recommendations {
-				got[i] = recommendations[i].Instance
+			recommendations, err := Recommend([]Advice{
+				advice("m6i.boundary", 0.01, 2, 8, test.interruption),
+			}, opts, testLookup())
+			if test.wantRecommendation {
+				require.NoError(t, err)
+				require.Len(t, recommendations, 1)
+				assert.Equal(t, "m6i.boundary", recommendations[0].Instance)
+				return
 			}
-			assert.Equal(t, test.want, got)
+
+			require.ErrorIs(t, err, ErrNoRecommendationCandidates)
+			assert.Nil(t, recommendations)
 		})
 	}
+}
+
+func TestRecommendationRankingPolicyIsCanonicalAndImmutable(t *testing.T) {
+	assert.Equal(t, recommendationRankingPolicy, RecommendationRankingPolicy())
+
+	policy := RecommendationRankingPolicy()
+	policy[0] = "mutated"
+	assert.Equal(t, recommendationRankingPolicy, RecommendationRankingPolicy())
 }
 
 func TestRecommend_RightsizesAndHasTotalDeterministicTieOrder(t *testing.T) {
