@@ -76,7 +76,11 @@ jobs:
           # the latest data — rather than a new PR every week that nobody closes.
           branch="chore/update-spot-data"
 
-          git config user.name  "github-actions[bot]"
+          # Single definition: the commit identity and the guard below must agree,
+          # or the workflow refuses its own branch forever and stops refreshing.
+          bot_name="github-actions[bot]"
+
+          git config user.name  "$bot_name"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$branch"
           git add internal/spot/data/
@@ -89,11 +93,14 @@ jobs:
           # refspec, so `git fetch origin "$branch"` only moves FETCH_HEAD and
           # never creates refs/remotes/origin/$branch — which would silently skip
           # the author guard below and leave --force-with-lease no lease to check.
-          git fetch origin "+refs/heads/$branch:refs/remotes/origin/$branch" || true
+          # stderr suppressed: on the very first run the branch does not exist yet
+          # and git prints "fatal: couldn't find remote ref", which is expected
+          # here and would otherwise look like a failure in the workflow log.
+          git fetch origin "+refs/heads/$branch:refs/remotes/origin/$branch" 2>/dev/null || true
 
           if remote_sha=$(git rev-parse --verify -q "refs/remotes/origin/$branch"); then
             tip_author=$(git log -1 --format='%an' "$remote_sha")
-            if [ "$tip_author" != "github-actions[bot]" ]; then
+            if [ "$tip_author" != "$bot_name" ]; then
               echo "::warning::$branch tip is authored by '$tip_author', not this workflow. Refusing to overwrite it — merge or close the open PR first."
               exit 0
             fi
