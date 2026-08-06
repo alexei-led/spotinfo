@@ -409,7 +409,13 @@ func addFreshnessInfo(scoreStr string, fetchedAt *time.Time) string {
 func printAdvicesJSON(advices any, output io.Writer) {
 	bytes, err := json.MarshalIndent(advices, "", "  ")
 	if err != nil {
-		panic(err)
+		// Reachable in principle: json.Marshal rejects non-finite floats, and
+		// prices come from an upstream feed. Prices are screened at parse time,
+		// so this is a backstop — but a CLI should report it, not panic with a
+		// stack trace.
+		slog.Error("failed to render JSON output", slog.Any("error", err))
+
+		return
 	}
 
 	txt := string(bytes)

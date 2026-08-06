@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -49,6 +50,22 @@ func withDefaultTimeout(ctx context.Context) (context.Context, context.CancelFun
 	}
 
 	return context.WithTimeout(ctx, httpTimeout)
+}
+
+// parsePrice reads a price from the feed, reporting whether it is usable.
+//
+// strconv.ParseFloat accepts "NaN", "Inf" and "-Inf" without error, so an
+// err-only check lets a non-finite value through. It then reaches
+// json.Marshal, which rejects non-finite floats — crashing `--output json` on
+// a value chosen by an undocumented upstream feed. The feed already ships
+// non-numeric cells ("N/A*"), so this is a live input, not a hypothetical.
+func parsePrice(raw string) (float64, bool) {
+	price, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(price) || math.IsInf(price, 0) || price < 0 {
+		return 0, false
+	}
+
+	return price, true
 }
 
 // fetchTimeout resolves a provider's configured timeout. A zero or negative
@@ -241,8 +258,8 @@ func convertRawPriceData(raw *rawPriceData) *spotPriceData {
 				var ip instancePrice
 
 				for _, os := range size.ValueColumns {
-					price, err := strconv.ParseFloat(os.Prices.USD, 64)
-					if err != nil {
+					price, ok := parsePrice(os.Prices.USD)
+					if !ok {
 						price = 0
 					}
 

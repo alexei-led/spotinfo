@@ -1,6 +1,8 @@
 package spot
 
 import (
+	"encoding/json"
+	"math"
 	"testing"
 	"time"
 
@@ -145,4 +147,60 @@ func TestFetchTimeoutTreatsZeroAsUnset(t *testing.T) {
 			assert.Equal(t, tc.want, fetchTimeout(tc.configured))
 		})
 	}
+}
+
+// strconv.ParseFloat accepts "NaN"/"Inf" without error, so an err-only check
+// admits a non-finite price. It then reaches json.Marshal, which rejects
+// non-finite floats — crashing `--output json` on a value the upstream feed
+// chose. That feed already ships non-numeric cells ("N/A*").
+func TestParsePriceRejectsNonFinite(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		raw    string
+		want   float64
+		wantOK bool
+	}{
+		{name: "ordinary price", raw: "0.0434", want: 0.0434, wantOK: true},
+		{name: "zero is valid but unusable upstream", raw: "0", want: 0, wantOK: true},
+		{name: "NaN parses without error and must be rejected", raw: "NaN"},
+		{name: "positive infinity", raw: "Inf"},
+		{name: "explicit positive infinity", raw: "+Inf"},
+		{name: "negative infinity", raw: "-Inf"},
+		{name: "negative price", raw: "-1.5"},
+		{name: "the feed's own not-available marker", raw: "N/A*"},
+		{name: "empty", raw: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := parsePrice(tc.raw)
+
+			assert.Equal(t, tc.wantOK, ok)
+			assert.InDelta(t, tc.want, got, 1e-9)
+		})
+	}
+}
+
+// End-to-end guard: a feed carrying NaN must not produce a price that breaks
+// JSON rendering.
+func TestNonFinitePriceNeverReachesJSON(t *testing.T) {
+	t.Parallel()
+
+	raw, err := parsePricingResponse([]byte(`{"config":{"regions":[{"region":"us-east-1",
+"instanceTypes":[{"type":"g","sizes":[{"size":"m5.large","valueColumns":[
+{"name":"linux","prices":{"USD":"NaN"}}]}]}]}]}}`))
+	require.NoError(t, err)
+
+	priced := convertRawPriceData(raw)
+	got := priced.Region["us-east-1"].Instance["m5.large"].Linux
+
+	assert.False(t, math.IsNaN(got), "a NaN feed value must not become a NaN price")
+	assert.Zero(t, got)
+
+	_, err = json.Marshal(struct{ Price float64 }{got})
+	require.NoError(t, err, "the resulting price must be JSON-encodable")
 }

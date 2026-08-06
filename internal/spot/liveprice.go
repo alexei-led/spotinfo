@@ -103,9 +103,9 @@ func (p *awsLivePriceProvider) fetchLivePrices(ctx context.Context, region strin
 				continue // keep the first (most recent) price
 			}
 			if item.SpotPrice != nil {
-				var price float64
-				_, err := fmt.Sscanf(*item.SpotPrice, "%f", &price)
-				if err == nil && price > 0 {
+				// Same non-finite guard as the static feed: +Inf would satisfy
+				// a bare `> 0` check and then break JSON output.
+				if price, ok := parsePrice(*item.SpotPrice); ok && price > 0 {
 					prices[it] = price
 				}
 			}
