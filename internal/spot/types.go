@@ -138,12 +138,28 @@ func sortAdvices(advices []Advice, sortBy SortBy, sortDesc bool) {
 
 // filterByMinScore filters advices to only include those with a minimum region score.
 func filterByMinScore(advices []Advice, minScore int) []Advice {
-	var filtered []Advice
+	filtered := make([]Advice, 0, len(advices))
+
 	for _, adv := range advices {
 		if adv.RegionScore != nil && *adv.RegionScore >= minScore {
 			filtered = append(filtered, adv)
+
+			continue
+		}
+
+		// --az records scores per zone and leaves RegionScore nil. Reading only
+		// RegionScore therefore dropped every row, so `--az --min-score N`
+		// silently returned nothing. An advice qualifies if any of its zones
+		// clears the threshold — that zone is a place the request can land.
+		for _, zoneScore := range adv.ZoneScores {
+			if zoneScore >= minScore {
+				filtered = append(filtered, adv)
+
+				break
+			}
 		}
 	}
+
 	return filtered
 }
 

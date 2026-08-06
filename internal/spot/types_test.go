@@ -560,3 +560,58 @@ func TestFunctionalOptions(t *testing.T) {
 		})
 	}
 }
+
+// --az stores scores in ZoneScores and leaves RegionScore nil, so a filter that
+// reads only RegionScore drops every row and `--az --min-score N` silently
+// returns nothing.
+func TestFilterByMinScoreHandlesZoneScores(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		advice   Advice
+		minScore int
+		wantKept bool
+	}{
+		{
+			name:     "region score above threshold",
+			advice:   Advice{Instance: "a", RegionScore: new(9)},
+			minScore: 5, wantKept: true,
+		},
+		{
+			name:     "region score below threshold",
+			advice:   Advice{Instance: "a", RegionScore: new(2)},
+			minScore: 5, wantKept: false,
+		},
+		{
+			name:     "az mode: a zone clears the threshold",
+			advice:   Advice{Instance: "a", ZoneScores: map[string]int{"use1-az1": 8}},
+			minScore: 5, wantKept: true,
+		},
+		{
+			name:     "az mode: best zone still below threshold",
+			advice:   Advice{Instance: "a", ZoneScores: map[string]int{"use1-az1": 2, "use1-az2": 3}},
+			minScore: 5, wantKept: false,
+		},
+		{
+			name:     "az mode: one of several zones clears it",
+			advice:   Advice{Instance: "a", ZoneScores: map[string]int{"use1-az1": 1, "use1-az2": 7}},
+			minScore: 5, wantKept: true,
+		},
+		{
+			name:     "unscored advice is dropped",
+			advice:   Advice{Instance: "a"},
+			minScore: 5, wantKept: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := filterByMinScore([]Advice{tc.advice}, tc.minScore)
+
+			assert.Len(t, got, map[bool]int{true: 1, false: 0}[tc.wantKept])
+		})
+	}
+}
