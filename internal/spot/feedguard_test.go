@@ -204,3 +204,25 @@ func TestNonFinitePriceNeverReachesJSON(t *testing.T) {
 	_, err = json.Marshal(struct{ Price float64 }{got})
 	require.NoError(t, err, "the resulting price must be JSON-encodable")
 }
+
+// getSpotPrice compared the OS exactly while getRegionAdvice used EqualFold, so
+// `--os Windows` returned Windows savings alongside the Linux price.
+func TestGetSpotInstancePriceIsCaseInsensitiveOnOS(t *testing.T) {
+	t.Parallel()
+
+	data, err := loadEmbeddedPricingData()
+	require.NoError(t, err)
+
+	priced := convertRawPriceData(data)
+
+	linux, err := priced.getSpotInstancePrice("m5.large", testRegionUSEast1, osLinux)
+	require.NoError(t, err)
+
+	for _, spelling := range []string{"windows", "Windows", "WINDOWS", "WiNdOwS"} {
+		got, err := priced.getSpotInstancePrice("m5.large", testRegionUSEast1, spelling)
+		require.NoError(t, err)
+		assert.NotEqual(t, linux, got,
+			"%q must return the Windows price, not the Linux one", spelling)
+		assert.Positive(t, got, "%q must resolve to a real price", spelling)
+	}
+}

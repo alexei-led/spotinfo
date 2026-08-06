@@ -15,7 +15,8 @@ const (
 	// allRegionsKeyword represents the special "all" regions value.
 	allRegionsKeyword = "all"
 	// osLinux and osWindows are the instance OS values accepted by this package.
-	// Compared case-insensitively; stored lowercase.
+	// Every comparison against them is case-insensitive; callers may pass any
+	// casing and nothing normalises the value on the way in.
 	osLinux   = "linux"
 	osWindows = "windows"
 	// priceColumnWindows is the price feed's own name for the Windows column,

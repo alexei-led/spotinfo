@@ -292,7 +292,10 @@ func (s *spotPriceData) getSpotInstancePrice(instance, region, os string) (float
 		return 0, fmt.Errorf("no pricing data for instance: %v", instance)
 	}
 
-	if os == osWindows {
+	// EqualFold, not ==: getRegionAdvice accepts "Windows" case-insensitively,
+	// so an exact compare here returned Windows savings alongside the Linux
+	// price for `--os Windows`.
+	if strings.EqualFold(os, osWindows) {
 		return price.Windows, nil
 	}
 

@@ -266,13 +266,49 @@ func TestAWSLivePriceProviderPropagatesErrors(t *testing.T) {
 
 // The AZ name used to be synthesised as region+"a", so any zone AWS actually
 // scored was reported under the wrong name.
+// AZ ids are opaque, so a zone belonging to another region is undetectable
+// once it reaches ZoneScores. Region mode filtered; AZ mode did not.
+func TestAWSScoreProviderRejectsOtherRegionsZones(t *testing.T) {
+	t.Parallel()
+
+	api := &fakeScoresAPI{pages: []*ec2.GetSpotPlacementScoresOutput{{
+		SpotPlacementScores: []ec2types.SpotPlacementScore{
+			{Region: aws.String(testRegionUSEast1), AvailabilityZoneId: aws.String("use1-az1"), Score: aws.Int32(9)},
+			{Region: aws.String("eu-west-1"), AvailabilityZoneId: aws.String("euw1-az2"), Score: aws.Int32(3)},
+		},
+	}}}
+
+	got, err := scoreProviderWith(api).fetchScores(t.Context(), testRegionUSEast1, []string{"m5.large"}, true)
+
+	require.NoError(t, err)
+	assert.Equal(t, []placementScore{{placement: "use1-az1", score: 9}}, got,
+		"a zone from another region must not be attributed to this one")
+}
+
+// The request must narrow scoring to the region asked about; a region-scoped
+// client only picks the endpoint.
+func TestAWSScoreProviderNarrowsToRequestedRegion(t *testing.T) {
+	t.Parallel()
+
+	var sent []string
+
+	api := &recordingScoresAPI{onInput: func(in *ec2.GetSpotPlacementScoresInput) {
+		sent = in.RegionNames
+	}}
+
+	_, err := scoreProviderWith(api).fetchScores(t.Context(), testRegionUSEast1, []string{"m5.large"}, false)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{testRegionUSEast1}, sent, "RegionNames must scope the request")
+}
+
 func TestAWSScoreProviderUsesAWSZoneIDs(t *testing.T) {
 	t.Parallel()
 
 	api := &fakeScoresAPI{pages: []*ec2.GetSpotPlacementScoresOutput{{
 		SpotPlacementScores: []ec2types.SpotPlacementScore{
-			{AvailabilityZoneId: aws.String("use1-az4"), Score: aws.Int32(7)},
-			{AvailabilityZoneId: aws.String("use1-az6"), Score: aws.Int32(3)},
+			{Region: aws.String(testRegionUSEast1), AvailabilityZoneId: aws.String("use1-az4"), Score: aws.Int32(7)},
+			{Region: aws.String(testRegionUSEast1), AvailabilityZoneId: aws.String("use1-az6"), Score: aws.Int32(3)},
 		},
 	}}}
 

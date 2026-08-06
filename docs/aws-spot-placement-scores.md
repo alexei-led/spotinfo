@@ -193,12 +193,12 @@ Ensure no Service Control Policy blocks `ec2:GetSpotPlacementScores`. SCPs overr
 
 ### Fallback Behavior
 
-If AWS API is unavailable, `spotinfo` uses deterministic mock scores for demonstration purposes. Real deployments should use actual AWS placement scores.
+If the AWS API is unavailable, `spotinfo` reports an error rather than substituting a score. Placement scores drive capacity decisions, so an invented number presented as an AWS score is worse than an explicit failure.
 
 ## Data Sources
 
 Placement scores are fetched from:
 - **Primary**: AWS `GetSpotPlacementScores` API
-- **Fallback**: Deterministic mock provider (for offline functionality)
+- **Fallback**: none. `--with-score` requires AWS credentials and the `ec2:GetSpotPlacementScores` permission, and fails with that message when they are missing. Instance types AWS declines to score are omitted rather than defaulted.
 
 See [Data Sources](data-sources.md) for complete information.

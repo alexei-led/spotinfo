@@ -103,7 +103,7 @@ graph TB
 1. **Primary**: Fetch fresh data from AWS feeds
 2. **Secondary**: Use embedded data if network unavailable
 3. **Live Pricing**: For instance types with $0 in the static feed, fetch current prices via EC2 `DescribeSpotPriceHistory` API (requires AWS credentials)
-4. **Placement Scores**: Graceful degradation to mock scores if API inaccessible
+4. **Placement Scores**: No degradation — `--with-score` fails with an explicit error if AWS is unreachable. A synthesised score is indistinguishable from a real one, so none is produced.
 
 ## Data Processing Pipeline
 

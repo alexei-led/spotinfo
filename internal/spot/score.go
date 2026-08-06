@@ -35,10 +35,14 @@ const (
 	defaultScoreTimeout        = DefaultScoreTimeoutSeconds * time.Second
 )
 
-// errScoreProviderUnavailable is returned when placement scores were requested
-// but AWS could not be reached. Reported rather than substituted: a synthetic
-// score is indistinguishable from a real one and would silently misinform
-// capacity decisions.
+// errScoreProviderUnavailable wraps every placement-score failure. Reported
+// rather than substituted: a synthetic score is indistinguishable from a real
+// one and would silently misinform capacity decisions.
+//
+// It wraps rather than replaces the cause. LoadDefaultConfig succeeds without
+// credentials — it only fails on a malformed config file — so the real failure
+// almost always surfaces later as an SDK authorization error, and this guidance
+// would never be seen if it were reachable only from a nil provider.
 var errScoreProviderUnavailable = errors.New(
 	"spot placement scores unavailable: requires AWS credentials and the ec2:GetSpotPlacementScores permission")
 
@@ -184,6 +188,11 @@ func (p *awsScoreProvider) fetchScores(ctx context.Context, region string, insta
 		TargetCapacity:         aws.Int32(defaultTargetCapacity),
 		SingleAvailabilityZone: aws.Bool(singleAZ),
 		MaxResults:             aws.Int32(defaultMaxResults),
+		// Narrow the scoring to the region actually asked about. A region-scoped
+		// client only selects the endpoint; without this AWS scores every region
+		// it considers viable, and with MaxResults the requested one can be
+		// crowded out entirely.
+		RegionNames: []string{region},
 	}
 
 	var scores []placementScore
@@ -199,6 +208,13 @@ func (p *awsScoreProvider) fetchScores(ctx context.Context, region string, insta
 		for _, result := range output.SpotPlacementScores {
 			score := int(aws.ToInt32(result.Score))
 
+			// Every result must belong to the requested region, in both modes.
+			// AZ ids are opaque, so a zone from elsewhere is undetectable to the
+			// user once it lands in ZoneScores.
+			if aws.ToString(result.Region) != region {
+				continue
+			}
+
 			if singleAZ {
 				// AWS identifies the zone; keep only scored zones.
 				if az := aws.ToString(result.AvailabilityZoneId); az != "" {
@@ -208,12 +224,7 @@ func (p *awsScoreProvider) fetchScores(ctx context.Context, region string, insta
 				continue
 			}
 
-			// Region mode returns a score per Region, and AWS may evaluate more
-			// than the one asked for. Anything else would report a different
-			// region's capacity under this region's name.
-			if aws.ToString(result.Region) == region {
-				scores = append(scores, placementScore{placement: region, score: score})
-			}
+			scores = append(scores, placementScore{placement: region, score: score})
 		}
 	}
 
@@ -221,6 +232,26 @@ func (p *awsScoreProvider) fetchScores(ctx context.Context, region string, insta
 	// with a middle-of-the-range default: a synthesised score is
 	// indistinguishable from a real one.
 	return scores, nil
+}
+
+// dedupe drops repeated messages while preserving order. With --region all a
+// single cause (missing credentials, say) otherwise produces the same sentence
+// once per region.
+func dedupe(msgs []string) []string {
+	seen := make(map[string]bool, len(msgs))
+	out := make([]string, 0, len(msgs))
+
+	for _, m := range msgs {
+		if seen[m] {
+			continue
+		}
+
+		seen[m] = true
+
+		out = append(out, m)
+	}
+
+	return out
 }
 
 // getCacheKey creates a consistent cache key for region and instance types.
@@ -259,10 +290,11 @@ func (sc *scoreCache) getSpotPlacementScores(ctx context.Context, region string,
 		return nil, fmt.Errorf("rate limit wait failed: %w", err)
 	}
 
-	// Fetch from provider (AWS or mock)
 	scores, err := sc.provider.fetchScores(ctx, region, instanceTypes, singleAZ)
 	if err != nil {
-		return nil, err
+		// Wrapped here, the one choke point every failure passes through, so the
+		// guidance reaches the user exactly once regardless of the cause.
+		return nil, fmt.Errorf("%w: %w", errScoreProviderUnavailable, err)
 	}
 
 	// Cache the result with timestamp (ignore error as it's not critical)
@@ -331,6 +363,17 @@ func (sc *scoreCache) enrichWithScores(ctx context.Context, advices []Advice,
 				return
 			}
 
+			// No scores is not success. The caller asked for them explicitly with
+			// --with-score; returning a normal table and exit 0 would look like
+			// "these instances have no score" rather than "AWS scored nothing".
+			if len(scores) == 0 {
+				fetchErrs = append(fetchErrs,
+					fmt.Sprintf("region %s: AWS returned no placement scores "+
+						"(scores are only meaningful for a flexible request — try more instance types)", r))
+
+				return
+			}
+
 			// AWS scores the request as a whole, so each returned placement score
 			// applies to every instance type that was asked about in this region.
 			for _, adv := range advs {
@@ -356,7 +399,7 @@ func (sc *scoreCache) enrichWithScores(ctx context.Context, advices []Advice,
 
 	if len(fetchErrs) > 0 {
 		// Caller (GetSpotSavings) already prefixes "score enrichment failed".
-		return fmt.Errorf("%s", strings.Join(fetchErrs, "; "))
+		return fmt.Errorf("%s", strings.Join(dedupe(fetchErrs), "; "))
 	}
 
 	return nil
