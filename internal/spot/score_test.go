@@ -308,3 +308,46 @@ func TestSortAndFilterByScore(t *testing.T) {
 		assert.Equal(t, "high", got[0].Instance)
 	})
 }
+
+// With --region all, one region scoring nothing must not discard the rest.
+// Returning an error here throws away every result, successful ones included.
+func TestEnrichWithScoresPartialFailure(t *testing.T) {
+	t.Parallel()
+
+	t.Run("partial success keeps the scores that worked", func(t *testing.T) {
+		t.Parallel()
+
+		provider := newMockawsAPIProvider(t)
+		provider.EXPECT().fetchScores(mock.Anything, testRegionUSEast1, mock.Anything, false).
+			Return([]placementScore{{placement: testRegionUSEast1, score: 9}}, nil).Once()
+		provider.EXPECT().fetchScores(mock.Anything, "eu-west-1", mock.Anything, false).
+			Return(nil, nil).Once()
+
+		advices := []Advice{
+			{Region: testRegionUSEast1, Instance: testInstanceT2Micro},
+			{Region: "eu-west-1", Instance: testInstanceT2Micro},
+		}
+
+		err := newTestScoreCache(provider).enrichWithScores(t.Context(), advices, false, time.Second)
+
+		require.NoError(t, err, "one empty region must not fail the whole call")
+		require.NotNil(t, advices[0].RegionScore, "the region that scored must keep its score")
+		assert.Equal(t, 9, *advices[0].RegionScore)
+		assert.Nil(t, advices[1].RegionScore, "the region that scored nothing stays unscored")
+	})
+
+	t.Run("total failure is still an error", func(t *testing.T) {
+		t.Parallel()
+
+		provider := newMockawsAPIProvider(t)
+		provider.EXPECT().fetchScores(mock.Anything, mock.Anything, mock.Anything, false).
+			Return(nil, nil).Once()
+
+		advices := []Advice{{Region: testRegionUSEast1, Instance: testInstanceT2Micro}}
+
+		err := newTestScoreCache(provider).enrichWithScores(t.Context(), advices, false, time.Second)
+
+		require.Error(t, err, "scoring nothing at all must be reported")
+		assert.Nil(t, advices[0].RegionScore)
+	})
+}

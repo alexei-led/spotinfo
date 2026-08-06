@@ -397,10 +397,38 @@ func (sc *scoreCache) enrichWithScores(ctx context.Context, advices []Advice,
 
 	wg.Wait()
 
-	if len(fetchErrs) > 0 {
-		// Caller (GetSpotSavings) already prefixes "score enrichment failed".
-		return fmt.Errorf("%s", strings.Join(dedupe(fetchErrs), "; "))
+	return scoreOutcome(advices, fetchErrs)
+}
+
+// scoreOutcome decides what per-region failures mean for the call as a whole.
+//
+// Only a total failure is fatal. With --region all a single region that scores
+// nothing must not discard the other thirty-three: the caller asked for scores
+// and got most of them, and returning an error here throws away every result,
+// successful ones included.
+func scoreOutcome(advices []Advice, fetchErrs []string) error {
+	if len(fetchErrs) == 0 {
+		return nil
 	}
+
+	scored := 0
+
+	for i := range advices {
+		if advices[i].RegionScore != nil || len(advices[i].ZoneScores) > 0 {
+			scored++
+		}
+	}
+
+	detail := strings.Join(dedupe(fetchErrs), "; ")
+
+	if scored == 0 {
+		// Caller (GetSpotSavings) already prefixes "score enrichment failed".
+		return fmt.Errorf("%s", detail)
+	}
+
+	slog.Warn("some regions returned no placement scores",
+		slog.Int("scored_advices", scored),
+		slog.String("detail", detail))
 
 	return nil
 }
