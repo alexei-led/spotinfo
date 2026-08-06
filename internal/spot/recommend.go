@@ -182,7 +182,7 @@ func ValidateRecommendationOptions(opts *RecommendationOptions) error { //nolint
 		return fmt.Errorf("%w: os must be linux or windows", ErrInvalidRecommendationInput)
 	}
 	if opts.Budget < 0 || math.IsNaN(opts.Budget) || math.IsInf(opts.Budget, 0) {
-		return fmt.Errorf("%w: budget must be a positive USD instance-hour price", ErrInvalidRecommendationInput)
+		return fmt.Errorf("%w: budget must be zero or a positive USD instance-hour price", ErrInvalidRecommendationInput)
 	}
 	if opts.Instance != "" {
 		if _, err := regexp.Compile(opts.Instance); err != nil {
@@ -198,7 +198,7 @@ func ValidateRecommendationOptions(opts *RecommendationOptions) error { //nolint
 		return fmt.Errorf("%w: workload must be web, ci, or batch", ErrInvalidRecommendationInput)
 	}
 	if opts.Top < 0 {
-		return fmt.Errorf("%w: top must be positive", ErrInvalidRecommendationInput)
+		return fmt.Errorf("%w: top must be zero or positive", ErrInvalidRecommendationInput)
 	}
 
 	return nil

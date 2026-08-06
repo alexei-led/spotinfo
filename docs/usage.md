@@ -61,7 +61,7 @@ spotinfo [global options]
 `recommend` is an additive subcommand; root invocation and root `--type` behavior are unchanged. It recommends **individual instances**, not fleets or placement plans. Positive `--cpu` and `--memory` requests are required so results can be right-sized.
 
 ```bash
-spotinfo recommend --architecture x86_64|arm64 --cpu N --memory N [flags]
+spotinfo recommend --architecture <x86_64|arm64> --cpu N --memory N [flags]
 ```
 
 | Flag | Description | Default |

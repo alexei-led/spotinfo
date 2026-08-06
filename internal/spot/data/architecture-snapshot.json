@@ -1,5 +1,5 @@
 {
-  "provenance": "Reviewed manually against AWS EC2 instance type processor architecture documentation. G6/G6e/G6f and Hpc8a are AMD EPYC (x86_64); family names are not inferred at runtime.",
+  "provenance": "Reviewed manually against AWS EC2 instance type processor architecture documentation. G6/G6e/G6f and hpc8a are AMD EPYC (x86_64); family names are not inferred at runtime.",
   "reviewed_at": "2026-08-06",
   "families": {
     "a1": "arm64",

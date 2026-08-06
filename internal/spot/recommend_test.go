@@ -89,7 +89,7 @@ func TestRecommend_NoCandidatesReturnsSentinel(t *testing.T) {
 	assert.Nil(t, recommendations)
 }
 
-func TestRecommend_ArchitectureAndInstanceUseANDSemantics(t *testing.T) {
+func TestRecommend_ArchitectureAndInstanceUseAndSemantics(t *testing.T) {
 	opts := recommendationOptions()
 	opts.Instance = `^m6i\.large$`
 	advices := []Advice{
