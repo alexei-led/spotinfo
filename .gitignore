@@ -1,32 +1,31 @@
-# code coverage
+# --- Build output ---
+.bin
+
+# --- Test & coverage ---
 .cover
 coverage.html
 coverage.out
-
-# git repo
-.git
-
-# IDE customization
-.idea
-.vscode
-
-# binaries
-.bin
-
-# env customization
-.env
-
-# claude settings
-.claude
-
-# temporary
-**/.DS_Store
 **/debug
 **/debug.test
 
-# ignore data file, downloaded during make
-public/spot/data/*.json
-public/spot/data/*.json-e
+# --- Secrets & local env ---
+.env
 
-# ralphex progress logs
+# --- AI / agent tooling ---
+.claude
+.archfit-cache/
+.codegraph/
+.gitnexus/
 progress*.txt
+
+# --- Editors & IDEs ---
+.idea
+.vscode
+
+# --- OS files ---
+**/.DS_Store
+
+# --- Misc ---
+.git
+*.bak
+*.tmp

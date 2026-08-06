@@ -13,8 +13,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"spotinfo/internal/spot"
 )
 
 // TestSSETransportBasic tests basic SSE transport functionality
@@ -22,7 +20,7 @@ func TestSSETransportBasic(t *testing.T) {
 	cfg := Config{
 		Version:    "1.0.0",
 		Logger:     slog.Default(),
-		SpotClient: spot.New(),
+		SpotClient: newEmbeddedClient(),
 	}
 
 	server, err := NewServer(cfg)
@@ -57,7 +55,7 @@ func TestSSETransportContextCancellation(t *testing.T) {
 	cfg := Config{
 		Version:    "1.0.0",
 		Logger:     slog.Default(),
-		SpotClient: spot.New(),
+		SpotClient: newEmbeddedClient(),
 	}
 
 	server, err := NewServer(cfg)
@@ -117,7 +115,7 @@ func TestSSETransportPortBinding(t *testing.T) {
 			cfg := Config{
 				Version:    "1.0.0",
 				Logger:     slog.Default(),
-				SpotClient: spot.New(),
+				SpotClient: newEmbeddedClient(),
 			}
 
 			server, err := NewServer(cfg)
@@ -176,7 +174,7 @@ func TestSSEServerCreation(t *testing.T) {
 	cfg := Config{
 		Version:    "1.0.0",
 		Logger:     slog.Default(),
-		SpotClient: spot.New(),
+		SpotClient: newEmbeddedClient(),
 	}
 
 	server, err := NewServer(cfg)
@@ -198,7 +196,7 @@ func TestSSEConcurrentAccess(t *testing.T) {
 	cfg := Config{
 		Version:    "1.0.0",
 		Logger:     slog.Default(),
-		SpotClient: spot.New(),
+		SpotClient: newEmbeddedClient(),
 	}
 
 	server, err := NewServer(cfg)
@@ -208,7 +206,7 @@ func TestSSEConcurrentAccess(t *testing.T) {
 	errChan := make(chan error, numGoroutines)
 
 	// Start multiple SSE servers concurrently (they should all fail with port binding)
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 			defer cancel()
@@ -222,7 +220,7 @@ func TestSSEConcurrentAccess(t *testing.T) {
 
 	// Collect results
 	var errors []error
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		err := <-errChan
 		if err != nil {
 			errors = append(errors, err)
@@ -262,7 +260,7 @@ func TestSSEWithDifferentConfigurations(t *testing.T) {
 			cfg := Config{
 				Version:    tt.version,
 				Logger:     tt.logger,
-				SpotClient: spot.New(),
+				SpotClient: newEmbeddedClient(),
 			}
 
 			server, err := NewServer(cfg)
@@ -325,7 +323,7 @@ func BenchmarkSSEServerCreation(b *testing.B) {
 	cfg := Config{
 		Version:    "1.0.0",
 		Logger:     slog.Default(),
-		SpotClient: spot.New(),
+		SpotClient: newEmbeddedClient(),
 	}
 
 	b.ResetTimer()
@@ -365,7 +363,7 @@ func TestSSETransportErrorHandling(t *testing.T) {
 				cfg := Config{
 					Version:    "1.0.0",
 					Logger:     slog.Default(),
-					SpotClient: spot.New(),
+					SpotClient: newEmbeddedClient(),
 				}
 				return NewServer(cfg)
 			},

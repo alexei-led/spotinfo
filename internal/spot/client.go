@@ -14,6 +14,19 @@ const (
 	DefaultTimeoutSeconds = 5
 	// allRegionsKeyword represents the special "all" regions value.
 	allRegionsKeyword = "all"
+	// osLinux and osWindows are the instance OS values accepted by this package.
+	// Every comparison against them is case-insensitive; callers may pass any
+	// casing and nothing normalises the value on the way in.
+	osLinux   = "linux"
+	osWindows = "windows"
+	// priceColumnWindows is the price feed's own name for the Windows column,
+	// distinct from the osWindows value users pass on the command line.
+	priceColumnWindows = "mswin"
+
+	// DataSourceAWS and DataSourceEmbedded report where the advice data came
+	// from, so callers can tell a live answer from the embedded snapshot.
+	DataSourceAWS      = "aws"
+	DataSourceEmbedded = "embedded"
 )
 
 // getSpotSavingsConfig holds configuration options for GetSpotSavingsWithOptions.
@@ -128,6 +141,7 @@ type Client struct {
 // advisorProvider provides access to spot advisor data (private interface close to consumer).
 type advisorProvider interface {
 	getRegions() []string
+	usedEmbeddedData() bool
 	getRegionAdvice(region, os string) (map[string]spotAdvice, error)
 	getInstanceType(instance string) (TypeInfo, error)
 	getRange(index int) (Range, error)
@@ -136,6 +150,7 @@ type advisorProvider interface {
 // pricingProvider provides access to spot pricing data (private interface close to consumer).
 type pricingProvider interface {
 	getSpotPrice(instance, region, os string) (float64, error)
+	usedEmbeddedData() bool
 }
 
 // scoreProvider provides access to spot placement scores (private interface close to consumer).
@@ -172,6 +187,18 @@ func NewWithProviders(advisor advisorProvider, pricing pricingProvider) *Client 
 	}
 }
 
+// DataSource reports whether the returned advice was built from live AWS feeds
+// or the embedded snapshot. Embedded wins if either feed fell back: the result
+// is only as fresh as its stalest input. Reported conservatively — anything not
+// positively known to be live counts as embedded.
+func (c *Client) DataSource() string {
+	if c.advisorProvider.usedEmbeddedData() || c.pricingProvider.usedEmbeddedData() {
+		return DataSourceEmbedded
+	}
+
+	return DataSourceAWS
+}
+
 // SetLivePriceProvider sets the live price provider (for testing).
 func (c *Client) SetLivePriceProvider(p livePriceProvider) {
 	c.livePriceProvider = p
@@ -183,7 +210,7 @@ func (c *Client) SetLivePriceProvider(p livePriceProvider) {
 func (c *Client) GetSpotSavings(ctx context.Context, opts ...GetSpotSavingsOption) ([]Advice, error) {
 	// Default configuration
 	cfg := &getSpotSavingsConfig{
-		instanceOS:   "linux",
+		instanceOS:   osLinux,
 		sortBy:       SortByRange,
 		scoreTimeout: defaultScoreTimeout,
 	}
@@ -260,14 +287,22 @@ func (c *Client) GetSpotSavings(ctx context.Context, opts ...GetSpotSavingsOptio
 	// Enrich instances with missing prices from live AWS API
 	enrichMissingPrices(ctx, result, c.livePriceProvider, cfg.instanceOS, livePriceTimeout)
 
-	// Re-apply maxPrice filter after live price enrichment
+	// Re-apply maxPrice filter after live price enrichment.
+	//
+	// A zero price means "unknown" — the instance is absent from the static feed
+	// and live enrichment could not fill it (no credentials, or AWS omits the
+	// region entirely, as it does for me-*). Spot prices are never actually zero,
+	// so an unknown price cannot be asserted to satisfy a price ceiling; drop it
+	// rather than present it as the cheapest option.
 	if cfg.maxPrice != 0 {
 		filtered := result[:0]
+
 		for _, adv := range result {
-			if adv.Price <= cfg.maxPrice {
+			if adv.Price > 0 && adv.Price <= cfg.maxPrice {
 				filtered = append(filtered, adv)
 			}
 		}
+
 		result = filtered
 	}
 
@@ -304,9 +339,20 @@ func newDefaultAdvisorProvider(timeout time.Duration) *defaultAdvisorProvider {
 
 func (p *defaultAdvisorProvider) loadData() error {
 	p.once.Do(func() {
-		p.data, p.err = fetchAdvisorData(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout(p.timeout))
+		defer cancel()
+
+		p.data, p.err = fetchAdvisorData(ctx)
 	})
+
 	return p.err
+}
+
+// usedEmbeddedData reports whether the loaded advisor data came from the
+// embedded copy. Unloaded counts as embedded: never claim live data we do not
+// positively know we fetched.
+func (p *defaultAdvisorProvider) usedEmbeddedData() bool {
+	return p.data == nil || p.data.Embedded
 }
 
 func (p *defaultAdvisorProvider) getRegions() []string {
@@ -322,7 +368,7 @@ func (p *defaultAdvisorProvider) getRegions() []string {
 
 func (p *defaultAdvisorProvider) getRegionAdvice(region, os string) (map[string]spotAdvice, error) {
 	// Validate OS first before loading data
-	if !strings.EqualFold("windows", os) && !strings.EqualFold("linux", os) {
+	if !strings.EqualFold(osWindows, os) && !strings.EqualFold(osLinux, os) {
 		return nil, fmt.Errorf("invalid instance OS, must be windows/linux")
 	}
 
@@ -336,7 +382,7 @@ func (p *defaultAdvisorProvider) getRegionAdvice(region, os string) (map[string]
 	}
 
 	var advices map[string]spotAdvice
-	if strings.EqualFold("windows", os) {
+	if strings.EqualFold(osWindows, os) {
 		advices = regionData.Windows
 	} else {
 		advices = regionData.Linux
@@ -377,10 +423,13 @@ func (p *defaultAdvisorProvider) getRange(index int) (Range, error) {
 
 // defaultPricingProvider is the default implementation of pricingProvider.
 type defaultPricingProvider struct {
-	data        *spotPriceData
-	err         error
-	timeout     time.Duration
+	data    *spotPriceData
+	err     error
+	timeout time.Duration
+	// useEmbedded skips the network entirely; rawEmbedded records what the load
+	// actually used, which also covers falling back after a failed fetch.
 	useEmbedded bool
+	rawEmbedded bool
 	once        sync.Once
 }
 
@@ -393,14 +442,25 @@ func newDefaultPricingProvider(timeout time.Duration, useEmbedded bool) *default
 
 func (p *defaultPricingProvider) loadData() error {
 	p.once.Do(func() {
-		rawData, err := fetchPricingData(context.Background(), p.useEmbedded)
+		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout(p.timeout))
+		defer cancel()
+
+		rawData, err := fetchPricingData(ctx, p.useEmbedded)
 		if err != nil {
 			p.err = err
 			return
 		}
+
+		p.rawEmbedded = rawData.Embedded
 		p.data = convertRawPriceData(rawData)
 	})
 	return p.err
+}
+
+// usedEmbeddedData reports whether the loaded pricing data came from the
+// embedded copy. Unloaded counts as embedded, as above.
+func (p *defaultPricingProvider) usedEmbeddedData() bool {
+	return p.rawEmbedded
 }
 
 func (p *defaultPricingProvider) getSpotPrice(instance, region, os string) (float64, error) {

@@ -71,7 +71,7 @@ type mockadvisorProvider_getInstanceType_Call struct {
 
 // getInstanceType is a helper method to define mock.On call
 //   - instance string
-func (_e *mockadvisorProvider_Expecter) getInstanceType(instance interface{}) *mockadvisorProvider_getInstanceType_Call {
+func (_e *mockadvisorProvider_Expecter) getInstanceType(instance any) *mockadvisorProvider_getInstanceType_Call {
 	return &mockadvisorProvider_getInstanceType_Call{Call: _e.mock.On("getInstanceType", instance)}
 }
 
@@ -131,7 +131,7 @@ type mockadvisorProvider_getRange_Call struct {
 
 // getRange is a helper method to define mock.On call
 //   - index int
-func (_e *mockadvisorProvider_Expecter) getRange(index interface{}) *mockadvisorProvider_getRange_Call {
+func (_e *mockadvisorProvider_Expecter) getRange(index any) *mockadvisorProvider_getRange_Call {
 	return &mockadvisorProvider_getRange_Call{Call: _e.mock.On("getRange", index)}
 }
 
@@ -194,7 +194,7 @@ type mockadvisorProvider_getRegionAdvice_Call struct {
 // getRegionAdvice is a helper method to define mock.On call
 //   - region string
 //   - os string
-func (_e *mockadvisorProvider_Expecter) getRegionAdvice(region interface{}, os interface{}) *mockadvisorProvider_getRegionAdvice_Call {
+func (_e *mockadvisorProvider_Expecter) getRegionAdvice(region any, os any) *mockadvisorProvider_getRegionAdvice_Call {
 	return &mockadvisorProvider_getRegionAdvice_Call{Call: _e.mock.On("getRegionAdvice", region, os)}
 }
 
@@ -272,6 +272,50 @@ func (_c *mockadvisorProvider_getRegions_Call) RunAndReturn(run func() []string)
 	return _c
 }
 
+// usedEmbeddedData provides a mock function for the type mockadvisorProvider
+func (_mock *mockadvisorProvider) usedEmbeddedData() bool {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for usedEmbeddedData")
+	}
+
+	var r0 bool
+	if returnFunc, ok := ret.Get(0).(func() bool); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	return r0
+}
+
+// mockadvisorProvider_usedEmbeddedData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'usedEmbeddedData'
+type mockadvisorProvider_usedEmbeddedData_Call struct {
+	*mock.Call
+}
+
+// usedEmbeddedData is a helper method to define mock.On call
+func (_e *mockadvisorProvider_Expecter) usedEmbeddedData() *mockadvisorProvider_usedEmbeddedData_Call {
+	return &mockadvisorProvider_usedEmbeddedData_Call{Call: _e.mock.On("usedEmbeddedData")}
+}
+
+func (_c *mockadvisorProvider_usedEmbeddedData_Call) Run(run func()) *mockadvisorProvider_usedEmbeddedData_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *mockadvisorProvider_usedEmbeddedData_Call) Return(b bool) *mockadvisorProvider_usedEmbeddedData_Call {
+	_c.Call.Return(b)
+	return _c
+}
+
+func (_c *mockadvisorProvider_usedEmbeddedData_Call) RunAndReturn(run func() bool) *mockadvisorProvider_usedEmbeddedData_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // newMockpricingProvider creates a new instance of mockpricingProvider. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func newMockpricingProvider(t interface {
@@ -334,7 +378,7 @@ type mockpricingProvider_getSpotPrice_Call struct {
 //   - instance string
 //   - region string
 //   - os string
-func (_e *mockpricingProvider_Expecter) getSpotPrice(instance interface{}, region interface{}, os interface{}) *mockpricingProvider_getSpotPrice_Call {
+func (_e *mockpricingProvider_Expecter) getSpotPrice(instance any, region any, os any) *mockpricingProvider_getSpotPrice_Call {
 	return &mockpricingProvider_getSpotPrice_Call{Call: _e.mock.On("getSpotPrice", instance, region, os)}
 }
 
@@ -367,6 +411,50 @@ func (_c *mockpricingProvider_getSpotPrice_Call) Return(f float64, err error) *m
 }
 
 func (_c *mockpricingProvider_getSpotPrice_Call) RunAndReturn(run func(instance string, region string, os string) (float64, error)) *mockpricingProvider_getSpotPrice_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// usedEmbeddedData provides a mock function for the type mockpricingProvider
+func (_mock *mockpricingProvider) usedEmbeddedData() bool {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for usedEmbeddedData")
+	}
+
+	var r0 bool
+	if returnFunc, ok := ret.Get(0).(func() bool); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	return r0
+}
+
+// mockpricingProvider_usedEmbeddedData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'usedEmbeddedData'
+type mockpricingProvider_usedEmbeddedData_Call struct {
+	*mock.Call
+}
+
+// usedEmbeddedData is a helper method to define mock.On call
+func (_e *mockpricingProvider_Expecter) usedEmbeddedData() *mockpricingProvider_usedEmbeddedData_Call {
+	return &mockpricingProvider_usedEmbeddedData_Call{Call: _e.mock.On("usedEmbeddedData")}
+}
+
+func (_c *mockpricingProvider_usedEmbeddedData_Call) Run(run func()) *mockpricingProvider_usedEmbeddedData_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *mockpricingProvider_usedEmbeddedData_Call) Return(b bool) *mockpricingProvider_usedEmbeddedData_Call {
+	_c.Call.Return(b)
+	return _c
+}
+
+func (_c *mockpricingProvider_usedEmbeddedData_Call) RunAndReturn(run func() bool) *mockpricingProvider_usedEmbeddedData_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -425,7 +513,7 @@ type mockscoreProvider_enrichWithScores_Call struct {
 //   - advices []Advice
 //   - singleAZ bool
 //   - timeout time.Duration
-func (_e *mockscoreProvider_Expecter) enrichWithScores(ctx interface{}, advices interface{}, singleAZ interface{}, timeout interface{}) *mockscoreProvider_enrichWithScores_Call {
+func (_e *mockscoreProvider_Expecter) enrichWithScores(ctx any, advices any, singleAZ any, timeout any) *mockscoreProvider_enrichWithScores_Call {
 	return &mockscoreProvider_enrichWithScores_Call{Call: _e.mock.On("enrichWithScores", ctx, advices, singleAZ, timeout)}
 }
 
@@ -467,17 +555,21 @@ func (_c *mockscoreProvider_enrichWithScores_Call) RunAndReturn(run func(ctx con
 	return _c
 }
 
-// newMocklivePriceProvider creates a new instance of mocklivePriceProvider.
+// newMocklivePriceProvider creates a new instance of mocklivePriceProvider. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
+// The first argument is typically a *testing.T value.
 func newMocklivePriceProvider(t interface {
 	mock.TestingT
 	Cleanup(func())
 }) *mocklivePriceProvider {
 	mock := &mocklivePriceProvider{}
 	mock.Mock.Test(t)
+
 	t.Cleanup(func() { mock.AssertExpectations(t) })
+
 	return mock
 }
 
+// mocklivePriceProvider is an autogenerated mock type for the livePriceProvider type
 type mocklivePriceProvider struct {
 	mock.Mock
 }
@@ -490,11 +582,14 @@ func (_m *mocklivePriceProvider) EXPECT() *mocklivePriceProvider_Expecter {
 	return &mocklivePriceProvider_Expecter{mock: &_m.Mock}
 }
 
+// fetchLivePrices provides a mock function for the type mocklivePriceProvider
 func (_mock *mocklivePriceProvider) fetchLivePrices(ctx context.Context, region string, instanceTypes []string, os string) (map[string]float64, error) {
 	ret := _mock.Called(ctx, region, instanceTypes, os)
+
 	if len(ret) == 0 {
 		panic("no return value specified for fetchLivePrices")
 	}
+
 	var r0 map[string]float64
 	var r1 error
 	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []string, string) (map[string]float64, error)); ok {
@@ -515,27 +610,54 @@ func (_mock *mocklivePriceProvider) fetchLivePrices(ctx context.Context, region 
 	return r0, r1
 }
 
+// mocklivePriceProvider_fetchLivePrices_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'fetchLivePrices'
 type mocklivePriceProvider_fetchLivePrices_Call struct {
 	*mock.Call
 }
 
-func (_e *mocklivePriceProvider_Expecter) fetchLivePrices(ctx interface{}, region interface{}, instanceTypes interface{}, os interface{}) *mocklivePriceProvider_fetchLivePrices_Call {
+// fetchLivePrices is a helper method to define mock.On call
+//   - ctx context.Context
+//   - region string
+//   - instanceTypes []string
+//   - os string
+func (_e *mocklivePriceProvider_Expecter) fetchLivePrices(ctx any, region any, instanceTypes any, os any) *mocklivePriceProvider_fetchLivePrices_Call {
 	return &mocklivePriceProvider_fetchLivePrices_Call{Call: _e.mock.On("fetchLivePrices", ctx, region, instanceTypes, os)}
 }
 
 func (_c *mocklivePriceProvider_fetchLivePrices_Call) Run(run func(ctx context.Context, region string, instanceTypes []string, os string)) *mocklivePriceProvider_fetchLivePrices_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].([]string), args[3].(string))
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 []string
+		if args[2] != nil {
+			arg2 = args[2].([]string)
+		}
+		var arg3 string
+		if args[3] != nil {
+			arg3 = args[3].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
 	})
 	return _c
 }
 
-func (_c *mocklivePriceProvider_fetchLivePrices_Call) Return(prices map[string]float64, err error) *mocklivePriceProvider_fetchLivePrices_Call {
-	_c.Call.Return(prices, err)
+func (_c *mocklivePriceProvider_fetchLivePrices_Call) Return(stringToFloat64 map[string]float64, err error) *mocklivePriceProvider_fetchLivePrices_Call {
+	_c.Call.Return(stringToFloat64, err)
 	return _c
 }
 
-func (_c *mocklivePriceProvider_fetchLivePrices_Call) RunAndReturn(run func(context.Context, string, []string, string) (map[string]float64, error)) *mocklivePriceProvider_fetchLivePrices_Call {
+func (_c *mocklivePriceProvider_fetchLivePrices_Call) RunAndReturn(run func(ctx context.Context, region string, instanceTypes []string, os string) (map[string]float64, error)) *mocklivePriceProvider_fetchLivePrices_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -568,23 +690,23 @@ func (_m *mockawsAPIProvider) EXPECT() *mockawsAPIProvider_Expecter {
 }
 
 // fetchScores provides a mock function for the type mockawsAPIProvider
-func (_mock *mockawsAPIProvider) fetchScores(ctx context.Context, region string, instanceTypes []string, singleAZ bool) (map[string]int, error) {
+func (_mock *mockawsAPIProvider) fetchScores(ctx context.Context, region string, instanceTypes []string, singleAZ bool) ([]placementScore, error) {
 	ret := _mock.Called(ctx, region, instanceTypes, singleAZ)
 
 	if len(ret) == 0 {
 		panic("no return value specified for fetchScores")
 	}
 
-	var r0 map[string]int
+	var r0 []placementScore
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []string, bool) (map[string]int, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []string, bool) ([]placementScore, error)); ok {
 		return returnFunc(ctx, region, instanceTypes, singleAZ)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []string, bool) map[string]int); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []string, bool) []placementScore); ok {
 		r0 = returnFunc(ctx, region, instanceTypes, singleAZ)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]int)
+			r0 = ret.Get(0).([]placementScore)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []string, bool) error); ok {
@@ -605,7 +727,7 @@ type mockawsAPIProvider_fetchScores_Call struct {
 //   - region string
 //   - instanceTypes []string
 //   - singleAZ bool
-func (_e *mockawsAPIProvider_Expecter) fetchScores(ctx interface{}, region interface{}, instanceTypes interface{}, singleAZ interface{}) *mockawsAPIProvider_fetchScores_Call {
+func (_e *mockawsAPIProvider_Expecter) fetchScores(ctx any, region any, instanceTypes any, singleAZ any) *mockawsAPIProvider_fetchScores_Call {
 	return &mockawsAPIProvider_fetchScores_Call{Call: _e.mock.On("fetchScores", ctx, region, instanceTypes, singleAZ)}
 }
 
@@ -637,12 +759,12 @@ func (_c *mockawsAPIProvider_fetchScores_Call) Run(run func(ctx context.Context,
 	return _c
 }
 
-func (_c *mockawsAPIProvider_fetchScores_Call) Return(stringToInt map[string]int, err error) *mockawsAPIProvider_fetchScores_Call {
-	_c.Call.Return(stringToInt, err)
+func (_c *mockawsAPIProvider_fetchScores_Call) Return(placementScoreMoqParams []placementScore, err error) *mockawsAPIProvider_fetchScores_Call {
+	_c.Call.Return(placementScoreMoqParams, err)
 	return _c
 }
 
-func (_c *mockawsAPIProvider_fetchScores_Call) RunAndReturn(run func(ctx context.Context, region string, instanceTypes []string, singleAZ bool) (map[string]int, error)) *mockawsAPIProvider_fetchScores_Call {
+func (_c *mockawsAPIProvider_fetchScores_Call) RunAndReturn(run func(ctx context.Context, region string, instanceTypes []string, singleAZ bool) ([]placementScore, error)) *mockawsAPIProvider_fetchScores_Call {
 	_c.Call.Return(run)
 	return _c
 }

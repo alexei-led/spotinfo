@@ -1,5 +1,5 @@
-dir: "{{.InterfaceDir}}"
-filename: "mocks_test.go"
+dir: '{{.InterfaceDir}}'
+filename: mocks_test.go
 inpackage: true
 template: testify
 packages:
@@ -8,6 +8,7 @@ packages:
       advisorProvider:
       pricingProvider:
       scoreProvider:
+      livePriceProvider:
       awsAPIProvider:
   spotinfo/cmd/spotinfo:
     interfaces:

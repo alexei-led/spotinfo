@@ -38,6 +38,50 @@ func (_m *mockspotClient) EXPECT() *mockspotClient_Expecter {
 	return &mockspotClient_Expecter{mock: &_m.Mock}
 }
 
+// DataSource provides a mock function for the type mockspotClient
+func (_mock *mockspotClient) DataSource() string {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for DataSource")
+	}
+
+	var r0 string
+	if returnFunc, ok := ret.Get(0).(func() string); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	return r0
+}
+
+// mockspotClient_DataSource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DataSource'
+type mockspotClient_DataSource_Call struct {
+	*mock.Call
+}
+
+// DataSource is a helper method to define mock.On call
+func (_e *mockspotClient_Expecter) DataSource() *mockspotClient_DataSource_Call {
+	return &mockspotClient_DataSource_Call{Call: _e.mock.On("DataSource")}
+}
+
+func (_c *mockspotClient_DataSource_Call) Run(run func()) *mockspotClient_DataSource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *mockspotClient_DataSource_Call) Return(s string) *mockspotClient_DataSource_Call {
+	_c.Call.Return(s)
+	return _c
+}
+
+func (_c *mockspotClient_DataSource_Call) RunAndReturn(run func() string) *mockspotClient_DataSource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetSpotSavings provides a mock function for the type mockspotClient
 func (_mock *mockspotClient) GetSpotSavings(ctx context.Context, opts ...spot.GetSpotSavingsOption) ([]spot.Advice, error) {
 	var tmpRet mock.Arguments
@@ -80,9 +124,9 @@ type mockspotClient_GetSpotSavings_Call struct {
 // GetSpotSavings is a helper method to define mock.On call
 //   - ctx context.Context
 //   - opts ...spot.GetSpotSavingsOption
-func (_e *mockspotClient_Expecter) GetSpotSavings(ctx interface{}, opts ...interface{}) *mockspotClient_GetSpotSavings_Call {
+func (_e *mockspotClient_Expecter) GetSpotSavings(ctx any, opts ...any) *mockspotClient_GetSpotSavings_Call {
 	return &mockspotClient_GetSpotSavings_Call{Call: _e.mock.On("GetSpotSavings",
-		append([]interface{}{ctx}, opts...)...)}
+		append([]any{ctx}, opts...)...)}
 }
 
 func (_c *mockspotClient_GetSpotSavings_Call) Run(run func(ctx context.Context, opts ...spot.GetSpotSavingsOption)) *mockspotClient_GetSpotSavings_Call {

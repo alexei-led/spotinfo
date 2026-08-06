@@ -8,8 +8,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"spotinfo/internal/spot"
 )
 
 // TestNewServer tests server creation with different configurations
@@ -24,7 +22,7 @@ func TestNewServer(t *testing.T) {
 			cfg: Config{
 				Version:    "1.0.0",
 				Logger:     slog.Default(),
-				SpotClient: spot.New(),
+				SpotClient: newEmbeddedClient(),
 			},
 			wantErr: false,
 		},
@@ -32,7 +30,7 @@ func TestNewServer(t *testing.T) {
 			name: "missing logger uses default",
 			cfg: Config{
 				Version:    "1.0.0",
-				SpotClient: spot.New(),
+				SpotClient: newEmbeddedClient(),
 			},
 			wantErr: false,
 		},
@@ -66,7 +64,7 @@ func TestServerToolRegistration(t *testing.T) {
 	cfg := Config{
 		Version:    "1.0.0",
 		Logger:     slog.Default(),
-		SpotClient: spot.New(),
+		SpotClient: newEmbeddedClient(),
 	}
 
 	server, err := NewServer(cfg)
@@ -83,7 +81,7 @@ func TestServeStdio_ContextCancellation(t *testing.T) {
 	cfg := Config{
 		Version:    "1.0.0",
 		Logger:     slog.Default(),
-		SpotClient: spot.New(),
+		SpotClient: newEmbeddedClient(),
 	}
 
 	server, err := NewServer(cfg)
@@ -119,7 +117,7 @@ func TestServeSSE_ContextCancellation(t *testing.T) {
 	cfg := Config{
 		Version:    "1.0.0",
 		Logger:     slog.Default(),
-		SpotClient: spot.New(),
+		SpotClient: newEmbeddedClient(),
 	}
 
 	server, err := NewServer(cfg)
@@ -157,7 +155,7 @@ func TestServeSSE_InvalidPort(t *testing.T) {
 	cfg := Config{
 		Version:    "1.0.0",
 		Logger:     slog.Default(),
-		SpotClient: spot.New(),
+		SpotClient: newEmbeddedClient(),
 	}
 
 	server, err := NewServer(cfg)
@@ -176,7 +174,7 @@ func TestServerConcurrentAccess(t *testing.T) {
 	cfg := Config{
 		Version:    "1.0.0",
 		Logger:     slog.Default(),
-		SpotClient: spot.New(),
+		SpotClient: newEmbeddedClient(),
 	}
 
 	server, err := NewServer(cfg)
@@ -186,7 +184,7 @@ func TestServerConcurrentAccess(t *testing.T) {
 	done := make(chan error, numOperations)
 
 	// Perform concurrent server operations
-	for i := 0; i < numOperations; i++ {
+	for range numOperations {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
@@ -199,7 +197,7 @@ func TestServerConcurrentAccess(t *testing.T) {
 	}
 
 	// Collect results - should either timeout or fail with port binding
-	for i := 0; i < numOperations; i++ {
+	for i := range numOperations {
 		err := <-done
 		// Any error is acceptable - we're testing concurrent access doesn't panic
 		t.Logf("Operation %d returned: %v", i, err)
@@ -211,7 +209,7 @@ func BenchmarkServerCreation(b *testing.B) {
 	cfg := Config{
 		Version:    "1.0.0",
 		Logger:     slog.Default(),
-		SpotClient: spot.New(),
+		SpotClient: newEmbeddedClient(),
 	}
 
 	b.ResetTimer()

@@ -19,7 +19,7 @@ import (
 // This tests the real shared state in spot.Client (sync.Once, cached data)
 func TestConcurrentSameClient(t *testing.T) {
 	// Use real client to test actual shared state concurrency issues
-	realClient := spot.New() // Has internal sync.Once and shared data providers
+	realClient := newEmbeddedClient() // Has internal sync.Once and shared data providers
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	findTool := NewFindSpotInstancesTool(realClient, logger)
@@ -30,12 +30,12 @@ func TestConcurrentSameClient(t *testing.T) {
 	errors := make([]error, numGoroutines)
 
 	// Test concurrent access with same parameters (realistic production scenario)
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-			req := createTestCallToolRequest(map[string]interface{}{
-				"regions":        []interface{}{"us-east-1"},
+			req := createTestCallToolRequest(map[string]any{
+				"regions":        []any{"us-east-1"},
 				"instance_types": "t2.micro",
 				"limit":          5,
 			})
@@ -48,7 +48,7 @@ func TestConcurrentSameClient(t *testing.T) {
 	wg.Wait()
 
 	// Verify all calls succeeded and returned consistent results
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		assert.NoError(t, errors[i], "Goroutine %d should not have errors", i)
 		require.NotNil(t, results[i], "Result %d should not be nil", i)
 		assert.False(t, results[i].IsError, "Result %d should not be an error", i)
@@ -66,15 +66,15 @@ func TestConcurrentSameClient(t *testing.T) {
 
 // TestConcurrentDifferentParameters tests concurrent calls with different parameters
 func TestConcurrentDifferentParameters(t *testing.T) {
-	realClient := spot.New()
+	realClient := newEmbeddedClient()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	findTool := NewFindSpotInstancesTool(realClient, logger)
 
-	testCases := []map[string]interface{}{
-		{"regions": []interface{}{"us-east-1"}, "instance_types": "t2.micro", "limit": 5},
-		{"regions": []interface{}{"us-west-2"}, "instance_types": "t2.small", "limit": 3},
-		{"regions": []interface{}{"eu-west-1"}, "instance_types": "t3.micro", "limit": 10},
-		{"regions": []interface{}{"us-east-1", "us-west-2"}, "sort_by": "price", "limit": 8},
+	testCases := []map[string]any{
+		{"regions": []any{"us-east-1"}, "instance_types": "t2.micro", "limit": 5},
+		{"regions": []any{"us-west-2"}, "instance_types": "t2.small", "limit": 3},
+		{"regions": []any{"eu-west-1"}, "instance_types": "t3.micro", "limit": 10},
+		{"regions": []any{"us-east-1", "us-west-2"}, "sort_by": "price", "limit": 8},
 	}
 
 	var wg sync.WaitGroup
@@ -84,7 +84,7 @@ func TestConcurrentDifferentParameters(t *testing.T) {
 	// Run different parameter sets concurrently
 	for i, testCase := range testCases {
 		wg.Add(1)
-		go func(index int, params map[string]interface{}) {
+		go func(index int, params map[string]any) {
 			defer wg.Done()
 			req := createTestCallToolRequest(params)
 			result, err := findTool.Handle(context.Background(), req)
@@ -104,7 +104,7 @@ func TestConcurrentDifferentParameters(t *testing.T) {
 
 // TestConcurrentRegionsToolAccess tests concurrent access to regions tool
 func TestConcurrentRegionsToolAccess(t *testing.T) {
-	realClient := spot.New()
+	realClient := newEmbeddedClient()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	regionsTool := NewListSpotRegionsTool(realClient, logger)
 
@@ -114,11 +114,11 @@ func TestConcurrentRegionsToolAccess(t *testing.T) {
 	errors := make([]error, numGoroutines)
 
 	// Test concurrent regions listing (all using same empty parameters)
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-			req := createTestCallToolRequest(map[string]interface{}{})
+			req := createTestCallToolRequest(map[string]any{})
 			result, err := regionsTool.Handle(context.Background(), req)
 			results[index] = result
 			errors[index] = err
@@ -128,7 +128,7 @@ func TestConcurrentRegionsToolAccess(t *testing.T) {
 	wg.Wait()
 
 	// Verify all calls succeeded
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		assert.NoError(t, errors[i], "Goroutine %d should not have errors", i)
 		require.NotNil(t, results[i], "Result %d should not be nil", i)
 		assert.False(t, results[i].IsError, "Result %d should not be an error", i)
@@ -143,14 +143,14 @@ func TestConcurrentServerCreation(t *testing.T) {
 	errors := make([]error, numGoroutines)
 
 	// Test concurrent server creation with different spot clients
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
 			cfg := Config{
 				Version:    "1.0.0",
 				Logger:     slog.Default(),
-				SpotClient: spot.New(), // Each gets its own client
+				SpotClient: newEmbeddedClient(), // Each gets its own client
 			}
 			server, err := NewServer(cfg)
 			servers[index] = server
@@ -161,7 +161,7 @@ func TestConcurrentServerCreation(t *testing.T) {
 	wg.Wait()
 
 	// Verify all servers were created successfully
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		assert.NoError(t, errors[i], "Server creation %d should succeed", i)
 		assert.NotNil(t, servers[i], "Server %d should not be nil", i)
 	}
@@ -170,21 +170,21 @@ func TestConcurrentServerCreation(t *testing.T) {
 // TestConcurrentParameterParsing tests concurrent parameter parsing with complex data
 func TestConcurrentParameterParsing(t *testing.T) {
 	// Different parameter sets to test concurrent parsing
-	testArgSets := []map[string]interface{}{
+	testArgSets := []map[string]any{
 		{
-			"regions":        []interface{}{"us-east-1", "eu-west-1"},
+			"regions":        []any{"us-east-1", "eu-west-1"},
 			"instance_types": "m5.large",
 			"limit":          10,
 			"sort_by":        "price",
 		},
 		{
-			"regions":               []interface{}{"us-west-2"},
+			"regions":               []any{"us-west-2"},
 			"min_vcpu":              4,
 			"max_price_per_hour":    0.5,
 			"max_interruption_rate": 15.0,
 		},
 		{
-			"regions":       []interface{}{"ap-south-1", "ap-southeast-1"},
+			"regions":       []any{"ap-south-1", "ap-southeast-1"},
 			"sort_by":       "savings",
 			"min_memory_gb": 8,
 		},
@@ -195,7 +195,7 @@ func TestConcurrentParameterParsing(t *testing.T) {
 	results := make([]*params, numGoroutines)
 
 	// Test concurrent parameter parsing with different arg sets
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
@@ -242,16 +242,16 @@ func TestConcurrentResponseBuilding(t *testing.T) {
 
 	const numGoroutines = 25
 	var wg sync.WaitGroup
-	responses := make([]map[string]interface{}, numGoroutines)
+	responses := make([]map[string]any, numGoroutines)
 
 	startTime := time.Now()
 
 	// Test concurrent response building with same data
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-			response := buildResponse(testAdvices, startTime)
+			response := buildResponse(testAdvices, startTime, spot.DataSourceEmbedded)
 			responses[index] = response
 		}(i)
 	}
@@ -263,14 +263,14 @@ func TestConcurrentResponseBuilding(t *testing.T) {
 		assert.Contains(t, response, "results", "Response %d should contain results", i)
 		assert.Contains(t, response, "metadata", "Response %d should contain metadata", i)
 
-		results, ok := response["results"].([]map[string]interface{})
+		results, ok := response["results"].([]map[string]any)
 		require.True(t, ok, "Results should be a slice of maps")
 		assert.Len(t, results, len(testAdvices), "Should have correct number of results")
 
 		// Verify content consistency across all concurrent calls
 		if i > 0 {
 			firstResponse := responses[0]
-			firstResults, ok := firstResponse["results"].([]map[string]interface{})
+			firstResults, ok := firstResponse["results"].([]map[string]any)
 			require.True(t, ok, "First response results should be a slice of maps")
 			for j, result := range results {
 				assert.Equal(t, firstResults[j]["instance_type"], result["instance_type"],
@@ -285,17 +285,17 @@ func TestConcurrentResponseBuilding(t *testing.T) {
 // TestConcurrentHelperFunctions tests concurrent access to helper functions
 func TestConcurrentHelperFunctions(t *testing.T) {
 	// Shared test arguments
-	testArgs := map[string]interface{}{
+	testArgs := map[string]any{
 		"test_string": "value",
 		"test_limit":  15,
-		"test_slice":  []interface{}{"a", "b", "c"},
+		"test_slice":  []any{"a", "b", "c"},
 	}
 
 	const numGoroutines = 50
 	var wg sync.WaitGroup
 
 	// Test all helper functions concurrently
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		wg.Add(3)
 
 		go func() {
@@ -329,18 +329,18 @@ func TestConcurrentDataProviderInitialization(t *testing.T) {
 	errors := make([]error, numGoroutines)
 
 	// Create multiple fresh clients to force sync.Once initialization races
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
 
 			// Create fresh client for each goroutine to trigger initialization race
-			freshClient := spot.New()
+			freshClient := newEmbeddedClient()
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 			tool := NewFindSpotInstancesTool(freshClient, logger)
 
-			req := createTestCallToolRequest(map[string]interface{}{
-				"regions": []interface{}{"us-east-1"},
+			req := createTestCallToolRequest(map[string]any{
+				"regions": []any{"us-east-1"},
 				"limit":   3,
 			})
 
@@ -353,7 +353,7 @@ func TestConcurrentDataProviderInitialization(t *testing.T) {
 	wg.Wait()
 
 	// Verify all initializations succeeded without race conditions
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		assert.NoError(t, errors[i], "Initialization %d should not have errors", i)
 		require.NotNil(t, results[i], "Result %d should not be nil", i)
 	}
@@ -361,7 +361,7 @@ func TestConcurrentDataProviderInitialization(t *testing.T) {
 
 // TestConcurrentMixedOperations tests different operations triggering different code paths
 func TestConcurrentMixedOperations(t *testing.T) {
-	sharedClient := spot.New()
+	sharedClient := newEmbeddedClient()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	findTool := NewFindSpotInstancesTool(sharedClient, logger)
@@ -374,21 +374,21 @@ func TestConcurrentMixedOperations(t *testing.T) {
 	// Mix of different operations that stress different code paths
 	operations := []func(int) error{
 		func(i int) error {
-			req := createTestCallToolRequest(map[string]interface{}{
-				"regions": []interface{}{"us-east-1", "us-west-2"},
+			req := createTestCallToolRequest(map[string]any{
+				"regions": []any{"us-east-1", "us-west-2"},
 				"sort_by": "price",
 			})
 			_, err := findTool.Handle(context.Background(), req)
 			return err
 		},
 		func(i int) error {
-			req := createTestCallToolRequest(map[string]interface{}{})
+			req := createTestCallToolRequest(map[string]any{})
 			_, err := regionsTool.Handle(context.Background(), req)
 			return err
 		},
 		func(i int) error {
-			req := createTestCallToolRequest(map[string]interface{}{
-				"regions":        []interface{}{"eu-west-1"},
+			req := createTestCallToolRequest(map[string]any{
+				"regions":        []any{"eu-west-1"},
 				"instance_types": "t3.*",
 				"min_vcpu":       2,
 			})
@@ -398,7 +398,7 @@ func TestConcurrentMixedOperations(t *testing.T) {
 	}
 
 	// Run mixed operations concurrently
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
@@ -417,7 +417,7 @@ func TestConcurrentMixedOperations(t *testing.T) {
 
 // TestConcurrentContextCancellation tests concurrent context cancellation scenarios
 func TestConcurrentContextCancellation(t *testing.T) {
-	client := spot.New()
+	client := newEmbeddedClient()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	tool := NewFindSpotInstancesTool(client, logger)
 
@@ -425,7 +425,7 @@ func TestConcurrentContextCancellation(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Test mix of cancelled and non-cancelled contexts
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
@@ -446,8 +446,8 @@ func TestConcurrentContextCancellation(t *testing.T) {
 				ctx = context.Background()
 			}
 
-			req := createTestCallToolRequest(map[string]interface{}{
-				"regions": []interface{}{"us-east-1"},
+			req := createTestCallToolRequest(map[string]any{
+				"regions": []any{"us-east-1"},
 				"limit":   5,
 			})
 
@@ -465,7 +465,7 @@ func TestConcurrentContextCancellation(t *testing.T) {
 
 // TestConcurrentLargeDatasets tests concurrent access with realistic large datasets
 func TestConcurrentLargeDatasets(t *testing.T) {
-	client := spot.New()
+	client := newEmbeddedClient()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	tool := NewFindSpotInstancesTool(client, logger)
 
@@ -473,25 +473,25 @@ func TestConcurrentLargeDatasets(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Large dataset requests that stress memory and processing
-	largeRequests := []map[string]interface{}{
+	largeRequests := []map[string]any{
 		{
-			"regions": []interface{}{"us-east-1", "us-west-1", "us-west-2", "eu-west-1", "eu-central-1"},
+			"regions": []any{"us-east-1", "us-west-1", "us-west-2", "eu-west-1", "eu-central-1"},
 			"limit":   50, // Large result set
 		},
 		{
-			"regions":        []interface{}{"all"}, // All regions
-			"instance_types": ".*",                 // All instance types
+			"regions":        []any{"all"}, // All regions
+			"instance_types": ".*",         // All instance types
 			"limit":          30,
 		},
 		{
-			"regions":       []interface{}{"us-east-1", "us-west-2", "eu-west-1"},
+			"regions":       []any{"us-east-1", "us-west-2", "eu-west-1"},
 			"min_vcpu":      1,
 			"min_memory_gb": 1,
 			"limit":         25,
 		},
 	}
 
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
@@ -512,7 +512,7 @@ func TestConcurrentLargeDatasets(t *testing.T) {
 }
 
 // createTestCallToolRequest creates a test MCP call tool request
-func createTestCallToolRequest(args interface{}) mcp.CallToolRequest {
+func createTestCallToolRequest(args any) mcp.CallToolRequest {
 	return mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Arguments: args,

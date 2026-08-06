@@ -20,17 +20,6 @@ import (
 	"spotinfo/internal/spot"
 )
 
-// Constants for repeated strings in tests
-const (
-	outputNumber = "number"
-	outputText   = "text"
-	outputJSON   = "json"
-	outputTable  = "table"
-	outputCSV    = "csv"
-
-	allRegions = "all"
-)
-
 // Helper functions for mock setup (following spot package patterns)
 
 // setupSuccessfulSpotClient creates a mock client with successful single instance response

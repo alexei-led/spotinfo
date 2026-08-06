@@ -1,26 +1,39 @@
-# binaries
-.bin
+# Allowlist: exclude everything, then re-admit only what the build reads.
+#
+# A denylist silently ships whatever nobody remembered to add — that is how a
+# 45MB agent cache and the full 30MB git history ended up in the build context.
+# With this form, a new dotfile, cache directory or credential file is excluded
+# by default and has to be opted in deliberately.
+*
 
-# coverage
-.cover
+# Go module graph
+!go.mod
+!go.sum
 
-# IDE
-.idea
-.vscode
+# Sources (the embedded AWS data lives under internal/spot/data)
+!cmd/
+!internal/
 
-# CI/CD
-.github
+# Build driver
+!Makefile
 
-# helper files
-.gitignore
-*.todo
+# Re-exclude things that would otherwise ride in under the directories above.
+# Tests and mocks are not build inputs; the binary is built from non-test files.
+**/*_test.go
+**/testdata/
+**/.DS_Store
 
-# documentation
-*.md
-docs
+# Never ship credentials or local env, even if a pattern above would admit them.
+**/.env
+**/.env.*
+**/.aws/
+**/.ssh/
+**/*.pem
+**/*.key
+**/credentials
 
-# customization and secrets
-.env
-
-# license
-LICENSE
+# Caches and scratch output
+**/*.bak
+**/*.tmp
+**/coverage.out
+**/coverage.html

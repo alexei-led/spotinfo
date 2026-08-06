@@ -4,9 +4,11 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,20 +23,61 @@ var embeddedPriceData string
 
 const (
 	spotAdvisorJSONURL = "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json"
-	spotPriceJSURL     = "https://spot-price.s3.amazonaws.com/spot.js"
-	responsePrefix     = "callback("
-	responseSuffix     = ");"
-	httpTimeout        = 5 * time.Second
+	// Feed behind https://aws.amazon.com/ec2/spot/pricing/. The legacy JSONP feed
+	// (spot-price.s3.amazonaws.com/spot.js) has been frozen since 2024-05-13.
+	spotPriceJSURL = "https://website.spot.ec2.aws.a2z.com/spot.json"
+	// This feed serves plain JSON, so the trims below are no-ops. They are kept
+	// because it is still served as application/x-javascript and may be re-wrapped.
+	responsePrefix = "callback("
+	responseSuffix = ");"
+	// httpTimeout bounds a fetch only when the caller supplied no deadline of
+	// its own. Providers pass their configured timeout via the context.
+	httpTimeout = 5 * time.Second
 )
 
-// awsSpotPricingRegions maps non-standard region codes to AWS region codes.
-var awsSpotPricingRegions = map[string]string{
-	"us-east":    "us-east-1",
-	"us-west":    "us-west-1",
-	"eu-ireland": "eu-west-1",
-	"apac-sin":   "ap-southeast-1",
-	"apac-syd":   "ap-southeast-2",
-	"apac-tokyo": "ap-northeast-1",
+// Sentinel errors for feed payloads that parse but carry no usable data.
+var (
+	errNoAdvisorRegions = errors.New("advisor data contained no regions")
+	errNoPricingRegions = errors.New("pricing data contained no regions")
+)
+
+// withDefaultTimeout bounds a context that carries no deadline. A caller's own
+// deadline wins, which is what makes the client's configured timeout effective —
+// it used to be stored and never read, so every fetch waited the hardcoded 5s.
+func withDefaultTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+
+	return context.WithTimeout(ctx, httpTimeout)
+}
+
+// parsePrice reads a price from the feed, reporting whether it is usable.
+//
+// strconv.ParseFloat accepts "NaN", "Inf" and "-Inf" without error, so an
+// err-only check lets a non-finite value through. It then reaches
+// json.Marshal, which rejects non-finite floats — crashing `--output json` on
+// a value chosen by an undocumented upstream feed. The feed already ships
+// non-numeric cells ("N/A*"), so this is a live input, not a hypothetical.
+func parsePrice(raw string) (float64, bool) {
+	price, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(price) || math.IsInf(price, 0) || price < 0 {
+		return 0, false
+	}
+
+	return price, true
+}
+
+// fetchTimeout resolves a provider's configured timeout. A zero or negative
+// value means "unset" and yields the default: context.WithTimeout(ctx, 0)
+// produces an already-expired context, which would silently skip every fetch
+// and serve embedded data forever instead of erroring.
+func fetchTimeout(configured time.Duration) time.Duration {
+	if configured <= 0 {
+		return httpTimeout
+	}
+
+	return configured
 }
 
 // minRange maps interruption range max values to min values
@@ -42,7 +85,10 @@ var minRange = map[int]int{5: 0, 11: 6, 16: 12, 22: 17, 100: 23} //nolint:mnd
 
 // fetchAdvisorData retrieves spot advisor data from AWS or falls back to embedded data.
 func fetchAdvisorData(ctx context.Context) (*advisorData, error) {
-	client := &http.Client{Timeout: httpTimeout}
+	ctx, cancel := withDefaultTimeout(ctx)
+	defer cancel()
+
+	client := &http.Client{}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, spotAdvisorJSONURL, http.NoBody)
 	if err != nil {
@@ -72,15 +118,31 @@ func fetchAdvisorData(ctx context.Context) (*advisorData, error) {
 		return loadEmbeddedAdvisorData()
 	}
 
-	var result advisorData
-	err = json.Unmarshal(body, &result)
+	result, err := parseAdvisorResponse(body)
 	if err != nil {
-		slog.Warn("failed to parse advisor data from AWS, using embedded data",
+		slog.Warn("unusable advisor data from AWS, using embedded data",
 			slog.Any("error", err))
 		return loadEmbeddedAdvisorData()
 	}
 
 	slog.Debug("successfully fetched advisor data from AWS")
+	return result, nil
+}
+
+// parseAdvisorResponse decodes an advisor feed body and rejects unusable payloads.
+// A 200 carrying valid-but-unexpected JSON (an empty body, renamed keys) unmarshals
+// cleanly into a zero-valued struct, so an empty region set must be an error rather
+// than an advisor that silently knows about nothing.
+func parseAdvisorResponse(body []byte) (*advisorData, error) {
+	var result advisorData
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse advisor data: %w", err)
+	}
+
+	if len(result.Regions) == 0 {
+		return nil, errNoAdvisorRegions
+	}
+
 	return &result, nil
 }
 
@@ -103,7 +165,10 @@ func fetchPricingData(ctx context.Context, useEmbedded bool) (*rawPriceData, err
 		return loadEmbeddedPricingData()
 	}
 
-	client := &http.Client{Timeout: httpTimeout}
+	ctx, cancel := withDefaultTimeout(ctx)
+	defer cancel()
+
+	client := &http.Client{}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, spotPriceJSURL, http.NoBody)
 	if err != nil {
@@ -133,20 +198,34 @@ func fetchPricingData(ctx context.Context, useEmbedded bool) (*rawPriceData, err
 		return loadEmbeddedPricingData()
 	}
 
-	// Process JSONP response
-	bodyString := strings.TrimPrefix(string(bodyBytes), responsePrefix)
-	bodyString = strings.TrimSuffix(bodyString, responseSuffix)
-
-	var result rawPriceData
-	err = json.Unmarshal([]byte(bodyString), &result)
+	result, err := parsePricingResponse(bodyBytes)
 	if err != nil {
-		slog.Warn("failed to parse pricing data from AWS, using embedded data",
+		slog.Warn("unusable pricing data from AWS, using embedded data",
 			slog.Any("error", err))
 		return loadEmbeddedPricingData()
 	}
 
 	slog.Debug("successfully fetched pricing data from AWS")
-	normalizeRegions(&result)
+	return result, nil
+}
+
+// parsePricingResponse decodes a pricing feed body and rejects unusable payloads.
+// An empty region set would otherwise price every instance at $0 with no fallback,
+// which matters because the feed is an undocumented endpoint that may change shape.
+func parsePricingResponse(body []byte) (*rawPriceData, error) {
+	// The current feed is plain JSON; these trims are no-ops unless it is re-wrapped.
+	bodyString := strings.TrimPrefix(string(body), responsePrefix)
+	bodyString = strings.TrimSuffix(bodyString, responseSuffix)
+
+	var result rawPriceData
+	if err := json.Unmarshal([]byte(bodyString), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse pricing data: %w", err)
+	}
+
+	if len(result.Config.Regions) == 0 {
+		return nil, errNoPricingRegions
+	}
+
 	return &result, nil
 }
 
@@ -160,17 +239,7 @@ func loadEmbeddedPricingData() (*rawPriceData, error) {
 
 	result.Embedded = true
 	slog.Debug("using embedded pricing data")
-	normalizeRegions(&result)
 	return &result, nil
-}
-
-// normalizeRegions normalizes region codes in the pricing data.
-func normalizeRegions(result *rawPriceData) {
-	for index, r := range result.Config.Regions {
-		if awsRegion, ok := awsSpotPricingRegions[r.Region]; ok {
-			result.Config.Regions[index].Region = awsRegion
-		}
-	}
 }
 
 // convertRawPriceData converts raw pricing data to a more usable format.
@@ -189,12 +258,12 @@ func convertRawPriceData(raw *rawPriceData) *spotPriceData {
 				var ip instancePrice
 
 				for _, os := range size.ValueColumns {
-					price, err := strconv.ParseFloat(os.Prices.USD, 64)
-					if err != nil {
+					price, ok := parsePrice(os.Prices.USD)
+					if !ok {
 						price = 0
 					}
 
-					if os.Name == "mswin" {
+					if os.Name == priceColumnWindows {
 						ip.Windows = price
 					} else {
 						ip.Linux = price
@@ -223,7 +292,10 @@ func (s *spotPriceData) getSpotInstancePrice(instance, region, os string) (float
 		return 0, fmt.Errorf("no pricing data for instance: %v", instance)
 	}
 
-	if os == "windows" {
+	// EqualFold, not ==: getRegionAdvice accepts "Windows" case-insensitively,
+	// so an exact compare here returned Windows savings alongside the Linux
+	// price for `--os Windows`.
+	if strings.EqualFold(os, osWindows) {
 		return price.Windows, nil
 	}
 

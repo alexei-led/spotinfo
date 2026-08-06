@@ -79,6 +79,45 @@ const (
 	stdioTransport  = "stdio"
 	sseTransport    = "sse"
 	defaultMCPPort  = "8080"
+
+	// Output formats
+	outputNumber = "number"
+	outputText   = "text"
+	outputJSON   = "json"
+	outputTable  = "table"
+	outputCSV    = "csv"
+
+	// CLI flag names, shared by the flag definitions and the value lookups
+	flagMCP          = "mcp"
+	flagDebug        = "debug"
+	flagQuiet        = "quiet"
+	flagJSONLog      = "json-log"
+	flagType         = "type"
+	flagOS           = "os"
+	flagRegion       = "region"
+	flagOutput       = "output"
+	flagCPU          = "cpu"
+	flagMemory       = "memory"
+	flagPrice        = "price"
+	flagSort         = "sort"
+	flagOrder        = "order"
+	flagWithScore    = "with-score"
+	flagMinScore     = "min-score"
+	flagAZ           = "az"
+	flagScoreTimeout = "score-timeout"
+
+	// Sort order values
+	orderAsc  = "asc"
+	orderDesc = "desc"
+
+	// defaultInstanceOS is the --os flag default
+	defaultInstanceOS = "linux"
+
+	// allRegions is the --region value selecting every AWS region
+	allRegions = "all"
+
+	// appName is the CLI application name
+	appName = "spotinfo"
 )
 
 //nolint:cyclop
@@ -93,7 +132,7 @@ func mainCmd(ctx *cli.Context) error {
 // isMCPMode checks if the application should run in MCP server mode
 func isMCPMode(ctx *cli.Context) bool {
 	// Check CLI flag first
-	if ctx.Bool("mcp") {
+	if ctx.Bool(flagMCP) {
 		return true
 	}
 
@@ -168,19 +207,19 @@ func execMainCmd(ctx *cli.Context, execCtx context.Context, client spotClient, o
 		log.Debug("context value received", slog.Any("value", v))
 	}
 
-	regions := ctx.StringSlice("region")
-	instanceOS := ctx.String("os")
-	instance := ctx.String("type")
-	cpu := ctx.Int("cpu")
-	memory := ctx.Int("memory")
-	maxPrice := ctx.Float64("price")
-	sortBy := ctx.String("sort")
-	order := ctx.String("order")
-	sortDesc := strings.EqualFold(order, "desc")
-	withScore := ctx.Bool("with-score")
-	minScore := ctx.Int("min-score")
-	azLevel := ctx.Bool("az")
-	scoreTimeout := ctx.Int("score-timeout")
+	regions := ctx.StringSlice(flagRegion)
+	instanceOS := ctx.String(flagOS)
+	instance := ctx.String(flagType)
+	cpu := ctx.Int(flagCPU)
+	memory := ctx.Int(flagMemory)
+	maxPrice := ctx.Float64(flagPrice)
+	sortBy := ctx.String(flagSort)
+	order := ctx.String(flagOrder)
+	sortDesc := strings.EqualFold(order, orderDesc)
+	withScore := ctx.Bool(flagWithScore)
+	minScore := ctx.Int(flagMinScore)
+	azLevel := ctx.Bool(flagAZ)
+	scoreTimeout := ctx.Int(flagScoreTimeout)
 
 	var sortByType spot.SortBy
 
@@ -235,18 +274,18 @@ func execMainCmd(ctx *cli.Context, execCtx context.Context, client spotClient, o
 	}
 
 	// decide if region should be printed
-	printRegion := len(regions) > 1 || (len(regions) == 1 && regions[0] == "all")
+	printRegion := len(regions) > 1 || (len(regions) == 1 && regions[0] == allRegions)
 
-	switch ctx.String("output") {
-	case "number":
+	switch ctx.String(flagOutput) {
+	case outputNumber:
 		printAdvicesNumber(advices, printRegion, output)
-	case "text":
+	case outputText:
 		printAdvicesText(advices, printRegion, output)
-	case "json":
+	case outputJSON:
 		printAdvicesJSON(advices, output)
-	case "table":
+	case outputTable:
 		printAdvicesTable(advices, false, printRegion, output)
-	case "csv":
+	case outputCSV:
 		printAdvicesTable(advices, true, printRegion, output)
 	default:
 		printAdvicesNumber(advices, printRegion, output)
@@ -367,10 +406,16 @@ func addFreshnessInfo(scoreStr string, fetchedAt *time.Time) string {
 	return scoreStr
 }
 
-func printAdvicesJSON(advices interface{}, output io.Writer) {
+func printAdvicesJSON(advices any, output io.Writer) {
 	bytes, err := json.MarshalIndent(advices, "", "  ")
 	if err != nil {
-		panic(err)
+		// Reachable in principle: json.Marshal rejects non-finite floats, and
+		// prices come from an upstream feed. Prices are screened at parse time,
+		// so this is a backstop — but a CLI should report it, not panic with a
+		// stack trace.
+		slog.Error("failed to render JSON output", slog.Any("error", err))
+
+		return
 	}
 
 	txt := string(bytes)
@@ -453,7 +498,7 @@ func buildTableRow(advice *spot.Advice, scoreInfo scoreTypeInfo, region, csv boo
 		opt(opts)
 	}
 
-	var priceValue interface{}
+	var priceValue any
 	if csv {
 		priceValue = advice.Price
 	} else {
@@ -587,14 +632,14 @@ func main() {
 		Before: func(ctx *cli.Context) error {
 			// Update logger based on flags
 			logLevel := slog.LevelInfo
-			if ctx.Bool("debug") {
+			if ctx.Bool(flagDebug) {
 				logLevel = slog.LevelDebug
-			} else if ctx.Bool("quiet") {
+			} else if ctx.Bool(flagQuiet) {
 				logLevel = slog.LevelError
 			}
 
 			opts := &slog.HandlerOptions{Level: logLevel}
-			if ctx.Bool("json-log") {
+			if ctx.Bool(flagJSONLog) {
 				log = slog.New(slog.NewJSONHandler(os.Stderr, opts))
 			} else {
 				log = slog.New(slog.NewTextHandler(os.Stderr, opts))
@@ -604,81 +649,81 @@ func main() {
 		},
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
-				Name:  "mcp",
+				Name:  flagMCP,
 				Usage: "run as MCP server instead of CLI",
 			},
 			&cli.BoolFlag{
-				Name:  "debug",
+				Name:  flagDebug,
 				Usage: "enable debug logging",
 			},
 			&cli.BoolFlag{
-				Name:  "quiet",
+				Name:  flagQuiet,
 				Usage: "quiet mode (errors only)",
 			},
 			&cli.BoolFlag{
-				Name:  "json-log",
+				Name:  flagJSONLog,
 				Usage: "output logs in JSON format",
 			},
 			&cli.StringFlag{
-				Name:  "type",
+				Name:  flagType,
 				Usage: "EC2 instance type (can be RE2 regexp patten)",
 			},
 			&cli.StringFlag{
-				Name:  "os",
+				Name:  flagOS,
 				Usage: "instance operating system (windows/linux)",
-				Value: "linux",
+				Value: defaultInstanceOS,
 			},
 			&cli.StringSliceFlag{
-				Name:  "region",
+				Name:  flagRegion,
 				Usage: "set one or more AWS regions, use \"all\" for all AWS regions",
 				Value: cli.NewStringSlice("us-east-1"),
 			},
 			&cli.StringFlag{
-				Name:  "output",
+				Name:  flagOutput,
 				Usage: "format output: number|text|json|table|csv",
-				Value: "table",
+				Value: outputTable,
 			},
 			&cli.IntFlag{
-				Name:  "cpu",
+				Name:  flagCPU,
 				Usage: "filter: minimal vCPU cores",
 			},
 			&cli.IntFlag{
-				Name:  "memory",
+				Name:  flagMemory,
 				Usage: "filter: minimal memory GiB",
 			},
 			&cli.Float64Flag{
-				Name:  "price",
+				Name:  flagPrice,
 				Usage: "filter: maximum price per hour",
 			},
 			&cli.StringFlag{
-				Name:  "sort",
+				Name:  flagSort,
 				Usage: "sort results by interruption|type|savings|price|region|score",
-				Value: "interruption",
+				Value: sortInterruption,
 			},
 			&cli.StringFlag{
-				Name:  "order",
+				Name:  flagOrder,
 				Usage: "sort order asc|desc",
-				Value: "asc",
+				Value: orderAsc,
 			},
 			&cli.BoolFlag{
-				Name:  "with-score",
+				Name:  flagWithScore,
 				Usage: "include AWS spot placement scores (experimental)",
 			},
 			&cli.IntFlag{
-				Name:  "min-score",
+				Name:  flagMinScore,
 				Usage: "filter: minimum spot placement score (1-10)",
 			},
 			&cli.BoolFlag{
-				Name:  "az",
+				Name:  flagAZ,
 				Usage: "request AZ-level scores instead of region-level (use with --with-score)",
 			},
 			&cli.IntFlag{
-				Name:  "score-timeout",
+				Name:  flagScoreTimeout,
 				Usage: "timeout for score enrichment in seconds",
 				Value: spot.DefaultScoreTimeoutSeconds,
 			},
 		},
-		Name:    "spotinfo",
+		Name:    appName,
 		Usage:   "explore AWS EC2 Spot instances",
 		Action:  mainCmd,
 		Version: Version,

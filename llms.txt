@@ -2,7 +2,7 @@
 
 > CLI tool and MCP server for AWS EC2 Spot Instance pricing, savings, and interruption frequency data.
 
-`spotinfo` provides comprehensive access to AWS Spot Instance data — real-time pricing, savings percentages, interruption rates, and placement scores. It embeds AWS data feeds for offline capability and supports multiple output formats (table, JSON, CSV, text). Also works as an MCP server for AI assistant integration.
+`spotinfo` provides comprehensive access to AWS Spot Instance data — real-time pricing, savings percentages, interruption rates, and placement scores. It embeds AWS data feeds for offline capability and supports multiple output formats (table, JSON, CSV, text, number). Also works as an MCP server for AI assistant integration.
 
 ## Docs
 
@@ -10,12 +10,17 @@
 - [Usage Guide](docs/usage.md)
 - [MCP Server Integration](docs/mcp-server.md)
 - [Data Sources](docs/data-sources.md)
+- [API Reference](docs/api-reference.md)
+- [Examples](docs/examples.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Placement Scores](docs/aws-spot-placement-scores.md)
+- [Claude Desktop Setup](docs/claude-desktop-setup.md)
 - [CLAUDE.md](CLAUDE.md) - AI coding guidelines for this project
 
 ## Key Features
 
 - **Spot pricing**: current spot prices per instance type, region, and OS
-- **Interruption rates**: AWS Spot Advisor interruption frequency ranges (0-5%, 5-10%, etc.)
+- **Interruption rates**: AWS Spot Advisor interruption frequency ranges (<5%, 5-10%, etc.)
 - **Savings**: percentage savings vs on-demand pricing
 - **Placement scores**: real-time AWS EC2 placement scores (1-10) for launch success probability
 - **Live price fallback**: EC2 DescribeSpotPriceHistory API for newer instances missing from static feed
@@ -23,7 +28,7 @@
 - **MCP server**: expose spot data to Claude, Cursor, and other MCP-compatible AI tools
 - **Flexible filtering**: by region, instance type (regex), vCPU, memory, price, placement score
 - **Multi-region**: compare across regions with `--region all`
-- **Output formats**: table, JSON, CSV, plain text
+- **Output formats**: table, JSON, CSV, plain text, number
 
 ## Architecture
 
@@ -38,9 +43,14 @@
 
 ## Data Sources
 
-- Spot Advisor data: `https://spot-price.s3.amazonaws.com/spot-advisor-data.json`
-- Static pricing: `https://spot-price.s3.amazonaws.com/spot.js`
+- Spot Advisor data: `https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json`
+- Static pricing: `https://website.spot.ec2.aws.a2z.com/spot.json` (feed behind the AWS spot
+  pricing page; plain JSON, hourly. Replaces the legacy `spot-price.s3.amazonaws.com/spot.js`,
+  frozen since 2024-05-13)
 - Live prices: EC2 `DescribeSpotPriceHistory` API (fallback for zero-price instances)
+
+Both static feeds are embedded at build time via `//go:embed` for offline use. Refresh them
+with `make update-data update-price`; builds never fetch.
 
 ## Install
 

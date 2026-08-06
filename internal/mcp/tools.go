@@ -23,6 +23,79 @@ const (
 	maxReliability  = 100
 )
 
+// MCP sort_by parameter values.
+const (
+	sortByPrice       = "price"
+	sortByReliability = "reliability"
+	sortBySavings     = "savings"
+	sortByScore       = "score"
+)
+
+// MCP request argument keys and their special values.
+const (
+	argRegions             = "regions"
+	argInstanceTypes       = "instance_types"
+	argMinVCPU             = "min_vcpu"
+	argMinMemoryGB         = "min_memory_gb"
+	argMaxPricePerHour     = "max_price_per_hour"
+	argMaxInterruptionRate = "max_interruption_rate"
+	argSortBy              = "sort_by"
+	argLimit               = "limit"
+	argWithScore           = "with_score"
+	argMinScore            = "min_score"
+	argAZ                  = "az"
+	argScoreTimeout        = "score_timeout"
+	// allRegions is the "regions" argument value meaning every AWS region.
+	allRegions = "all"
+)
+
+// JSON field names of the MCP tool responses.
+const (
+	fieldInstanceType      = "instance_type"
+	fieldRegion            = "region"
+	fieldSpotPricePerHour  = "spot_price_per_hour"
+	fieldSpotPrice         = "spot_price"
+	fieldSavingsPercentage = "savings_percentage"
+	fieldSavings           = "savings"
+	fieldInterruptionRate  = "interruption_rate"
+	fieldInterruptionFreq  = "interruption_frequency"
+	fieldInterruptionRange = "interruption_range"
+	fieldVCPU              = "vcpu"
+	fieldMemoryGB          = "memory_gb"
+	fieldSpecs             = "specs"
+	fieldReliabilityScore  = "reliability_score"
+	fieldLivePrice         = "live_price"
+	fieldRegionScore       = "region_score"
+	fieldZoneScores        = "zone_scores"
+	fieldScoreFetchedAt    = "score_fetched_at"
+	fieldResults           = "results"
+	fieldMetadata          = "metadata"
+	fieldTotalResults      = "total_results"
+	fieldRegionsSearched   = "regions_searched"
+	fieldQueryTimeMS       = "query_time_ms"
+	fieldDataSource        = "data_source"
+	fieldDataFreshness     = "data_freshness"
+	fieldRegions           = "regions"
+	fieldTotal             = "total"
+)
+
+// Freshness reported alongside the data source. Derived from the source rather
+// than asserted: metadata claiming "current" while serving a months-old
+// embedded snapshot is worse than no metadata at all.
+const (
+	dataFreshnessLive     = "live"
+	dataFreshnessSnapshot = "embedded-snapshot"
+)
+
+// freshnessFor maps a spot data source onto the freshness it can honestly claim.
+func freshnessFor(source string) string {
+	if source == spot.DataSourceAWS {
+		return dataFreshnessLive
+	}
+
+	return dataFreshnessSnapshot
+}
+
 // FindSpotInstancesTool implements the find_spot_instances MCP tool
 type FindSpotInstancesTool struct {
 	client spotClient
@@ -38,6 +111,10 @@ func NewFindSpotInstancesTool(client spotClient, logger *slog.Logger) *FindSpotI
 }
 
 // Handle implements the find_spot_instances tool
+// Signature is fixed by mcp-go's server.ToolHandlerFunc, which takes the request
+// by value, so gocritic's hugeParam suggestion cannot be applied here.
+//
+//nolint:gocritic // hugeParam: signature dictated by mcp-go
 func (t *FindSpotInstancesTool) Handle(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	startTime := time.Now()
 	t.logger.Debug("handling find_spot_instances request", slog.Any("arguments", req.Params.Arguments))
@@ -79,15 +156,15 @@ func (t *FindSpotInstancesTool) Handle(ctx context.Context, req mcp.CallToolRequ
 
 	filteredAdvices := filterByInterruption(advices, params.maxInterruption)
 	limitedAdvices := applyLimit(filteredAdvices, params.limit)
-	response := buildResponse(limitedAdvices, startTime)
+	response := buildResponse(limitedAdvices, startTime, t.client.DataSource())
 
-	results, ok := response["results"].([]map[string]interface{})
+	results, ok := response[fieldResults].([]map[string]any)
 	if !ok {
-		results = []map[string]interface{}{}
+		results = []map[string]any{}
 	}
 	t.logger.Debug("find_spot_instances completed",
-		slog.Int("results", len(results)),
-		slog.Int64("query_time_ms", time.Since(startTime).Milliseconds()))
+		slog.Int(fieldResults, len(results)),
+		slog.Int64(fieldQueryTimeMS, time.Since(startTime).Milliseconds()))
 
 	return marshalResponse(response)
 }
@@ -109,43 +186,43 @@ type params struct { //nolint:govet
 }
 
 // parseParameters extracts all parameters from the request arguments
-func parseParameters(arguments interface{}) *params {
-	args, ok := arguments.(map[string]interface{})
+func parseParameters(arguments any) *params {
+	args, ok := arguments.(map[string]any)
 	if !ok {
-		args = make(map[string]interface{})
+		args = make(map[string]any)
 	}
 
-	regions := getStringSliceWithDefault(args, "regions", []string{"all"})
-	if len(regions) == 1 && regions[0] == "all" {
-		regions = []string{"all"}
+	regions := getStringSliceWithDefault(args, argRegions, []string{allRegions})
+	if len(regions) == 1 && regions[0] == allRegions {
+		regions = []string{allRegions}
 	}
 
 	return &params{
 		regions:         regions,
-		instanceTypes:   cast.ToString(args["instance_types"]),
-		minVCPU:         cast.ToInt(args["min_vcpu"]),
-		minMemoryGB:     cast.ToInt(args["min_memory_gb"]),
-		maxPrice:        cast.ToFloat64(args["max_price_per_hour"]),
-		maxInterruption: cast.ToFloat64(args["max_interruption_rate"]),
-		sortBy:          getStringWithDefault(args, "sort_by", "reliability"),
-		limit:           getLimitWithDefault(args, "limit", defaultLimit),
-		withScore:       cast.ToBool(args["with_score"]),
-		minScore:        cast.ToInt(args["min_score"]),
-		az:              cast.ToBool(args["az"]),
-		scoreTimeout:    cast.ToInt(args["score_timeout"]),
+		instanceTypes:   cast.ToString(args[argInstanceTypes]),
+		minVCPU:         cast.ToInt(args[argMinVCPU]),
+		minMemoryGB:     cast.ToInt(args[argMinMemoryGB]),
+		maxPrice:        cast.ToFloat64(args[argMaxPricePerHour]),
+		maxInterruption: cast.ToFloat64(args[argMaxInterruptionRate]),
+		sortBy:          getStringWithDefault(args, argSortBy, sortByReliability),
+		limit:           getLimitWithDefault(args, argLimit, defaultLimit),
+		withScore:       cast.ToBool(args[argWithScore]),
+		minScore:        cast.ToInt(args[argMinScore]),
+		az:              cast.ToBool(args[argAZ]),
+		scoreTimeout:    cast.ToInt(args[argScoreTimeout]),
 	}
 }
 
 // convertSortParams converts string sort parameter to internal types
 func convertSortParams(sortBy string) (spot.SortBy, bool) {
 	switch sortBy {
-	case "price":
+	case sortByPrice:
 		return spot.SortByPrice, false
-	case "reliability":
+	case sortByReliability:
 		return spot.SortByRange, false
-	case "savings":
+	case sortBySavings:
 		return spot.SortBySavings, true
-	case "score":
+	case sortByScore:
 		return spot.SortByScore, false
 	default:
 		return spot.SortByRange, false
@@ -176,40 +253,40 @@ func applyLimit(advices []spot.Advice, limit int) []spot.Advice {
 }
 
 // buildResponse creates the response map from filtered advices
-func buildResponse(advices []spot.Advice, startTime time.Time) map[string]interface{} {
-	results := make([]map[string]interface{}, len(advices))
+func buildResponse(advices []spot.Advice, startTime time.Time, dataSource string) map[string]any {
+	results := make([]map[string]any, len(advices))
 	regionsSearched := make(map[string]bool)
 
 	for i, advice := range advices {
 		regionsSearched[advice.Region] = true
 		avgInterruption := calculateAvgInterruption(advice.Range)
 
-		result := map[string]interface{}{
-			"instance_type":          advice.Instance,
-			"region":                 advice.Region,
-			"spot_price_per_hour":    advice.Price,
-			"spot_price":             fmt.Sprintf("$%.4f/hour", advice.Price),
-			"savings_percentage":     advice.Savings,
-			"savings":                fmt.Sprintf("%d%% cheaper than on-demand", advice.Savings),
-			"interruption_rate":      avgInterruption,
-			"interruption_frequency": advice.Range.Label,
-			"interruption_range":     fmt.Sprintf("%d-%d%%", advice.Range.Min, advice.Range.Max),
-			"vcpu":                   advice.Info.Cores,
-			"memory_gb":              advice.Info.RAM,
-			"specs":                  fmt.Sprintf("%d vCPU, %.0f GB RAM", advice.Info.Cores, advice.Info.RAM),
-			"reliability_score":      calculateReliabilityScore(avgInterruption),
-			"live_price":             advice.LivePrice,
+		result := map[string]any{
+			fieldInstanceType:      advice.Instance,
+			fieldRegion:            advice.Region,
+			fieldSpotPricePerHour:  advice.Price,
+			fieldSpotPrice:         fmt.Sprintf("$%.4f/hour", advice.Price),
+			fieldSavingsPercentage: advice.Savings,
+			fieldSavings:           fmt.Sprintf("%d%% cheaper than on-demand", advice.Savings),
+			fieldInterruptionRate:  avgInterruption,
+			fieldInterruptionFreq:  advice.Range.Label,
+			fieldInterruptionRange: fmt.Sprintf("%d-%d%%", advice.Range.Min, advice.Range.Max),
+			fieldVCPU:              advice.Info.Cores,
+			fieldMemoryGB:          advice.Info.RAM,
+			fieldSpecs:             fmt.Sprintf("%d vCPU, %.0f GB RAM", advice.Info.Cores, advice.Info.RAM),
+			fieldReliabilityScore:  calculateReliabilityScore(avgInterruption),
+			fieldLivePrice:         advice.LivePrice,
 		}
 
 		// Add score-related fields when available
 		if advice.RegionScore != nil {
-			result["region_score"] = *advice.RegionScore
+			result[fieldRegionScore] = *advice.RegionScore
 		}
 		if len(advice.ZoneScores) > 0 {
-			result["zone_scores"] = advice.ZoneScores
+			result[fieldZoneScores] = advice.ZoneScores
 		}
 		if advice.ScoreFetchedAt != nil {
-			result["score_fetched_at"] = advice.ScoreFetchedAt.Format(time.RFC3339)
+			result[fieldScoreFetchedAt] = advice.ScoreFetchedAt.Format(time.RFC3339)
 		}
 
 		results[i] = result
@@ -220,14 +297,14 @@ func buildResponse(advices []spot.Advice, startTime time.Time) map[string]interf
 		searchedRegions = append(searchedRegions, region)
 	}
 
-	return map[string]interface{}{
-		"results": results,
-		"metadata": map[string]interface{}{
-			"total_results":    len(results),
-			"regions_searched": searchedRegions,
-			"query_time_ms":    time.Since(startTime).Milliseconds(),
-			"data_source":      "embedded",
-			"data_freshness":   "current",
+	return map[string]any{
+		fieldResults: results,
+		fieldMetadata: map[string]any{
+			fieldTotalResults:    len(results),
+			fieldRegionsSearched: searchedRegions,
+			fieldQueryTimeMS:     time.Since(startTime).Milliseconds(),
+			fieldDataSource:      dataSource,
+			fieldDataFreshness:   freshnessFor(dataSource),
 		},
 	}
 }
@@ -247,7 +324,7 @@ func calculateReliabilityScore(avgInterruption float64) int {
 }
 
 // marshalResponse marshals response to JSON and creates MCP result
-func marshalResponse(response interface{}) (*mcp.CallToolResult, error) {
+func marshalResponse(response any) (*mcp.CallToolResult, error) {
 	jsonData, err := json.Marshal(response)
 	if err != nil {
 		return createErrorResult(fmt.Sprintf("failed to marshal response: %v", err)), nil
@@ -261,14 +338,14 @@ func createErrorResult(message string) *mcp.CallToolResult {
 }
 
 // Helper functions using spf13/cast with defaults
-func getStringWithDefault(args map[string]interface{}, key, defaultValue string) string {
+func getStringWithDefault(args map[string]any, key, defaultValue string) string {
 	if val := cast.ToString(args[key]); val != "" {
 		return val
 	}
 	return defaultValue
 }
 
-func getLimitWithDefault(args map[string]interface{}, key string, defaultValue int) int {
+func getLimitWithDefault(args map[string]any, key string, defaultValue int) int {
 	limit := cast.ToInt(args[key])
 	if limit <= 0 {
 		limit = defaultValue
@@ -279,7 +356,7 @@ func getLimitWithDefault(args map[string]interface{}, key string, defaultValue i
 	return limit
 }
 
-func getStringSliceWithDefault(args map[string]interface{}, key string, defaultValue []string) []string {
+func getStringSliceWithDefault(args map[string]any, key string, defaultValue []string) []string {
 	if slice := cast.ToStringSlice(args[key]); len(slice) > 0 {
 		return slice
 	}
@@ -301,6 +378,8 @@ func NewListSpotRegionsTool(client spotClient, logger *slog.Logger) *ListSpotReg
 }
 
 // Handle implements the list_spot_regions tool
+//
+//nolint:gocritic // hugeParam: signature dictated by mcp-go's server.ToolHandlerFunc
 func (t *ListSpotRegionsTool) Handle(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	t.logger.Debug("handling list_spot_regions request")
 
@@ -310,19 +389,19 @@ func (t *ListSpotRegionsTool) Handle(ctx context.Context, _ mcp.CallToolRequest)
 		return createErrorResult(fmt.Sprintf("Failed to retrieve regions: %v", err)), nil
 	}
 
-	response := map[string]interface{}{
-		"regions": regions,
-		"total":   len(regions),
+	response := map[string]any{
+		fieldRegions: regions,
+		fieldTotal:   len(regions),
 	}
 
-	t.logger.Debug("list_spot_regions completed", slog.Int("total", len(regions)))
+	t.logger.Debug("list_spot_regions completed", slog.Int(fieldTotal, len(regions)))
 	return marshalResponse(response)
 }
 
 // fetchRegions gets all available regions from the spot client
 func (t *ListSpotRegionsTool) fetchRegions(ctx context.Context) ([]string, error) {
 	opts := []spot.GetSpotSavingsOption{
-		spot.WithRegions([]string{"all"}),
+		spot.WithRegions([]string{allRegions}),
 		spot.WithPattern(""),
 		spot.WithOS("linux"),
 		spot.WithSort(spot.SortByRegion, false),

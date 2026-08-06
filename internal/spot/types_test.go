@@ -19,7 +19,9 @@ const (
 )
 
 // Helper to create int pointers
-func intPtr(i int) *int { return &i }
+//
+//go:fix inline
+func intPtr(i int) *int { return new(i) }
 
 // Helper to create test advice with minimal required fields
 func createAdvice(instance string, regionScore *int) Advice {
@@ -56,9 +58,9 @@ func TestByScore_NilSafeSorting(t *testing.T) {
 		{
 			name: "all_valid_scores_sorted_descending",
 			input: []Advice{
-				createAdvice(testInstanceT3Large, intPtr(5)),
-				createAdvice(testInstanceT3Medium, intPtr(8)),
-				createAdvice(testInstanceT3Small, intPtr(3)),
+				createAdvice(testInstanceT3Large, new(5)),
+				createAdvice(testInstanceT3Medium, new(8)),
+				createAdvice(testInstanceT3Small, new(3)),
 			},
 			expected:    []string{testInstanceT3Medium, testInstanceT3Large, testInstanceT3Small},
 			description: "Valid scores should be sorted in descending order (highest first)",
@@ -66,9 +68,9 @@ func TestByScore_NilSafeSorting(t *testing.T) {
 		{
 			name: "mixed_nil_and_valid_scores",
 			input: []Advice{
-				createAdvice(testInstanceT3Large, intPtr(5)),
+				createAdvice(testInstanceT3Large, new(5)),
 				createAdvice(testInstanceT3Medium, nil),
-				createAdvice(testInstanceT3Small, intPtr(8)),
+				createAdvice(testInstanceT3Small, new(8)),
 				createAdvice(testInstanceT3Nano, nil),
 			},
 			expected:    []string{testInstanceT3Small, testInstanceT3Large, testInstanceT3Medium, testInstanceT3Nano},
@@ -77,9 +79,9 @@ func TestByScore_NilSafeSorting(t *testing.T) {
 		{
 			name: "equal_scores_maintain_stable_order",
 			input: []Advice{
-				createAdvice(testInstanceT3Large, intPtr(7)),
-				createAdvice(testInstanceT3Medium, intPtr(7)),
-				createAdvice(testInstanceT3Small, intPtr(9)),
+				createAdvice(testInstanceT3Large, new(7)),
+				createAdvice(testInstanceT3Medium, new(7)),
+				createAdvice(testInstanceT3Small, new(9)),
 			},
 			expected:    []string{testInstanceT3Small, testInstanceT3Large, testInstanceT3Medium},
 			description: "Equal scores should maintain their relative order (stable sort)",
@@ -87,9 +89,9 @@ func TestByScore_NilSafeSorting(t *testing.T) {
 		{
 			name: "score_boundary_values",
 			input: []Advice{
-				createAdvice(testInstanceT3Large, intPtr(1)),   // Min score
-				createAdvice(testInstanceT3Medium, intPtr(10)), // Max score
-				createAdvice(testInstanceT3Small, intPtr(5)),   // Mid score
+				createAdvice(testInstanceT3Large, new(1)),   // Min score
+				createAdvice(testInstanceT3Medium, new(10)), // Max score
+				createAdvice(testInstanceT3Small, new(5)),   // Mid score
 			},
 			expected:    []string{testInstanceT3Medium, testInstanceT3Small, testInstanceT3Large},
 			description: "Boundary values (1, 10) should be handled correctly",
@@ -124,9 +126,9 @@ func TestByScore_ReverseSort(t *testing.T) {
 	t.Parallel()
 
 	input := []Advice{
-		createAdvice(testInstanceT3Large, intPtr(5)),
-		createAdvice(testInstanceT3Medium, intPtr(8)),
-		createAdvice(testInstanceT3Small, intPtr(3)),
+		createAdvice(testInstanceT3Large, new(5)),
+		createAdvice(testInstanceT3Medium, new(8)),
+		createAdvice(testInstanceT3Small, new(3)),
 	}
 
 	expected := []string{testInstanceT3Small, testInstanceT3Large, testInstanceT3Medium}
@@ -157,10 +159,10 @@ func TestFilterByMinScore(t *testing.T) {
 		{
 			name: "filter_above_threshold",
 			input: []Advice{
-				createAdvice(testInstanceT3Large, intPtr(5)),
-				createAdvice(testInstanceT3Medium, intPtr(8)),
-				createAdvice(testInstanceT3Small, intPtr(3)),
-				createAdvice(testInstanceT3Nano, intPtr(9)),
+				createAdvice(testInstanceT3Large, new(5)),
+				createAdvice(testInstanceT3Medium, new(8)),
+				createAdvice(testInstanceT3Small, new(3)),
+				createAdvice(testInstanceT3Nano, new(9)),
 			},
 			minScore:     7,
 			expectedLen:  2,
@@ -170,9 +172,9 @@ func TestFilterByMinScore(t *testing.T) {
 		{
 			name: "filter_excludes_nil_scores",
 			input: []Advice{
-				createAdvice(testInstanceT3Large, intPtr(8)),
+				createAdvice(testInstanceT3Large, new(8)),
 				createAdvice(testInstanceT3Medium, nil),
-				createAdvice(testInstanceT3Small, intPtr(3)),
+				createAdvice(testInstanceT3Small, new(3)),
 			},
 			minScore:     5,
 			expectedLen:  1,
@@ -182,8 +184,8 @@ func TestFilterByMinScore(t *testing.T) {
 		{
 			name: "no_matches_empty_result",
 			input: []Advice{
-				createAdvice(testInstanceT3Large, intPtr(3)),
-				createAdvice(testInstanceT3Medium, intPtr(4)),
+				createAdvice(testInstanceT3Large, new(3)),
+				createAdvice(testInstanceT3Medium, new(4)),
 			},
 			minScore:     8,
 			expectedLen:  0,
@@ -193,8 +195,8 @@ func TestFilterByMinScore(t *testing.T) {
 		{
 			name: "all_match_returns_all",
 			input: []Advice{
-				createAdvice(testInstanceT3Large, intPtr(8)),
-				createAdvice(testInstanceT3Medium, intPtr(9)),
+				createAdvice(testInstanceT3Large, new(8)),
+				createAdvice(testInstanceT3Medium, new(9)),
 			},
 			minScore:     5,
 			expectedLen:  2,
@@ -204,8 +206,8 @@ func TestFilterByMinScore(t *testing.T) {
 		{
 			name: "boundary_score_included",
 			input: []Advice{
-				createAdvice(testInstanceT3Large, intPtr(7)),
-				createAdvice(testInstanceT3Medium, intPtr(6)),
+				createAdvice(testInstanceT3Large, new(7)),
+				createAdvice(testInstanceT3Medium, new(6)),
 			},
 			minScore:     7,
 			expectedLen:  1,
@@ -247,7 +249,7 @@ func TestSortAdvices_AllSortTypes(t *testing.T) {
 		{
 			Instance:    testInstanceT3Large,
 			Region:      "us-west-2",
-			RegionScore: intPtr(5),
+			RegionScore: new(5),
 			Range:       Range{Min: 10, Max: 15},
 			Savings:     30,
 			Price:       0.10,
@@ -255,7 +257,7 @@ func TestSortAdvices_AllSortTypes(t *testing.T) {
 		{
 			Instance:    testInstanceT3Medium,
 			Region:      "us-east-1",
-			RegionScore: intPtr(8),
+			RegionScore: new(8),
 			Range:       Range{Min: 5, Max: 10},
 			Savings:     50,
 			Price:       0.05,
@@ -295,6 +297,50 @@ func TestSortAdvices_AllSortTypes(t *testing.T) {
 				assert.Equal(t, "us-west-2", result[1].Region, "us-west-2 should come after us-east-1")
 			},
 		},
+		{
+			name:     "sort_by_range_lowest_interruption_first",
+			sortBy:   SortByRange,
+			sortDesc: false,
+			checkFn: func(t *testing.T, result []Advice) {
+				assert.Equal(t, 5, result[0].Range.Min, "lowest interruption range first")
+				assert.Equal(t, 10, result[1].Range.Min)
+			},
+		},
+		{
+			name:     "sort_by_range_descending",
+			sortBy:   SortByRange,
+			sortDesc: true,
+			checkFn: func(t *testing.T, result []Advice) {
+				assert.Equal(t, 10, result[0].Range.Min, "highest interruption range first when reversed")
+			},
+		},
+		{
+			name:     "sort_by_instance_alphabetical",
+			sortBy:   SortByInstance,
+			sortDesc: false,
+			checkFn: func(t *testing.T, result []Advice) {
+				assert.Equal(t, testInstanceT3Large, result[0].Instance, "t3.large sorts before t3.medium")
+				assert.Equal(t, testInstanceT3Medium, result[1].Instance)
+			},
+		},
+		{
+			name:     "sort_by_price_cheapest_first",
+			sortBy:   SortByPrice,
+			sortDesc: false,
+			checkFn: func(t *testing.T, result []Advice) {
+				assert.InDelta(t, 0.05, result[0].Price, 1e-9, "cheapest first")
+				assert.InDelta(t, 0.10, result[1].Price, 1e-9)
+			},
+		},
+		{
+			name:     "sort_by_savings_highest_first",
+			sortBy:   SortBySavings,
+			sortDesc: true,
+			checkFn: func(t *testing.T, result []Advice) {
+				assert.Equal(t, 50, result[0].Savings, "largest savings first")
+				assert.Equal(t, 30, result[1].Savings)
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -324,9 +370,9 @@ func BenchmarkByScore_Sort(b *testing.B) {
 		b.Run(fmt.Sprintf("size_%d", size), func(b *testing.B) {
 			// Create test data
 			advices := make([]Advice, size)
-			for i := 0; i < size; i++ {
+			for i := range size {
 				score := (i % 10) + 1 // Scores 1-10
-				advices[i] = createAdvice(fmt.Sprintf("instance-%d", i), intPtr(score))
+				advices[i] = createAdvice(fmt.Sprintf("instance-%d", i), new(score))
 			}
 
 			b.ResetTimer()
@@ -348,7 +394,7 @@ func BenchmarkByScore_SortWithNils(b *testing.B) {
 
 	// Create test data with mixed nil and valid scores
 	advices := make([]Advice, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		var score *int
 		if i%3 != 0 { // 2/3 have scores, 1/3 are nil
 			scoreVal := (i % 10) + 1
@@ -373,9 +419,9 @@ func BenchmarkFilterByMinScore(b *testing.B) {
 
 	// Create test data
 	advices := make([]Advice, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		score := (i % 10) + 1 // Scores 1-10
-		advices[i] = createAdvice(fmt.Sprintf("instance-%d", i), intPtr(score))
+		advices[i] = createAdvice(fmt.Sprintf("instance-%d", i), new(score))
 	}
 
 	b.ResetTimer()
@@ -511,6 +557,61 @@ func TestFunctionalOptions(t *testing.T) {
 
 			// Run the test validation
 			tt.checkFn(t, cfg)
+		})
+	}
+}
+
+// --az stores scores in ZoneScores and leaves RegionScore nil, so a filter that
+// reads only RegionScore drops every row and `--az --min-score N` silently
+// returns nothing.
+func TestFilterByMinScoreHandlesZoneScores(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		advice   Advice
+		minScore int
+		wantKept bool
+	}{
+		{
+			name:     "region score above threshold",
+			advice:   Advice{Instance: "a", RegionScore: new(9)},
+			minScore: 5, wantKept: true,
+		},
+		{
+			name:     "region score below threshold",
+			advice:   Advice{Instance: "a", RegionScore: new(2)},
+			minScore: 5, wantKept: false,
+		},
+		{
+			name:     "az mode: a zone clears the threshold",
+			advice:   Advice{Instance: "a", ZoneScores: map[string]int{"use1-az1": 8}},
+			minScore: 5, wantKept: true,
+		},
+		{
+			name:     "az mode: best zone still below threshold",
+			advice:   Advice{Instance: "a", ZoneScores: map[string]int{"use1-az1": 2, "use1-az2": 3}},
+			minScore: 5, wantKept: false,
+		},
+		{
+			name:     "az mode: one of several zones clears it",
+			advice:   Advice{Instance: "a", ZoneScores: map[string]int{"use1-az1": 1, "use1-az2": 7}},
+			minScore: 5, wantKept: true,
+		},
+		{
+			name:     "unscored advice is dropped",
+			advice:   Advice{Instance: "a"},
+			minScore: 5, wantKept: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := filterByMinScore([]Advice{tc.advice}, tc.minScore)
+
+			assert.Len(t, got, map[bool]int{true: 1, false: 0}[tc.wantKept])
 		})
 	}
 }

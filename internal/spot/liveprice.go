@@ -18,6 +18,11 @@ const (
 	livePriceTimeout  = 10 * time.Second
 	maxPriceBatchSize = 50
 	livePriceMaxPages = 5
+
+	// EC2 DescribeSpotPriceHistory product descriptions. These are AWS API wire
+	// values, unlike the osLinux/osWindows names they are derived from.
+	productDescWindows = "Windows"
+	productDescLinux   = "Linux/UNIX"
 )
 
 // livePriceProvider fetches current spot prices from the EC2 DescribeSpotPriceHistory API
@@ -28,7 +33,22 @@ type livePriceProvider interface {
 
 // awsLivePriceProvider uses the real AWS EC2 API to fetch live spot prices.
 type awsLivePriceProvider struct {
-	cfg aws.Config
+	// newClient builds the region-scoped EC2 client. Injectable so the response
+	// handling below can be tested without reaching AWS; production leaves it nil
+	// and gets ec2.NewFromConfig.
+	newClient func(region string) ec2.DescribeSpotPriceHistoryAPIClient
+	cfg       aws.Config
+}
+
+// historyClient returns the injected client factory, or the real EC2 one.
+func (p *awsLivePriceProvider) historyClient(region string) ec2.DescribeSpotPriceHistoryAPIClient {
+	if p.newClient != nil {
+		return p.newClient(region)
+	}
+
+	return ec2.NewFromConfig(p.cfg, func(o *ec2.Options) {
+		o.Region = region
+	})
 }
 
 // newAWSLivePriceProvider creates a provider using the default AWS config.
@@ -50,9 +70,7 @@ func newAWSLivePriceProvider(ctx context.Context) (*awsLivePriceProvider, error)
 // fetchLivePrices calls DescribeSpotPriceHistory for the given instance types in a region.
 // It returns the most recent price per instance type.
 func (p *awsLivePriceProvider) fetchLivePrices(ctx context.Context, region string, instanceTypes []string, os string) (map[string]float64, error) {
-	client := ec2.NewFromConfig(p.cfg, func(o *ec2.Options) {
-		o.Region = region
-	})
+	client := p.historyClient(region)
 
 	productDesc := osToProductDescription(os)
 
@@ -85,9 +103,9 @@ func (p *awsLivePriceProvider) fetchLivePrices(ctx context.Context, region strin
 				continue // keep the first (most recent) price
 			}
 			if item.SpotPrice != nil {
-				var price float64
-				_, err := fmt.Sscanf(*item.SpotPrice, "%f", &price)
-				if err == nil && price > 0 {
+				// Same non-finite guard as the static feed: +Inf would satisfy
+				// a bare `> 0` check and then break JSON output.
+				if price, ok := parsePrice(*item.SpotPrice); ok && price > 0 {
 					prices[it] = price
 				}
 			}
@@ -117,10 +135,10 @@ func createLivePriceProvider() livePriceProvider {
 
 // osToProductDescription maps OS names to EC2 product description strings.
 func osToProductDescription(os string) string {
-	if strings.EqualFold(os, "windows") {
-		return "Windows"
+	if strings.EqualFold(os, osWindows) {
+		return productDescWindows
 	}
-	return "Linux/UNIX"
+	return productDescLinux
 }
 
 // enrichMissingPrices fills in zero-priced Advice entries using the live price API.
@@ -175,10 +193,7 @@ func enrichMissingPrices(ctx context.Context, advices []Advice, provider livePri
 
 			// Batch if needed
 			for start := 0; start < len(types); start += maxPriceBatchSize {
-				end := start + maxPriceBatchSize
-				if end > len(types) {
-					end = len(types)
-				}
+				end := min(start+maxPriceBatchSize, len(types))
 				batch := types[start:end]
 
 				prices, err := provider.fetchLivePrices(enrichCtx, r, batch, os)
