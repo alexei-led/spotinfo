@@ -79,11 +79,22 @@ const (
 	fieldTotal             = "total"
 )
 
-// Static values reported in the find_spot_instances response metadata.
+// Freshness reported alongside the data source. Derived from the source rather
+// than asserted: metadata claiming "current" while serving a months-old
+// embedded snapshot is worse than no metadata at all.
 const (
-	dataSourceEmbedded   = "embedded"
-	dataFreshnessCurrent = "current"
+	dataFreshnessLive     = "live"
+	dataFreshnessSnapshot = "embedded-snapshot"
 )
+
+// freshnessFor maps a spot data source onto the freshness it can honestly claim.
+func freshnessFor(source string) string {
+	if source == spot.DataSourceAWS {
+		return dataFreshnessLive
+	}
+
+	return dataFreshnessSnapshot
+}
 
 // FindSpotInstancesTool implements the find_spot_instances MCP tool
 type FindSpotInstancesTool struct {
@@ -145,7 +156,7 @@ func (t *FindSpotInstancesTool) Handle(ctx context.Context, req mcp.CallToolRequ
 
 	filteredAdvices := filterByInterruption(advices, params.maxInterruption)
 	limitedAdvices := applyLimit(filteredAdvices, params.limit)
-	response := buildResponse(limitedAdvices, startTime)
+	response := buildResponse(limitedAdvices, startTime, t.client.DataSource())
 
 	results, ok := response[fieldResults].([]map[string]any)
 	if !ok {
@@ -242,7 +253,7 @@ func applyLimit(advices []spot.Advice, limit int) []spot.Advice {
 }
 
 // buildResponse creates the response map from filtered advices
-func buildResponse(advices []spot.Advice, startTime time.Time) map[string]any {
+func buildResponse(advices []spot.Advice, startTime time.Time, dataSource string) map[string]any {
 	results := make([]map[string]any, len(advices))
 	regionsSearched := make(map[string]bool)
 
@@ -292,8 +303,8 @@ func buildResponse(advices []spot.Advice, startTime time.Time) map[string]any {
 			fieldTotalResults:    len(results),
 			fieldRegionsSearched: searchedRegions,
 			fieldQueryTimeMS:     time.Since(startTime).Milliseconds(),
-			fieldDataSource:      dataSourceEmbedded,
-			fieldDataFreshness:   dataFreshnessCurrent,
+			fieldDataSource:      dataSource,
+			fieldDataFreshness:   freshnessFor(dataSource),
 		},
 	}
 }

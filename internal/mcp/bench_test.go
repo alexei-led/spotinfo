@@ -67,7 +67,7 @@ func BenchmarkBuildResponse(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		response := buildResponse(advices, startTime)
+		response := buildResponse(advices, startTime, spot.DataSourceEmbedded)
 		_ = response // Prevent optimization
 	}
 }
@@ -503,14 +503,14 @@ func BenchmarkMemoryAllocations(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			response := buildResponse(testAdvices, startTime)
+			response := buildResponse(testAdvices, startTime, spot.DataSourceEmbedded)
 			_ = response
 		}
 	})
 
 	b.Run("JSONMarshaling", func(b *testing.B) {
 		startTime := time.Now()
-		response := buildResponse(testAdvices, startTime)
+		response := buildResponse(testAdvices, startTime, spot.DataSourceEmbedded)
 
 		b.ResetTimer()
 		b.ReportAllocs()

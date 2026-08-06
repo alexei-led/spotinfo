@@ -21,6 +21,11 @@ const (
 	// priceColumnWindows is the price feed's own name for the Windows column,
 	// distinct from the osWindows value users pass on the command line.
 	priceColumnWindows = "mswin"
+
+	// DataSourceAWS and DataSourceEmbedded report where the advice data came
+	// from, so callers can tell a live answer from the embedded snapshot.
+	DataSourceAWS      = "aws"
+	DataSourceEmbedded = "embedded"
 )
 
 // getSpotSavingsConfig holds configuration options for GetSpotSavingsWithOptions.
@@ -135,6 +140,7 @@ type Client struct {
 // advisorProvider provides access to spot advisor data (private interface close to consumer).
 type advisorProvider interface {
 	getRegions() []string
+	usedEmbeddedData() bool
 	getRegionAdvice(region, os string) (map[string]spotAdvice, error)
 	getInstanceType(instance string) (TypeInfo, error)
 	getRange(index int) (Range, error)
@@ -143,6 +149,7 @@ type advisorProvider interface {
 // pricingProvider provides access to spot pricing data (private interface close to consumer).
 type pricingProvider interface {
 	getSpotPrice(instance, region, os string) (float64, error)
+	usedEmbeddedData() bool
 }
 
 // scoreProvider provides access to spot placement scores (private interface close to consumer).
@@ -177,6 +184,18 @@ func NewWithProviders(advisor advisorProvider, pricing pricingProvider) *Client 
 		timeout:         DefaultTimeoutSeconds * time.Second,
 		useEmbedded:     false,
 	}
+}
+
+// DataSource reports whether the returned advice was built from live AWS feeds
+// or the embedded snapshot. Embedded wins if either feed fell back: the result
+// is only as fresh as its stalest input. Reported conservatively — anything not
+// positively known to be live counts as embedded.
+func (c *Client) DataSource() string {
+	if c.advisorProvider.usedEmbeddedData() || c.pricingProvider.usedEmbeddedData() {
+		return DataSourceEmbedded
+	}
+
+	return DataSourceAWS
 }
 
 // SetLivePriceProvider sets the live price provider (for testing).
@@ -328,6 +347,13 @@ func (p *defaultAdvisorProvider) loadData() error {
 	return p.err
 }
 
+// usedEmbeddedData reports whether the loaded advisor data came from the
+// embedded copy. Unloaded counts as embedded: never claim live data we do not
+// positively know we fetched.
+func (p *defaultAdvisorProvider) usedEmbeddedData() bool {
+	return p.data == nil || p.data.Embedded
+}
+
 func (p *defaultAdvisorProvider) getRegions() []string {
 	if err := p.loadData(); err != nil {
 		return nil
@@ -396,10 +422,13 @@ func (p *defaultAdvisorProvider) getRange(index int) (Range, error) {
 
 // defaultPricingProvider is the default implementation of pricingProvider.
 type defaultPricingProvider struct {
-	data        *spotPriceData
-	err         error
-	timeout     time.Duration
+	data    *spotPriceData
+	err     error
+	timeout time.Duration
+	// useEmbedded skips the network entirely; rawEmbedded records what the load
+	// actually used, which also covers falling back after a failed fetch.
 	useEmbedded bool
+	rawEmbedded bool
 	once        sync.Once
 }
 
@@ -420,9 +449,17 @@ func (p *defaultPricingProvider) loadData() error {
 			p.err = err
 			return
 		}
+
+		p.rawEmbedded = rawData.Embedded
 		p.data = convertRawPriceData(rawData)
 	})
 	return p.err
+}
+
+// usedEmbeddedData reports whether the loaded pricing data came from the
+// embedded copy. Unloaded counts as embedded, as above.
+func (p *defaultPricingProvider) usedEmbeddedData() bool {
+	return p.rawEmbedded
 }
 
 func (p *defaultPricingProvider) getSpotPrice(instance, region, os string) (float64, error) {

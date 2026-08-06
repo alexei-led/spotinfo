@@ -224,7 +224,7 @@ func TestBuildResponse(t *testing.T) {
 		},
 	}
 
-	response := buildResponse(testAdvices, startTime)
+	response := buildResponse(testAdvices, startTime, spot.DataSourceEmbedded)
 
 	// Check response structure
 	assert.Contains(t, response, "results")
@@ -539,6 +539,7 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockClient := newMockspotClient(t)
+			mockClient.EXPECT().DataSource().Return(spot.DataSourceEmbedded).Maybe()
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 			tool := NewFindSpotInstancesTool(mockClient, logger)
 
@@ -652,6 +653,7 @@ func TestListSpotRegionsTool_Handle(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockClient := newMockspotClient(t)
+			mockClient.EXPECT().DataSource().Return(spot.DataSourceEmbedded).Maybe()
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 			tool := NewListSpotRegionsTool(mockClient, logger)
 

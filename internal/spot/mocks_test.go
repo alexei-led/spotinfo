@@ -272,6 +272,50 @@ func (_c *mockadvisorProvider_getRegions_Call) RunAndReturn(run func() []string)
 	return _c
 }
 
+// usedEmbeddedData provides a mock function for the type mockadvisorProvider
+func (_mock *mockadvisorProvider) usedEmbeddedData() bool {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for usedEmbeddedData")
+	}
+
+	var r0 bool
+	if returnFunc, ok := ret.Get(0).(func() bool); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	return r0
+}
+
+// mockadvisorProvider_usedEmbeddedData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'usedEmbeddedData'
+type mockadvisorProvider_usedEmbeddedData_Call struct {
+	*mock.Call
+}
+
+// usedEmbeddedData is a helper method to define mock.On call
+func (_e *mockadvisorProvider_Expecter) usedEmbeddedData() *mockadvisorProvider_usedEmbeddedData_Call {
+	return &mockadvisorProvider_usedEmbeddedData_Call{Call: _e.mock.On("usedEmbeddedData")}
+}
+
+func (_c *mockadvisorProvider_usedEmbeddedData_Call) Run(run func()) *mockadvisorProvider_usedEmbeddedData_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *mockadvisorProvider_usedEmbeddedData_Call) Return(b bool) *mockadvisorProvider_usedEmbeddedData_Call {
+	_c.Call.Return(b)
+	return _c
+}
+
+func (_c *mockadvisorProvider_usedEmbeddedData_Call) RunAndReturn(run func() bool) *mockadvisorProvider_usedEmbeddedData_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // newMockpricingProvider creates a new instance of mockpricingProvider. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func newMockpricingProvider(t interface {
@@ -367,6 +411,50 @@ func (_c *mockpricingProvider_getSpotPrice_Call) Return(f float64, err error) *m
 }
 
 func (_c *mockpricingProvider_getSpotPrice_Call) RunAndReturn(run func(instance string, region string, os string) (float64, error)) *mockpricingProvider_getSpotPrice_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// usedEmbeddedData provides a mock function for the type mockpricingProvider
+func (_mock *mockpricingProvider) usedEmbeddedData() bool {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for usedEmbeddedData")
+	}
+
+	var r0 bool
+	if returnFunc, ok := ret.Get(0).(func() bool); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	return r0
+}
+
+// mockpricingProvider_usedEmbeddedData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'usedEmbeddedData'
+type mockpricingProvider_usedEmbeddedData_Call struct {
+	*mock.Call
+}
+
+// usedEmbeddedData is a helper method to define mock.On call
+func (_e *mockpricingProvider_Expecter) usedEmbeddedData() *mockpricingProvider_usedEmbeddedData_Call {
+	return &mockpricingProvider_usedEmbeddedData_Call{Call: _e.mock.On("usedEmbeddedData")}
+}
+
+func (_c *mockpricingProvider_usedEmbeddedData_Call) Run(run func()) *mockpricingProvider_usedEmbeddedData_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *mockpricingProvider_usedEmbeddedData_Call) Return(b bool) *mockpricingProvider_usedEmbeddedData_Call {
+	_c.Call.Return(b)
+	return _c
+}
+
+func (_c *mockpricingProvider_usedEmbeddedData_Call) RunAndReturn(run func() bool) *mockpricingProvider_usedEmbeddedData_Call {
 	_c.Call.Return(run)
 	return _c
 }

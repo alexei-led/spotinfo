@@ -251,7 +251,7 @@ func TestConcurrentResponseBuilding(t *testing.T) {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-			response := buildResponse(testAdvices, startTime)
+			response := buildResponse(testAdvices, startTime, spot.DataSourceEmbedded)
 			responses[index] = response
 		}(i)
 	}

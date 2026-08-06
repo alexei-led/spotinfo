@@ -25,6 +25,9 @@ const (
 // spotClient interface defined close to consumer for testing (following codebase patterns)
 type spotClient interface {
 	GetSpotSavings(ctx context.Context, opts ...spot.GetSpotSavingsOption) ([]spot.Advice, error)
+	// DataSource reports whether the advice came from live AWS feeds or the
+	// embedded snapshot, so the response can say which rather than guess.
+	DataSource() string
 }
 
 // Server wraps the MCP server with spotinfo-specific configuration
