@@ -33,7 +33,22 @@ type livePriceProvider interface {
 
 // awsLivePriceProvider uses the real AWS EC2 API to fetch live spot prices.
 type awsLivePriceProvider struct {
-	cfg aws.Config
+	// newClient builds the region-scoped EC2 client. Injectable so the response
+	// handling below can be tested without reaching AWS; production leaves it nil
+	// and gets ec2.NewFromConfig.
+	newClient func(region string) ec2.DescribeSpotPriceHistoryAPIClient
+	cfg       aws.Config
+}
+
+// historyClient returns the injected client factory, or the real EC2 one.
+func (p *awsLivePriceProvider) historyClient(region string) ec2.DescribeSpotPriceHistoryAPIClient {
+	if p.newClient != nil {
+		return p.newClient(region)
+	}
+
+	return ec2.NewFromConfig(p.cfg, func(o *ec2.Options) {
+		o.Region = region
+	})
 }
 
 // newAWSLivePriceProvider creates a provider using the default AWS config.
@@ -55,9 +70,7 @@ func newAWSLivePriceProvider(ctx context.Context) (*awsLivePriceProvider, error)
 // fetchLivePrices calls DescribeSpotPriceHistory for the given instance types in a region.
 // It returns the most recent price per instance type.
 func (p *awsLivePriceProvider) fetchLivePrices(ctx context.Context, region string, instanceTypes []string, os string) (map[string]float64, error) {
-	client := ec2.NewFromConfig(p.cfg, func(o *ec2.Options) {
-		o.Region = region
-	})
+	client := p.historyClient(region)
 
 	productDesc := osToProductDescription(os)
 

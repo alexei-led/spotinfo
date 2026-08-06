@@ -49,7 +49,22 @@ type awsAPIProvider interface {
 
 // awsScoreProvider implements awsAPIProvider using real AWS API calls.
 type awsScoreProvider struct {
-	cfg aws.Config
+	// newClient builds the region-scoped EC2 client. Injectable so the response
+	// handling below can be tested without reaching AWS; production leaves it nil
+	// and gets ec2.NewFromConfig.
+	newClient func(region string) ec2.GetSpotPlacementScoresAPIClient
+	cfg       aws.Config
+}
+
+// scoresClient returns the injected client factory, or the real EC2 one.
+func (p *awsScoreProvider) scoresClient(region string) ec2.GetSpotPlacementScoresAPIClient {
+	if p.newClient != nil {
+		return p.newClient(region)
+	}
+
+	return ec2.NewFromConfig(p.cfg, func(o *ec2.Options) {
+		o.Region = region
+	})
 }
 
 // CachedScoreData wraps scores with timestamp for freshness tracking.
@@ -149,10 +164,7 @@ func newAWSScoreProvider(ctx context.Context) (*awsScoreProvider, error) {
 
 // fetchScores implements awsAPIProvider for AWS API calls.
 func (p *awsScoreProvider) fetchScores(ctx context.Context, region string, instanceTypes []string, singleAZ bool) (map[string]int, error) {
-	// Create region-specific client
-	client := ec2.NewFromConfig(p.cfg, func(o *ec2.Options) {
-		o.Region = region
-	})
+	client := p.scoresClient(region)
 
 	input := &ec2.GetSpotPlacementScoresInput{
 		InstanceTypes:          instanceTypes,
@@ -186,14 +198,10 @@ func (p *awsScoreProvider) fetchScores(ctx context.Context, region string, insta
 		}
 	}
 
-	// Fill in any missing instance types with a default score
-	for _, instanceType := range instanceTypes {
-		if _, exists := scores[instanceType]; !exists {
-			// Use a moderate default score if AWS doesn't return data for this type
-			scores[instanceType] = 5 // Middle of 1-10 range
-		}
-	}
-
+	// Instance types AWS did not score are deliberately left absent rather than
+	// filled with a middle-of-the-range default. A synthesised 5 is
+	// indistinguishable from a real score and would misreport capacity for
+	// exactly the types AWS declined to rate.
 	return scores, nil
 }
 
