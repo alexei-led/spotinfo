@@ -83,21 +83,33 @@ jobs:
           git commit -m "chore: refresh embedded AWS spot data"
 
           # A long-lived PR branch is exactly where a maintainer pushes a review
-          # fix, so never blind-force over it. Fetch first (a shallow checkout has
-          # no remote-tracking ref, which is what --force-with-lease compares
-          # against), bail out if the tip is not ours, and keep the lease as a
-          # second line of defence against a race with a concurrent run.
-          git fetch origin "$branch" || true
+          # fix, so never blind-force over it.
+          #
+          # The refspec must be explicit: actions/checkout leaves a single-branch
+          # refspec, so `git fetch origin "$branch"` only moves FETCH_HEAD and
+          # never creates refs/remotes/origin/$branch — which would silently skip
+          # the author guard below and leave --force-with-lease no lease to check.
+          git fetch origin "+refs/heads/$branch:refs/remotes/origin/$branch" || true
 
-          if git rev-parse --verify -q "refs/remotes/origin/$branch" >/dev/null 2>&1; then
-            tip_author=$(git log -1 --format='%an' "refs/remotes/origin/$branch")
+          if remote_sha=$(git rev-parse --verify -q "refs/remotes/origin/$branch"); then
+            tip_author=$(git log -1 --format='%an' "$remote_sha")
             if [ "$tip_author" != "github-actions[bot]" ]; then
               echo "::warning::$branch tip is authored by '$tip_author', not this workflow. Refusing to overwrite it — merge or close the open PR first."
               exit 0
             fi
-          fi
 
-          git push --force-with-lease -u origin "HEAD:refs/heads/$branch"
+            # The author check above is the actual protection, and it is exact:
+            # nothing but this workflow's own commit is ever overwritten.
+            # --force-with-lease is not used as a second layer because pushing
+            # HEAD:refs/heads/<branch> gives git no tracking ref to derive the
+            # lease from — it fails as "stale info" or "non-fast-forward" even
+            # immediately after a successful fetch, which would break the refresh
+            # rather than protect anything.
+            git push --force origin "HEAD:refs/heads/$branch"
+          else
+            # First run: the branch does not exist remotely, nothing to clobber.
+            git push origin "HEAD:refs/heads/$branch"
+          fi
 
           state=$(gh pr view "$branch" --json state --jq .state 2>/dev/null || echo "")
           if [ "$state" = "OPEN" ]; then
