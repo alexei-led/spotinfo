@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -105,6 +106,11 @@ const (
 	flagMinScore     = "min-score"
 	flagAZ           = "az"
 	flagScoreTimeout = "score-timeout"
+	flagArchitecture = "architecture"
+	flagInstance     = "instance"
+	flagBudget       = "budget"
+	flagWorkload     = "workload"
+	flagTop          = "top"
 
 	// Sort order values
 	orderAsc  = "asc"
@@ -118,6 +124,9 @@ const (
 
 	// appName is the CLI application name
 	appName = "spotinfo"
+
+	recommendCommandName = "recommend"
+	regionFlagUsage      = "set one or more AWS regions, use \"all\" for all AWS regions"
 )
 
 //nolint:cyclop
@@ -197,6 +206,51 @@ func getMCPPort() string {
 
 type spotClient interface {
 	GetSpotSavings(ctx context.Context, opts ...spot.GetSpotSavingsOption) ([]spot.Advice, error)
+}
+
+const recommendationSchemaVersion = "spotinfo.recommend/v1"
+
+type recommendationRequest struct { //nolint:govet // JSON request field grouping is clearer than memory-layout optimization.
+	Architecture              spot.Architecture `json:"architecture"`
+	InstanceRegexp            string            `json:"instance_regexp"`
+	Regions                   []string          `json:"regions"`
+	OS                        string            `json:"os"`
+	MinimumVCPU               int               `json:"minimum_vcpu"`
+	MinimumMemoryGiB          int               `json:"minimum_memory_gib"`
+	MaximumUSDPerInstanceHour *float64          `json:"maximum_usd_per_instance_hour"`
+	Workload                  spot.Workload     `json:"workload"`
+	Top                       int               `json:"top"`
+}
+
+type recommendationReport struct {
+	SchemaVersion   string                `json:"schema_version"`
+	Request         recommendationRequest `json:"request"`
+	RankingPolicy   []string              `json:"ranking_policy"`
+	Recommendations []spot.Recommendation `json:"recommendations"`
+}
+
+func normalizedRegions(regions []string) []string {
+	unique := make(map[string]struct{}, len(regions))
+	for _, region := range regions {
+		unique[region] = struct{}{}
+	}
+	normalized := make([]string, 0, len(unique))
+	for region := range unique {
+		normalized = append(normalized, region)
+	}
+	sort.Strings(normalized)
+	return normalized
+}
+
+func recommendationRankingPolicy() []string {
+	return []string{
+		"price_usd_per_hour_ascending",
+		"interruption_frequency_ascending",
+		"excess_vcpu_ascending",
+		"excess_memory_gib_ascending",
+		"region_ascending",
+		"instance_ascending",
+	}
 }
 
 // execMainCmd is the testable version of mainCmd that accepts dependencies.
@@ -289,6 +343,114 @@ func execMainCmd(ctx *cli.Context, execCtx context.Context, client spotClient, o
 		printAdvicesTable(advices, true, printRegion, output)
 	default:
 		printAdvicesNumber(advices, printRegion, output)
+	}
+
+	return nil
+}
+
+// execRecommendCmd fetches candidate advice and renders only the dedicated,
+// deterministic recommendation DTO. Recommendation ranking itself lives in
+// internal/spot and performs no I/O.
+func execRecommendCmd(ctx *cli.Context, execCtx context.Context, client spotClient, output io.Writer) error { //nolint:gocyclo,cyclop // CLI validation and rendering have explicit error paths.
+	budget := ctx.Float64(flagBudget)
+	if ctx.IsSet(flagBudget) && budget <= 0 {
+		return fmt.Errorf("%w: budget must be a positive USD instance-hour price", spot.ErrInvalidRecommendationInput)
+	}
+	if ctx.IsSet(flagTop) && ctx.Int(flagTop) <= 0 {
+		return fmt.Errorf("%w: top must be positive", spot.ErrInvalidRecommendationInput)
+	}
+	outputFormat := ctx.String(flagOutput)
+	if outputFormat != outputTable && outputFormat != outputJSON {
+		return fmt.Errorf("%w: output must be table or json", spot.ErrInvalidRecommendationInput)
+	}
+
+	opts := spot.RecommendationOptions{
+		Architecture: spot.Architecture(ctx.String(flagArchitecture)),
+		Instance:     ctx.String(flagInstance),
+		OS:           ctx.String(flagOS),
+		CPU:          ctx.Int(flagCPU),
+		Memory:       ctx.Int(flagMemory),
+		Budget:       budget,
+		Workload:     spot.Workload(ctx.String(flagWorkload)),
+		Top:          ctx.Int(flagTop),
+	}
+	if err := spot.ValidateRecommendationOptions(&opts); err != nil {
+		return err
+	}
+
+	lookup, err := spot.LoadEmbeddedArchitectureLookup()
+	if err != nil {
+		return fmt.Errorf("load recommendation architecture data: %w", err)
+	}
+
+	regions := ctx.StringSlice(flagRegion)
+	queryOpts := []spot.GetSpotSavingsOption{
+		spot.WithRegions(regions),
+		spot.WithOS(opts.OS),
+		spot.WithCPU(opts.CPU),
+		spot.WithMemory(opts.Memory),
+	}
+	if opts.Budget > 0 {
+		queryOpts = append(queryOpts, spot.WithMaxPrice(opts.Budget))
+	}
+
+	advices, err := client.GetSpotSavings(execCtx, queryOpts...)
+	if err != nil {
+		return fmt.Errorf("failed to get recommendation candidates: %w", err)
+	}
+
+	recommendations, err := spot.Recommend(advices, &opts, lookup)
+	if err != nil {
+		return err
+	}
+
+	report := recommendationReport{
+		SchemaVersion: recommendationSchemaVersion,
+		Request: recommendationRequest{
+			Architecture:     opts.Architecture,
+			InstanceRegexp:   opts.Instance,
+			Regions:          normalizedRegions(regions),
+			OS:               opts.OS,
+			MinimumVCPU:      opts.CPU,
+			MinimumMemoryGiB: opts.Memory,
+			Workload:         opts.Workload,
+			Top:              opts.Top,
+		},
+		RankingPolicy:   recommendationRankingPolicy(),
+		Recommendations: recommendations,
+	}
+	if opts.Budget > 0 {
+		report.Request.MaximumUSDPerInstanceHour = &opts.Budget
+	}
+
+	switch outputFormat {
+	case outputTable:
+		return writeRecommendationTable(report.Recommendations, output)
+	case outputJSON:
+		encoded, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return fmt.Errorf("render recommendation JSON: %w", err)
+		}
+		if _, err := fmt.Fprintln(output, string(encoded)); err != nil {
+			return fmt.Errorf("write recommendation output: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func writeRecommendationTable(recommendations []spot.Recommendation, output io.Writer) error {
+	if _, err := fmt.Fprintln(output, "RANK  REGION       INSTANCE       ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR  SAVINGS  INTERRUPTION  WHY"); err != nil {
+		return fmt.Errorf("write recommendation output: %w", err)
+	}
+	for index, recommendation := range recommendations {
+		if _, err := fmt.Fprintf(output, "%4d  %-11s %-14s %-12s %4d  %10.1f  %8.4f  %6d%%  %-12s  %s\n",
+			index+1, recommendation.Region, recommendation.Instance, recommendation.Architecture,
+			recommendation.VCPU, recommendation.MemoryGiB, recommendation.PriceUSDPerHour,
+			recommendation.SavingsPercent, recommendation.InterruptionFrequency,
+			strings.Join(recommendation.RationaleCodes, ",")); err != nil {
+			return fmt.Errorf("write recommendation output: %w", err)
+		}
 	}
 
 	return nil
@@ -627,6 +789,29 @@ func handleSignals() context.Context {
 }
 
 //nolint:funlen // CLI main functions are inherently long due to comprehensive flag definitions
+func recommendCommand() *cli.Command {
+	return &cli.Command{
+		Name:  recommendCommandName,
+		Usage: "recommend individual Spot instances by architecture and workload",
+		Action: func(ctx *cli.Context) error {
+			return execRecommendCmd(ctx, mainCtx, spot.New(), os.Stdout)
+		},
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: flagArchitecture, Usage: "required instance architecture: x86_64|arm64", Required: true},
+			&cli.StringFlag{Name: flagInstance, Usage: "instance type RE2 regexp (combined with architecture)"},
+			&cli.StringSliceFlag{Name: flagRegion, Usage: regionFlagUsage, Value: cli.NewStringSlice("us-east-1")},
+			&cli.IntFlag{Name: flagCPU, Aliases: []string{"vcpu"}, Usage: "required minimum vCPU cores", Required: true},
+			&cli.IntFlag{Name: flagMemory, Aliases: []string{"memory-gib"}, Usage: "required minimum memory GiB", Required: true},
+			&cli.Float64Flag{Name: flagBudget, Usage: "positive maximum USD per candidate instance-hour"},
+			&cli.StringFlag{Name: flagOS, Usage: "instance operating system: linux|windows", Value: spot.OperatingSystemLinux},
+			&cli.StringFlag{Name: flagWorkload, Usage: "interruption cap: web|ci|batch", Value: string(spot.WorkloadWeb)},
+			&cli.IntFlag{Name: flagTop, Usage: "maximum recommendations to return", Value: spot.DefaultRecommendationTop},
+			&cli.StringFlag{Name: flagOutput, Usage: "format output: table|json", Value: outputTable},
+		},
+	}
+}
+
+//nolint:funlen // CLI flag declarations are intentionally kept together.
 func main() {
 	app := &cli.App{
 		Before: func(ctx *cli.Context) error {
@@ -675,7 +860,7 @@ func main() {
 			},
 			&cli.StringSliceFlag{
 				Name:  flagRegion,
-				Usage: "set one or more AWS regions, use \"all\" for all AWS regions",
+				Usage: regionFlagUsage,
 				Value: cli.NewStringSlice("us-east-1"),
 			},
 			&cli.StringFlag{
@@ -723,10 +908,11 @@ func main() {
 				Value: spot.DefaultScoreTimeoutSeconds,
 			},
 		},
-		Name:    appName,
-		Usage:   "explore AWS EC2 Spot instances",
-		Action:  mainCmd,
-		Version: Version,
+		Name:     appName,
+		Usage:    "explore AWS EC2 Spot instances",
+		Action:   mainCmd,
+		Commands: []*cli.Command{recommendCommand()},
+		Version:  Version,
 	}
 	cli.VersionPrinter = func(_ *cli.Context) {
 		fmt.Printf("spotinfo %s\n", Version)

@@ -56,6 +56,61 @@ spotinfo [global options]
 | `--help, -h` | Show help | `--help` |
 | `--version, -v` | Print version | `--version` |
 
+## Recommendations
+
+`recommend` is an additive subcommand; root invocation and root `--type` behavior are unchanged. It recommends **individual instances**, not fleets or placement plans. Positive `--cpu` and `--memory` requests are required so results can be right-sized.
+
+```bash
+spotinfo recommend --architecture x86_64|arm64 --cpu N --memory N [flags]
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--architecture x86_64|arm64` | Required processor architecture | none |
+| `--instance REGEXP` | RE2 instance-type filter; combined with architecture using AND semantics | none |
+| `--region REGION` | One or more regions; `all` uses all Advisor regions | `us-east-1` |
+| `--cpu N`, `--vcpu N` | Required positive minimum vCPU count | none |
+| `--memory N`, `--memory-gib N` | Required positive minimum GiB of memory | none |
+| `--budget USD` | Positive maximum USD per candidate instance-hour | none |
+| `--os linux|windows` | Operating-system price stream | `linux` |
+| `--workload web|ci|batch` | Interruption-frequency cap | `web` |
+| `--top N` | Maximum candidates returned | `3` |
+| `--output table|json` | Recommendation output format | `table` |
+
+`web` accepts only the Advisor `<5%` label. `ci` accepts Advisor labels through `10-15%` (at most 15%), and `batch` accepts labels through `15-20%` (at most 20%). `--cpu` and `--memory` are inclusive minima, as is `--budget`; a supplied budget must be greater than zero. Prices of zero, missing prices, and non-finite prices are never candidates; existing live-price enrichment can provide a usable positive price. `--os` selects Linux or Windows pricing before ranking.
+
+The default `table` output is concise and has rank, region, instance, architecture, vCPU, memory GiB, USD/hour, savings, interruption, and `WHY`. `WHY` is a comma-separated list of deterministic rationale codes such as `ARCHITECTURE_MATCH`, `KNOWN_POSITIVE_PRICE`, `VCPU_MINIMUM_MET`, `MEMORY_MINIMUM_MET`, `WORKLOAD_CI_CAP_MET`, and, when applicable, `BUDGET_CAP_MET`. These are facts and policy checks, not generated prose.
+
+Candidates rank by lower USD/hour, lower interruption cap, lower excess vCPU, lower excess memory GiB, region, then instance type. Savings is displayed but is never a ranking input. Invalid input and a valid request with no candidates are errors.
+
+```bash
+spotinfo recommend --architecture arm64 --instance '^m[678]g\.' --vcpu 2 --memory-gib 8 \
+  --budget 0.20 --workload ci --region us-east-1 --top 2
+```
+
+Use `--output json` for a deterministic versioned wrapper rather than a bare array. The normalized request has explicit units, sorted regions, OS, workload, and top; `recommendations` is always an array.
+
+```json
+{
+  "schema_version": "spotinfo.recommend/v1",
+  "request": {
+    "architecture": "arm64",
+    "instance_regexp": "^m[678]g\\.",
+    "regions": ["us-east-1"],
+    "os": "linux",
+    "minimum_vcpu": 2,
+    "minimum_memory_gib": 8,
+    "maximum_usd_per_instance_hour": 0.2,
+    "workload": "ci",
+    "top": 2
+  },
+  "ranking_policy": ["price_usd_per_hour_ascending", "interruption_frequency_ascending", "excess_vcpu_ascending", "excess_memory_gib_ascending", "region_ascending", "instance_ascending"],
+  "recommendations": [{"instance": "m7g.large", "rationale_codes": ["ARCHITECTURE_MATCH", "BUDGET_CAP_MET", "KNOWN_POSITIVE_PRICE", "MEMORY_MINIMUM_MET", "VCPU_MINIMUM_MET", "WORKLOAD_CI_CAP_MET"]}]
+}
+```
+
+v1 does not use placement scores, GPUs, ML, Markdown output, composite scores, or savings ranking. Architecture comes from a committed reviewed family snapshot; unknown families fail closed and no runtime AWS metadata call is made. See [Data Sources](data-sources.md) for provenance and freshness limitations.
+
 ## Output Formats
 
 ### Table Format (Default)
