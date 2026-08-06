@@ -675,3 +675,27 @@ func TestListSpotRegionsTool_Handle(t *testing.T) {
 		})
 	}
 }
+
+// Freshness is derived from the data source, never asserted. Metadata claiming
+// "current" while serving a months-old embedded snapshot is worse than none.
+func TestFreshnessFor(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{name: "live AWS data", source: spot.DataSourceAWS, want: dataFreshnessLive},
+		{name: "embedded snapshot", source: spot.DataSourceEmbedded, want: dataFreshnessSnapshot},
+		{name: "unknown source is not claimed as live", source: "something-else", want: dataFreshnessSnapshot},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, freshnessFor(tc.source))
+		})
+	}
+}
