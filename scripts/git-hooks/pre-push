@@ -36,7 +36,12 @@ go test ./... || status=1
 if command -v gitleaks >/dev/null 2>&1; then
 	gitleaks git --redact --no-banner || status=1
 else
-	note "gitleaks not installed, skipping secret scan (brew install gitleaks)"
+	# Fail closed. gofmt/golangci-lint skipping is recoverable — CI re-runs them.
+	# A skipped secret scan is not: the push proceeds unscanned and a leaked
+	# credential is already published by the time anyone notices.
+	note "gitleaks is required but not installed: brew install gitleaks"
+	note "to bypass deliberately: git push --no-verify"
+	status=1
 fi
 
 exit "$status"
