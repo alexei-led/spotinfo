@@ -299,9 +299,10 @@ func (sc *scoreCache) enrichWithScores(ctx context.Context, advices []Advice,
 		go func(r string, advs []*Advice) {
 			defer wg.Done()
 
-			// Collect unique instance types for this region
+			// Collect the unique instance types to ask AWS about. A per-type
+			// index is no longer kept: AWS scores the request as a whole, so
+			// every returned score applies to every advice in this region.
 			instanceTypeSet := make(map[string]bool)
-			typeToAdvices := make(map[string][]*Advice)
 
 			for _, adv := range advs {
 				instanceType := adv.InstanceType
@@ -309,10 +310,7 @@ func (sc *scoreCache) enrichWithScores(ctx context.Context, advices []Advice,
 					instanceType = adv.Instance
 				}
 
-				if !instanceTypeSet[instanceType] {
-					instanceTypeSet[instanceType] = true
-				}
-				typeToAdvices[instanceType] = append(typeToAdvices[instanceType], adv)
+				instanceTypeSet[instanceType] = true
 			}
 
 			// Convert set to slice

@@ -51,6 +51,18 @@ func withDefaultTimeout(ctx context.Context) (context.Context, context.CancelFun
 	return context.WithTimeout(ctx, httpTimeout)
 }
 
+// fetchTimeout resolves a provider's configured timeout. A zero or negative
+// value means "unset" and yields the default: context.WithTimeout(ctx, 0)
+// produces an already-expired context, which would silently skip every fetch
+// and serve embedded data forever instead of erroring.
+func fetchTimeout(configured time.Duration) time.Duration {
+	if configured <= 0 {
+		return httpTimeout
+	}
+
+	return configured
+}
+
 // minRange maps interruption range max values to min values
 var minRange = map[int]int{5: 0, 11: 6, 16: 12, 22: 17, 100: 23} //nolint:mnd
 

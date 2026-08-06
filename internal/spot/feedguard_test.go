@@ -2,6 +2,7 @@ package spot
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -118,4 +119,30 @@ func TestEmbeddedPricingCoversPost2024Families(t *testing.T) {
 	assert.NotEmpty(t, priced,
 		"no post-2024 instance family has a non-zero price in %s — the embedded price feed is stale (checked %v)",
 		testRegionUSEast1, post2024)
+}
+
+// A zero timeout means "unset", not "expire immediately". context.WithTimeout
+// with a zero duration yields an already-expired context, which would skip every
+// fetch and silently serve embedded data forever instead of erroring.
+func TestFetchTimeoutTreatsZeroAsUnset(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		configured time.Duration
+		want       time.Duration
+	}{
+		{name: "zero falls back to the default", configured: 0, want: httpTimeout},
+		{name: "negative falls back to the default", configured: -time.Second, want: httpTimeout},
+		{name: "an explicit short timeout is honoured", configured: time.Millisecond, want: time.Millisecond},
+		{name: "an explicit long timeout is honoured", configured: time.Minute, want: time.Minute},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, fetchTimeout(tc.configured))
+		})
+	}
 }

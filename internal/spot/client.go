@@ -319,7 +319,7 @@ func newDefaultAdvisorProvider(timeout time.Duration) *defaultAdvisorProvider {
 
 func (p *defaultAdvisorProvider) loadData() error {
 	p.once.Do(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
+		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout(p.timeout))
 		defer cancel()
 
 		p.data, p.err = fetchAdvisorData(ctx)
@@ -412,7 +412,7 @@ func newDefaultPricingProvider(timeout time.Duration, useEmbedded bool) *default
 
 func (p *defaultPricingProvider) loadData() error {
 	p.once.Do(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
+		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout(p.timeout))
 		defer cancel()
 
 		rawData, err := fetchPricingData(ctx, p.useEmbedded)
