@@ -29,7 +29,9 @@ const (
 	// because it is still served as application/x-javascript and may be re-wrapped.
 	responsePrefix = "callback("
 	responseSuffix = ");"
-	httpTimeout    = 5 * time.Second
+	// httpTimeout bounds a fetch only when the caller supplied no deadline of
+	// its own. Providers pass their configured timeout via the context.
+	httpTimeout = 5 * time.Second
 )
 
 // Sentinel errors for feed payloads that parse but carry no usable data.
@@ -38,12 +40,26 @@ var (
 	errNoPricingRegions = errors.New("pricing data contained no regions")
 )
 
+// withDefaultTimeout bounds a context that carries no deadline. A caller's own
+// deadline wins, which is what makes the client's configured timeout effective —
+// it used to be stored and never read, so every fetch waited the hardcoded 5s.
+func withDefaultTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+
+	return context.WithTimeout(ctx, httpTimeout)
+}
+
 // minRange maps interruption range max values to min values
 var minRange = map[int]int{5: 0, 11: 6, 16: 12, 22: 17, 100: 23} //nolint:mnd
 
 // fetchAdvisorData retrieves spot advisor data from AWS or falls back to embedded data.
 func fetchAdvisorData(ctx context.Context) (*advisorData, error) {
-	client := &http.Client{Timeout: httpTimeout}
+	ctx, cancel := withDefaultTimeout(ctx)
+	defer cancel()
+
+	client := &http.Client{}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, spotAdvisorJSONURL, http.NoBody)
 	if err != nil {
@@ -120,7 +136,10 @@ func fetchPricingData(ctx context.Context, useEmbedded bool) (*rawPriceData, err
 		return loadEmbeddedPricingData()
 	}
 
-	client := &http.Client{Timeout: httpTimeout}
+	ctx, cancel := withDefaultTimeout(ctx)
+	defer cancel()
+
+	client := &http.Client{}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, spotPriceJSURL, http.NoBody)
 	if err != nil {

@@ -211,12 +211,16 @@ func BenchmarkHelperFunctions(b *testing.B) {
 	})
 }
 
-// BenchmarkToolHandlerComplete benchmarks complete tool handler flow with real client
+// BenchmarkToolHandlerComplete benchmarks the complete tool handler flow.
+//
+// Uses the embedded client, not spot.New(): the production client sends every
+// instance the static feed does not price to the live-price API, which stalls
+// for livePriceTimeout per call without AWS credentials and makes the numbers
+// measure network failure rather than handler work.
 func BenchmarkToolHandlerComplete(b *testing.B) {
-	// Use real client for benchmarking to measure realistic performance
-	realClient := spot.New()
+	client := newEmbeddedClient()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	tool := NewFindSpotInstancesTool(realClient, logger)
+	tool := NewFindSpotInstancesTool(client, logger)
 
 	req := mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
@@ -308,7 +312,7 @@ func BenchmarkColdVsWarmStartup(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			// Create fresh client each time to force cold start
-			client := spot.New()
+			client := newEmbeddedClient()
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 			tool := NewFindSpotInstancesTool(client, logger)
 
@@ -331,7 +335,7 @@ func BenchmarkColdVsWarmStartup(b *testing.B) {
 
 	b.Run("WarmStart", func(b *testing.B) {
 		// Pre-warm the client
-		client := spot.New()
+		client := newEmbeddedClient()
 		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 		tool := NewFindSpotInstancesTool(client, logger)
 
@@ -360,7 +364,7 @@ func BenchmarkColdVsWarmStartup(b *testing.B) {
 
 // BenchmarkDatasetSizes benchmarks performance with different dataset sizes
 func BenchmarkDatasetSizes(b *testing.B) {
-	client := spot.New()
+	client := newEmbeddedClient()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	tool := NewFindSpotInstancesTool(client, logger)
 
@@ -429,7 +433,7 @@ func BenchmarkDatasetSizes(b *testing.B) {
 
 // BenchmarkConcurrentThroughput benchmarks concurrent throughput
 func BenchmarkConcurrentThroughput(b *testing.B) {
-	client := spot.New()
+	client := newEmbeddedClient()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	tool := NewFindSpotInstancesTool(client, logger)
 
