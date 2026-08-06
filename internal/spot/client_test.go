@@ -576,3 +576,85 @@ func TestNewWithOptions_EmbeddedDataMode(t *testing.T) {
 		})
 	}
 }
+
+// A zero price means "unknown" everywhere in this package — the instance is
+// absent from the static feed and live enrichment could not fill it. Spot
+// prices are never actually zero, so an unknown price cannot be asserted to sit
+// under a ceiling. Newly visible because AWS omits all me-* regions from the
+// price feed, where every instance is unpriced.
+func TestGetSpotSavingsMaxPriceExcludesUnpricedInstances(t *testing.T) {
+	t.Parallel()
+
+	const region = "us-east-1"
+
+	tests := []struct {
+		name     string
+		price    float64
+		priceErr error
+		maxPrice float64
+		wantKept bool
+	}{
+		{name: "priced under the ceiling is kept", price: 0.02, maxPrice: 0.05, wantKept: true},
+		{name: "priced over the ceiling is dropped", price: 0.20, maxPrice: 0.05, wantKept: false},
+		{name: "price exactly at the ceiling is kept", price: 0.05, maxPrice: 0.05, wantKept: true},
+		{name: "zero price is unknown, not free", price: 0, maxPrice: 0.05, wantKept: false},
+		{name: "lookup failure is unknown, not free", priceErr: errors.New("no pricing data"), maxPrice: 0.05, wantKept: false},
+		{name: "no ceiling keeps an unpriced instance", price: 0, maxPrice: 0, wantKept: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			advisor := newMockadvisorProvider(t)
+			pricing := newMockpricingProvider(t)
+
+			advisor.EXPECT().getRegionAdvice(region, osLinux).
+				Return(map[string]spotAdvice{testInstanceT2Micro: {Range: 0, Savings: 50}}, nil).Once()
+			advisor.EXPECT().getInstanceType(testInstanceT2Micro).
+				Return(TypeInfo{Cores: 1, RAM: 1.0}, nil).Once()
+			// Maybe: an over-ceiling price short-circuits before the range lookup.
+			advisor.EXPECT().getRange(0).Return(Range{Label: "<5%", Min: 0, Max: 5}, nil).Maybe()
+			pricing.EXPECT().getSpotPrice(testInstanceT2Micro, region, osLinux).
+				Return(tc.price, tc.priceErr).Once()
+
+			client := NewWithProviders(advisor, pricing)
+			client.SetLivePriceProvider(nil)
+
+			got, err := client.GetSpotSavings(t.Context(),
+				WithRegions([]string{region}),
+				WithMaxPrice(tc.maxPrice))
+
+			require.NoError(t, err)
+
+			if tc.wantKept {
+				assert.Len(t, got, 1)
+			} else {
+				assert.Empty(t, got, "an instance whose price is unknown must not satisfy --price")
+			}
+		})
+	}
+}
+
+func TestDedupePreservesOrderAndDropsRepeats(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{name: "nil", in: nil, want: []string{}},
+		{name: "no repeats keeps order", in: []string{"b", "a", "c"}, want: []string{"b", "a", "c"}},
+		{name: "repeats collapse to the first", in: []string{"a", "b", "a", "a"}, want: []string{"a", "b"}},
+		{name: "all identical", in: []string{"x", "x", "x"}, want: []string{"x"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, dedupe(tc.in))
+		})
+	}
+}
