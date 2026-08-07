@@ -20,6 +20,13 @@
 - **Cross-region comparison** with `--region all` support
 - **Flexible sorting** by price, reliability, savings, or placement scores
 
+### 💡 **Single-Instance Recommendations**
+- `recommend` requires an `x86_64` or `arm64` architecture plus positive vCPU and memory minima
+- Workload interruption caps are conservative and explicit: web `<5%`, CI `<=15%`, batch `<=20%`
+- The default concise table includes deterministic rationale codes; `--output json` emits a versioned request-and-results wrapper
+- Ranking uses price, interruption, and right-sizing excess; savings is displayed but never used to rank
+- Repeated recommendation regions are deduplicated; `all` cannot be mixed with explicit regions
+
 ### 📊 **Multiple Output Formats**
 - **Visual formats**: Table with emoji indicators, plain text
 - **Data formats**: JSON, CSV for automation and scripting
@@ -68,6 +75,12 @@ spotinfo --type "t3.*" --with-score --az --region "us-east-1" --region "eu-west-
 
 # Export data for automation
 spotinfo --type "c5.*" --with-score --min-score 7 --output json
+
+# Get low-interruption Arm single-instance candidates (default table output)
+spotinfo recommend --architecture arm64 --workload web --vcpu 2 --memory-gib 8 --region us-east-1
+
+# Emit the versioned JSON report, using Windows Spot prices
+spotinfo recommend --architecture x86_64 --cpu 2 --memory 8 --os windows --output json
 ```
 
 ### New Placement Score Flags
@@ -156,6 +169,7 @@ Credentials are loaded via the [AWS SDK default credential chain](https://docs.a
 make build
 
 # Update embedded data (usually unnecessary — a weekly workflow opens a PR for this)
+# verify-data also checks reviewed architecture snapshot metadata and Advisor-family coverage.
 make update-data update-price verify-data
 
 # Docker build
