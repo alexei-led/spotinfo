@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alexei-led/spotinfo/schemas/provider-source-contract.schema.json",
+  "title": "Provider source approval contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "provider", "review_status", "reviewer", "reviewed_at", "sources", "terms", "expected_fields", "support", "thresholds", "parser_version", "update_cadence", "no_go_conditions"],
+  "properties": {
+    "schema_version": {"const": "spotinfo.source-contract/v1"},
+    "provider": {"type": "string", "enum": ["gcp", "azure"]},
+    "review_status": {"const": "approved"},
+    "reviewer": {"type": "string", "minLength": 1},
+    "reviewed_at": {"type": "string", "format": "date"},
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["url", "source_type", "data_kinds"],
+        "properties": {
+          "url": {"type": "string", "format": "uri"},
+          "source_type": {"type": "string", "enum": ["documented-rest-api", "official-server-rendered-html"]},
+          "data_kinds": {"type": "array", "items": {"type": "string", "enum": ["spot-price", "on-demand-price", "machine-spec", "architecture"]}, "minItems": 1, "uniqueItems": true}
+        }
+      }
+    },
+    "terms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["redistribution_decision", "evidence_url", "notes"],
+      "properties": {
+        "redistribution_decision": {"const": "approved"},
+        "evidence_url": {"type": "string", "format": "uri"},
+        "notes": {"type": "string", "minLength": 1}
+      }
+    },
+    "expected_fields": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+    "support": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operating_systems", "architectures", "price_classes", "risk_status", "regions", "machine_series"],
+      "properties": {
+        "operating_systems": {"type": "array", "items": {"type": "string", "enum": ["linux", "windows"]}, "minItems": 1, "uniqueItems": true},
+        "architectures": {"type": "array", "items": {"type": "string", "enum": ["x86_64", "arm64"]}, "minItems": 1, "uniqueItems": true},
+        "price_classes": {"type": "array", "items": {"type": "string", "enum": ["spot", "on-demand"]}, "minItems": 2, "uniqueItems": true, "allOf": [{"contains": {"const": "spot"}}, {"contains": {"const": "on-demand"}}]},
+        "risk_status": {"const": "unavailable"},
+        "regions": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+        "machine_series": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true}
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min_regions", "min_machines", "max_compressed_bytes", "max_fractional_digits"],
+      "properties": {
+        "min_regions": {"type": "integer", "minimum": 1},
+        "min_machines": {"type": "integer", "minimum": 1},
+        "max_compressed_bytes": {"type": "integer", "minimum": 1},
+        "max_fractional_digits": {"type": "integer", "minimum": 0, "maximum": 9}
+      }
+    },
+    "parser_version": {"type": "string", "minLength": 1},
+    "update_cadence": {"type": "string", "enum": ["weekly"]},
+    "no_go_conditions": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true}
+  }
+}
