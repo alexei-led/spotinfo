@@ -266,13 +266,32 @@ Manual checks:
 - Confirm that no AWS SDK type appears in `internal/cloud`.
 - Review fixed-point precision against the maximum fractional precision observed in AWS, GCP, and Azure fixtures.
 
-- [ ] Record AWS root and recommendation output hashes plus the normalized MCP v1 input and response fixtures.
-- [ ] Add neutral domain types with explicit units, currencies, source metadata, risk, and placement observations.
-- [ ] Add the AWS adapter without removing legacy AWS types or methods.
-- [ ] Add `internal/cloud/dependencies_test.go` and prove its forbidden-import case fails before the implementation passes.
-- [ ] Update `.archfit.yaml` module metadata and layer intent.
-- [ ] Run focused tests, race tests, vet, and the architecture gate.
-- [ ] Commit the #35 slice before starting Task 2.
+- [x] Record AWS root and recommendation output hashes plus the normalized MCP v1 input and response fixtures.
+- [x] Add neutral domain types with explicit units, currencies, source metadata, risk, and placement observations.
+- [x] Add the AWS adapter without removing legacy AWS types or methods.
+- [x] Add `internal/cloud/dependencies_test.go` and prove its forbidden-import case fails before the implementation passes.
+- [x] Update `.archfit.yaml` module metadata and layer intent.
+- [x] Run focused tests, race tests, vet, and the architecture gate.
+- [x] Commit the #35 slice before starting Task 2.
+
+Task 1 results:
+
+- Fixed-point scale confirmed against the committed AWS price feed: 42,886 price
+  strings, maximum 4 fractional digits, so nano-USD (9) stores every observed
+  amount exactly. GCP and Azure precision is re-checked in Task 5.
+- Goldens are the recorded contract: `cmd/spotinfo/testdata/aws-root-v1.json`,
+  `aws-recommend-v1.json`, `internal/mcp/testdata/find-spot-instances-v1-input-schema.json`,
+  and `find-spot-instances-v1-response.json`. All four come from fixed advice via
+  mocked clients, never from the embedded feeds, so a weekly data refresh cannot
+  rewrite them. Regenerate with `UPDATE_GOLDEN=1`.
+- Archfit after the config change: `verdict pass`, 0 gate findings, `config-quality`
+  warnings gone, `no-layer-back-edges` still `warn`. Critical finding
+  `bac6b2e4f1019c672ac2eec8dc470b31` is unchanged (`model × cross_module_same_owner`,
+  same id, still critical) — Task 4's target was not hidden by metadata. Two new
+  medium advisories cover the expected `providers_aws -> cloud` and
+  `providers_aws -> spot` edges.
+- `owner` is uniform (`spotinfo`) across modules because the repository has one
+  maintainer; inventing a team split would have altered Balanced-Coupling distance.
 
 ### Task 2: Add manifest-backed embedded snapshots and parser gates
 
