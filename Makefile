@@ -48,7 +48,7 @@ export CGO_ENABLED=0
 
 .PHONY: all build test test-verbose test-race test-coverage lint fmt clean help version
 .PHONY: update-data update-price refresh-manifests verify-data check-deps setup-tools release mocks hooks
-.PHONY: verify-architecture-rules
+.PHONY: verify-architecture-rules verify-architecture
 
 # Default target
 all: build
@@ -135,13 +135,29 @@ verify-data:
 
 # Package-boundary gate. Checks the declared layer direction and module
 # metadata in .archfit.yaml; it is not a data-correctness or test substitute.
-# Balanced-Coupling advisories stay warnings here — cmd/archfitcheck turns
-# Critical and High findings into a failure once the current critical edge is
-# fixed (see the plan's Task 4).
+# Balanced-Coupling advisories are warnings here, which is why it is only half
+# the gate — verify-architecture adds the severity check below.
 verify-architecture-rules:
 	@echo "Verifying architecture rules..."
 	@command -v archfit > /dev/null 2>&1 || go install github.com/alexei-led/archfit/cmd/archfit@$(ARCHFIT_VERSION)
 	@archfit --gate --config .archfit.yaml --full --format json
+
+# The full architecture gate: package boundaries, then finding severity.
+# archfit's own verdict is "pass" while a Critical Balanced-Coupling advisory
+# stands, so cmd/archfitcheck reads the analysis and fails on any open Critical
+# or High finding. The report goes through a temporary file rather than a pipe:
+# a pipeline reports the exit status of the last command, which would swallow an
+# archfit failure and feed the checker an empty document.
+verify-architecture: verify-architecture-rules
+	@echo "Verifying architecture findings..."
+	@report=$$(mktemp); \
+	archfit analyze --config .archfit.yaml --json > $$report; \
+	status=$$?; \
+	if [ $$status -ne 0 ]; then rm -f $$report; echo "archfit analyze failed"; exit $$status; fi; \
+	go run ./cmd/archfitcheck < $$report; \
+	status=$$?; \
+	rm -f $$report; \
+	exit $$status
 
 # Development tools
 setup-tools:
@@ -203,6 +219,7 @@ help:
 	@echo "  refresh-manifests Rewrite snapshot manifest hashes for refreshed data"
 	@echo "  verify-data   Verify embedded data, manifests and architecture coverage"
 	@echo "  verify-architecture-rules Verify package boundaries with archfit"
+	@echo "  verify-architecture Verify boundaries and fail on Critical/High findings"
 	@echo "  mocks         Regenerate testify mocks from .mockery.yaml"
 	@echo "  release       Build binaries for all platforms"
 	@echo "  clean         Remove build artifacts"

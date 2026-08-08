@@ -12,9 +12,9 @@ import (
 // TestStdioTransport_ContextCancellation tests that stdio transport respects context cancellation
 func TestStdioTransport_ContextCancellation(t *testing.T) {
 	cfg := Config{
-		Version:    "1.0.0",
-		Logger:     slog.Default(),
-		SpotClient: newEmbeddedClient(),
+		Version:   "1.0.0",
+		Logger:    slog.Default(),
+		Providers: newEmbeddedRegistry(),
 	}
 
 	server, err := NewServer(cfg)

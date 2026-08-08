@@ -13,6 +13,11 @@ var ErrUnsupportedCapability = errors.New("unsupported capability")
 // state is never silently replaced by another provider or by zero prices.
 var ErrDataUnavailable = errors.New("data unavailable")
 
+// ErrNoCandidates reports a valid request that a provider answered with no
+// matching machine. It is distinct from ErrDataUnavailable: the data was
+// served, it simply contains nothing that satisfies the constraints.
+var ErrNoCandidates = errors.New("no candidates")
+
 // ErrorCode is the stable machine-readable classification a consumer reports
 // for a failure. The values are the contract every spotinfo surface shares.
 type ErrorCode string
@@ -24,6 +29,8 @@ const (
 	CodeUnsupportedCapability ErrorCode = "UNSUPPORTED_CAPABILITY"
 	// CodeDataUnavailable reports a recognised provider with unusable data.
 	CodeDataUnavailable ErrorCode = "DATA_UNAVAILABLE"
+	// CodeNoCandidates reports a served request with no matching machine.
+	CodeNoCandidates ErrorCode = "NO_CANDIDATES"
 	// CodeInternal reports an unclassified failure.
 	CodeInternal ErrorCode = "INTERNAL"
 )
@@ -41,6 +48,8 @@ func CodeOf(err error) ErrorCode {
 		return CodeUnsupportedCapability
 	case errors.Is(err, ErrDataUnavailable):
 		return CodeDataUnavailable
+	case errors.Is(err, ErrNoCandidates):
+		return CodeNoCandidates
 	default:
 		return CodeInternal
 	}

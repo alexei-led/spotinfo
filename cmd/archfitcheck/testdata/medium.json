@@ -1,0 +1,29 @@
+{
+  "schema_version": "1",
+  "verdict": "pass",
+  "summary": {
+    "gate_findings": 0,
+    "warnings": 1
+  },
+  "findings": [
+    {
+      "id": "afce8fd54153d859cf8d3c61085a6a4e",
+      "kind": "advisory",
+      "rule_id": "bc/imbalanced_coupling",
+      "status": "new",
+      "severity": "medium",
+      "edge": {
+        "from": {
+          "module": "cmd_spotinfo",
+          "path": "cmd/spotinfo/provider_flags.go"
+        },
+        "to": {
+          "module": "cloud",
+          "path": "internal/cloud"
+        },
+        "kind": "imports"
+      },
+      "why": "balanced coupling: functional integration strength -> medium severity"
+    }
+  ]
+}

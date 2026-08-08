@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 )
 
 // Capability names one optional provider ability. The vocabulary is fixed: a
@@ -107,6 +108,50 @@ func (c Capabilities) Require(request CapabilityRequest) error {
 	return nil
 }
 
+// SortKey names the observation a result is ordered by. An empty key leaves the
+// order to the provider.
+type SortKey string
+
+const (
+	// SortByPrice orders by spot price.
+	SortByPrice SortKey = "price"
+	// SortBySavings orders by savings against on-demand.
+	SortBySavings SortKey = "savings"
+	// SortByRisk orders by the provider's own risk figure. Risk figures from
+	// different providers are not comparable, so this only ever orders one
+	// provider's own candidates.
+	SortByRisk SortKey = "risk"
+	// SortByMachine orders by machine identifier.
+	SortByMachine SortKey = "machine"
+	// SortByRegion orders by region identifier.
+	SortByRegion SortKey = "region"
+	// SortByPlacementScore orders by placement score.
+	SortByPlacementScore SortKey = "placement_score"
+)
+
+// SortOrder asks a provider to return candidates in a given order. The zero
+// value leaves ordering to the provider. Ordering is part of the query rather
+// than a consumer-side step because a provider that already sorts its own data
+// must not have that order silently re-derived from mapped observations.
+type SortOrder struct {
+	Key        SortKey
+	Descending bool
+}
+
+// PlacementRequest asks a provider for capacity placement scores. The zero
+// value requests none; a provider that does not declare CapabilityPlacementScore
+// must be rejected before the query is issued.
+type PlacementRequest struct {
+	// Timeout bounds the live lookup. Zero means the provider's own default.
+	Timeout time.Duration
+	// MinScore drops candidates scoring below it. Zero applies no floor.
+	MinScore int
+	// SingleZone requests per-zone scores instead of one regional score.
+	SingleZone bool
+	// Enabled requests scores at all.
+	Enabled bool
+}
+
 // Query is a provider-neutral candidate request. Zero-valued filters are
 // inactive: an empty Architecture matches any architecture, and a nil MaxPrice
 // applies no ceiling.
@@ -116,8 +161,28 @@ type Query struct {
 	Architecture   Architecture
 	OS             OperatingSystem
 	Regions        []Region
+	Sort           SortOrder
+	Placement      PlacementRequest
 	MinMemoryGiB   float64
 	MinVCPU        int
+}
+
+// CapabilityNeeds is what this query requires of a provider. Spot prices and
+// machine specifications are needed by every query; the rest is asked for only
+// when a filter or ordering actually depends on it.
+func (q *Query) CapabilityNeeds() CapabilityRequest {
+	needed := []Capability{CapabilitySpotPrice, CapabilityMachineSpec}
+	if q.Sort.Key == SortByRisk {
+		needed = append(needed, CapabilityRisk)
+	}
+	if q.Placement.Enabled || q.Placement.MinScore > 0 || q.Sort.Key == SortByPlacementScore {
+		needed = append(needed, CapabilityPlacementScore)
+	}
+	if q.Placement.SingleZone {
+		needed = append(needed, CapabilityZoneDetail)
+	}
+
+	return CapabilityRequest{OS: q.OS, Architecture: q.Architecture, Needed: needed}
 }
 
 // DataMode reports whether a result was built from a committed snapshot or from
@@ -133,7 +198,9 @@ const (
 
 // Candidate is one machine, in one location, priced for one OS. Optional
 // observations are absent rather than zero-valued when the provider does not
-// publish them.
+// publish them. SavingsPercent, when present, is a percentage of the on-demand
+// price in the range 1..100; a provider that cannot produce one in that range
+// leaves it absent rather than publishing a figure no consumer can read.
 type Candidate struct {
 	Spot           *PriceObservation
 	OnDemand       *PriceObservation
@@ -148,7 +215,8 @@ type Candidate struct {
 }
 
 // Result is one provider's answer to a Query, with the provenance a consumer
-// needs to describe how fresh the answer is.
+// needs to describe how fresh the answer is. Candidates carry the order the
+// query asked for; a consumer that needs a different order sorts them itself.
 type Result struct {
 	Provider   ProviderID
 	Mode       DataMode

@@ -24,6 +24,9 @@ type importPolicy struct {
 	dirPrefix string
 	reason    string
 	forbidden []string
+	// productionOnly exempts _test.go files. It is set only where a test
+	// legitimately composes the real implementation the boundary hides.
+	productionOnly bool
 }
 
 var importPolicies = []importPolicy{
@@ -52,6 +55,16 @@ var importPolicies = []importPolicy{
 			"spotinfo/internal/mcp",
 		},
 	},
+	{
+		name:      "mcp",
+		dirPrefix: "internal/mcp",
+		reason:    "MCP tools consume neutral candidates from the provider registry, not the legacy AWS package",
+		forbidden: []string{"spotinfo/internal/spot"},
+		// The concurrency tests exist to exercise the shared state inside the
+		// real AWS client, so the test helper composes it directly. The boundary
+		// this policy protects is the shipped one, which archfit also gates.
+		productionOnly: true,
+	},
 }
 
 func TestPackagesRespectImportPolicies(t *testing.T) {
@@ -62,13 +75,17 @@ func TestPackagesRespectImportPolicies(t *testing.T) {
 	// files that live beside this one, would satisfy every policy vacuously.
 	require.Contains(t, scanned, "internal/cloud/provider.go")
 	require.Contains(t, scanned, "internal/providers/aws/provider.go")
+	require.Contains(t, scanned, "internal/mcp/tools.go")
 
-	for dir, paths := range imports {
+	for file, paths := range imports {
 		for _, policy := range importPolicies {
-			if !strings.HasPrefix(dir, policy.dirPrefix) {
+			if !strings.HasPrefix(file, policy.dirPrefix) {
 				continue
 			}
-			assert.Empty(t, policy.violations(paths), "%s: %s", dir, policy.reason)
+			if policy.productionOnly && strings.HasSuffix(file, "_test.go") {
+				continue
+			}
+			assert.Empty(t, policy.violations(paths), "%s: %s", file, policy.reason)
 		}
 	}
 }
@@ -113,10 +130,11 @@ func policyNamed(t *testing.T, name string) importPolicy {
 	return importPolicy{}
 }
 
-// moduleImports maps every module package directory, relative to the module
-// root and slash-separated, to the import paths its Go files declare. It also
-// returns every scanned file, so a caller can prove the walk reached the files
-// it means to police.
+// moduleImports maps every module Go file, relative to the module root and
+// slash-separated, to the import paths it declares. It also returns every
+// scanned file, so a caller can prove the walk reached the files it means to
+// police. Keying by file rather than by directory is what lets a policy apply
+// to production code without exempting a whole package.
 func moduleImports(t *testing.T) (map[string][]string, []string) {
 	t.Helper()
 
@@ -147,9 +165,8 @@ func moduleImports(t *testing.T) (map[string][]string, []string) {
 			return err
 		}
 		file := filepath.ToSlash(relative)
-		dir := filepath.ToSlash(filepath.Dir(relative))
 		scanned = append(scanned, file)
-		imports[dir] = append(imports[dir], fileImports(t, path)...)
+		imports[file] = append(imports[file], fileImports(t, path)...)
 
 		return nil
 	})

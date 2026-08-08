@@ -10,7 +10,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"spotinfo/internal/cloud"
-	"spotinfo/internal/spot"
 )
 
 // Constants for MCP server configuration
@@ -18,18 +17,15 @@ const (
 	defaultMaxInterruptionRateParam = 100
 	defaultLimitParam               = 10
 	maxLimitParam                   = 50
-	totalMCPTools                   = 2
+	totalMCPTools                   = 3
 	maxScoreValue                   = 10
 	maxScoreTimeoutSeconds          = 300
+	// defaultScoreTimeoutSeconds is the advertised score_timeout default. It is
+	// declared here rather than imported from the AWS package: the published
+	// input schema is a client contract, and find-spot-instances-v1-input-schema.json
+	// pins this value.
+	defaultScoreTimeoutSeconds = 30
 )
-
-// spotClient interface defined close to consumer for testing (following codebase patterns)
-type spotClient interface {
-	GetSpotSavings(ctx context.Context, opts ...spot.GetSpotSavingsOption) ([]spot.Advice, error)
-	// DataSource reports whether the advice came from live AWS feeds or the
-	// embedded snapshot, so the response can say which rather than guess.
-	DataSource() string
-}
 
 // providerRegistry is the slice of the compiled provider registry this server
 // needs, defined next to its consumer. Tools are registered against the neutral
@@ -41,20 +37,18 @@ type providerRegistry interface {
 
 // Server wraps the MCP server with spotinfo-specific configuration
 type Server struct {
-	mcpServer  *server.MCPServer
-	logger     *slog.Logger
-	spotClient spotClient
-	providers  providerRegistry
+	mcpServer *server.MCPServer
+	logger    *slog.Logger
+	providers providerRegistry
 }
 
 // Config holds MCP server configuration
 type Config struct {
-	Logger     *slog.Logger
-	SpotClient spotClient
-	Providers  providerRegistry
-	Version    string
-	Transport  string
-	Port       string
+	Logger    *slog.Logger
+	Providers providerRegistry
+	Version   string
+	Transport string
+	Port      string
 }
 
 // NewServer creates a new MCP server instance with spotinfo tools
@@ -74,10 +68,9 @@ func NewServer(cfg Config) (*Server, error) {
 	)
 
 	s := &Server{
-		mcpServer:  mcpServer,
-		logger:     cfg.Logger,
-		spotClient: cfg.SpotClient,
-		providers:  cfg.Providers,
+		mcpServer: mcpServer,
+		logger:    cfg.Logger,
+		providers: cfg.Providers,
 	}
 
 	// Register tools
@@ -95,7 +88,7 @@ func (s *Server) registerTools() {
 		mcp.WithDescription("Search for AWS EC2 Spot Instance options based on requirements. Returns pricing, savings, and interruption data."),
 		mcp.WithArray(argRegions,
 			mcp.Description("AWS regions to search (e.g., ['us-east-1', 'eu-west-1']). Use ['all'] or omit to search all regions"),
-			mcp.Items(map[string]any{"type": "string"})),
+			mcp.Items(map[string]any{jsonSchemaType: jsonTypeString})),
 		mcp.WithString(argInstanceTypes,
 			mcp.Description("Instance type pattern - exact type (e.g., 'm5.large') or pattern (e.g., 't3.*', 'm5.*')")),
 		mcp.WithNumber(argMinVCPU,
@@ -130,12 +123,12 @@ func (s *Server) registerTools() {
 			mcp.DefaultBool(false)),
 		mcp.WithNumber(argScoreTimeout,
 			mcp.Description("Timeout for score enrichment in seconds"),
-			mcp.DefaultNumber(spot.DefaultScoreTimeoutSeconds),
+			mcp.DefaultNumber(defaultScoreTimeoutSeconds),
 			mcp.Min(1),
 			mcp.Max(maxScoreTimeoutSeconds)),
 	)
 
-	findSpotInstancesHandler := NewFindSpotInstancesTool(s.spotClient, s.logger)
+	findSpotInstancesHandler := NewFindSpotInstancesTool(s.providers, s.logger)
 	s.mcpServer.AddTool(findSpotInstancesTool, findSpotInstancesHandler.Handle)
 
 	// Register list_spot_regions tool
@@ -147,17 +140,19 @@ func (s *Server) registerTools() {
 		mcp.WithDescription("List all AWS regions where EC2 Spot Instances are available"),
 	)
 
-	listSpotRegionsHandler := NewListSpotRegionsTool(s.spotClient, s.logger)
+	listSpotRegionsHandler := NewListSpotRegionsTool(s.providers, s.logger)
 	s.mcpServer.AddTool(listSpotRegionsTool, listSpotRegionsHandler.Handle)
+
+	s.registerRecommendTool()
 
 	s.logger.Info("MCP tools registered",
 		slog.Int("count", totalMCPTools),
 		slog.Any("providers", s.availableProviders()))
 }
 
-// availableProviders names the providers this server can serve. The AWS tools
-// above do not consult the registry yet, so an operator needs the log line to
-// see which clouds the binary actually loaded.
+// availableProviders names the providers this server can serve. Registration is
+// unconditional so the advertised tool surface does not change with the data a
+// binary happens to carry; a request for a disabled cloud reports why.
 func (s *Server) availableProviders() []cloud.ProviderID {
 	if s.providers == nil {
 		return nil

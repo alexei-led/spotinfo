@@ -1,0 +1,93 @@
+{
+  "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": true,
+    "idempotentHint": false,
+    "openWorldHint": true
+  },
+  "description": "Recommend Spot machines from committed multi-cloud price data. Returns a spotinfo.recommend/v2 payload with explicit risk availability per cloud.",
+  "inputSchema": {
+    "properties": {
+      "architecture": {
+        "description": "Required processor architecture",
+        "enum": [
+          "x86_64",
+          "arm64"
+        ],
+        "type": "string"
+      },
+      "cloud": {
+        "default": "aws",
+        "description": "Cloud provider to query",
+        "enum": [
+          "aws",
+          "azure",
+          "gcp"
+        ],
+        "type": "string"
+      },
+      "machine": {
+        "default": "",
+        "description": "Machine type RE2 regexp. Omit for no machine-name filter",
+        "type": "string"
+      },
+      "max_price_per_hour": {
+        "description": "Maximum USD per machine-hour. Omit for no price ceiling",
+        "type": "number"
+      },
+      "min_memory_gib": {
+        "description": "Required minimum memory in GiB",
+        "type": "number"
+      },
+      "min_vcpu": {
+        "description": "Required minimum vCPU cores",
+        "minimum": 1,
+        "type": "number"
+      },
+      "os": {
+        "default": "linux",
+        "description": "Machine operating system",
+        "enum": [
+          "linux",
+          "windows"
+        ],
+        "type": "string"
+      },
+      "regions": {
+        "default": [
+          "all"
+        ],
+        "description": "Provider regions to search. Use ['all'] for every region the provider publishes",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "top": {
+        "default": 3,
+        "description": "Maximum recommendations to return",
+        "maximum": 50,
+        "minimum": 1,
+        "type": "number"
+      },
+      "workload": {
+        "default": "cost",
+        "description": "Ranking policy. 'cost' ranks by price alone and makes no interruption claim; 'web', 'ci' and 'batch' cap interruption frequency and need a provider that publishes risk",
+        "enum": [
+          "cost",
+          "web",
+          "ci",
+          "batch"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "architecture",
+      "min_vcpu",
+      "min_memory_gib"
+    ],
+    "type": "object"
+  },
+  "name": "recommend_spot_instances"
+}

@@ -211,14 +211,25 @@ func (m *Manifest) VerifyPayload(payload []byte) error {
 
 // SourceRefs converts manifest provenance into neutral source references, so a
 // provider result can report where its answer came from without inventing one.
+//
+// A reviewed catalogue built by reading a documentation page has no upstream
+// hash — nobody fetched and hashed the HTML. Those refs carry the payload hash
+// instead, so every published reference identifies bytes this repository can
+// verify rather than being empty. For a raw feed the two hashes are equal by
+// construction, so the fallback changes nothing there.
 func (m *Manifest) SourceRefs() []cloud.SourceRef {
 	refs := make([]cloud.SourceRef, 0, len(m.Sources))
 	for i := range m.Sources {
+		contentSHA256 := m.Sources[i].SHA256
+		if contentSHA256 == "" {
+			contentSHA256 = m.Payload.SHA256
+		}
+
 		refs = append(refs, cloud.SourceRef{
 			FetchedAt:     m.Sources[i].FetchedAt,
 			ObservedAt:    m.Sources[i].ObservedAt,
 			URL:           m.Sources[i].URL,
-			ContentSHA256: m.Sources[i].SHA256,
+			ContentSHA256: contentSHA256,
 			ParserVersion: m.ParserVersion,
 			SchemaVersion: m.DataSchemaVersion,
 		})

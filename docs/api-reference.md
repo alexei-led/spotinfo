@@ -4,10 +4,16 @@ This document provides complete technical specifications for the `spotinfo` MCP 
 
 ## Overview
 
-The spotinfo MCP server exposes two tools that enable AI assistants to query AWS EC2 Spot Instance data:
+The spotinfo MCP server exposes three tools:
 
-- **`find_spot_instances`**: Search and filter spot instances based on requirements
+- **`find_spot_instances`**: Search and filter AWS EC2 Spot Instances (v1 compatibility contract)
 - **`list_spot_regions`**: List available AWS regions for spot instances
+- **`recommend_spot_instances`**: Rank machines across clouds and return a `spotinfo.recommend/v2` payload
+
+`find_spot_instances` and `list_spot_regions` are the AWS v1 contract. Their names,
+input schemas, defaults, error behaviour and response JSON are frozen; the AWS data
+they serve now reaches them through the provider-neutral seam, which does not change
+what a client sees.
 
 All tools follow the [Model Context Protocol (MCP) specification](https://modelcontextprotocol.io/) and communicate via JSON-RPC 2.0 over stdio transport.
 
@@ -440,9 +446,178 @@ This tool returns a list of all AWS regions that have spot instance data availab
 }
 ```
 
+---
+
+### `recommend_spot_instances`
+
+Rank Spot machines from committed multi-cloud data and return the provider-neutral
+`spotinfo.recommend/v2` payload.
+
+#### Description
+
+The tool validates the request, checks that the selected cloud can answer it, acquires
+candidates, and ranks the survivors. Every failure happens before acquisition except an
+acquisition error and an empty candidate set. No error result carries partial
+recommendations.
+
+Normative machine-readable contracts:
+
+- `docs/plans/contracts/recommend-spot-instances-v2-input.schema.json`
+- `docs/plans/contracts/recommend-spot-instances-v2-success.schema.json`
+- `docs/plans/contracts/recommend-spot-instances-v2-error.schema.json`
+
+The schema files control types, required fields, defaults, nullability, formats and
+`additionalProperties`. `internal/mcp/recommend_test.go` validates real payloads against
+them.
+
+#### Input Schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["architecture", "min_vcpu", "min_memory_gib"],
+  "properties": {
+    "cloud": { "type": "string", "enum": ["aws", "gcp", "azure"], "default": "aws" },
+    "regions": { "type": "array", "items": { "type": "string" }, "default": ["all"] },
+    "machine": { "type": "string", "default": "" },
+    "architecture": { "type": "string", "enum": ["x86_64", "arm64"] },
+    "os": { "type": "string", "enum": ["linux", "windows"], "default": "linux" },
+    "min_vcpu": { "type": "integer", "minimum": 1 },
+    "min_memory_gib": { "type": "number", "exclusiveMinimum": 0 },
+    "max_price_per_hour": { "type": "number", "exclusiveMinimum": 0 },
+    "workload": { "type": "string", "enum": ["cost", "web", "ci", "batch"], "default": "cost" },
+    "top": { "type": "integer", "minimum": 1, "maximum": 50, "default": 3 }
+  }
+}
+```
+
+- Omitted `machine` means no machine-name filter; omitted `max_price_per_hour` means no
+  price ceiling.
+- `regions: ["all"]` selects every region the provider publishes and cannot be combined
+  with explicit regions.
+- `cost` ranks by price alone and makes **no** interruption claim. `web`, `ci` and `batch`
+  cap interruption frequency at 5%, 16% and 22% respectively and require a cloud that
+  publishes risk; asking for one on a cloud that does not returns
+  `UNSUPPORTED_CAPABILITY` before acquisition.
+
+#### Success Schema
+
+A successful result has `isError=false` and a single text content item containing JSON:
+
+```json
+{
+  "schema_version": "spotinfo.recommend/v2",
+  "status": "ok",
+  "request": {
+    "cloud": "aws",
+    "regions": ["us-east-1"],
+    "machine": "",
+    "architecture": "x86_64",
+    "os": "linux",
+    "min_vcpu": 2,
+    "min_memory_gib": 8,
+    "max_price_per_hour": null,
+    "workload": "web",
+    "top": 3
+  },
+  "ranking_policy": [
+    "spot_price_ascending",
+    "excess_vcpu_ascending",
+    "excess_memory_gib_ascending",
+    "region_ascending",
+    "machine_ascending"
+  ],
+  "data_source": {
+    "provider": "aws",
+    "mode": "embedded-snapshot",
+    "sources": [
+      {
+        "url": "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json",
+        "fetched_at": "2026-08-06T08:58:27Z",
+        "observed_at": null,
+        "content_sha256": "f42df66cd52c9dc3ac28b6bb7e525627696eec60692d5cf56658c679f0012393",
+        "parser_version": "aws-spot-advisor-json/1",
+        "schema_version": "aws.spot-advisor-feed/v1"
+      }
+    ]
+  },
+  "recommendations": [
+    {
+      "rank": 1,
+      "cloud": "aws",
+      "region": "us-east-1",
+      "machine": "m6i.large",
+      "architecture": "x86_64",
+      "os": "linux",
+      "vcpu": 2,
+      "memory_gib": 8,
+      "spot_usd_per_hour": "0.041600000",
+      "on_demand_usd_per_hour": null,
+      "savings_percent": 72,
+      "risk": {
+        "status": "available",
+        "kind": "interruption_bucket",
+        "label": "<5%",
+        "min_percent": 0,
+        "max_percent": 5,
+        "window_days": 30,
+        "source_url": "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json",
+        "observed_at": null
+      },
+      "rationale_codes": [
+        "ARCHITECTURE_MATCH",
+        "KNOWN_POSITIVE_PRICE",
+        "RESOURCE_MINIMUMS_MET",
+        "WORKLOAD_WEB_CAP_MET"
+      ]
+    }
+  ],
+  "warnings": []
+}
+```
+
+Contract notes:
+
+- Prices are decimal strings with exactly nine fractional digits, so no consumer has to
+  reconstruct an amount from a float.
+- An absent measurement is `null`, never `0`. A cloud that publishes no interruption data
+  reports `risk.status = "unavailable"` with every risk field null.
+- `risk.kind` is one of `interruption_bucket`, `preemption_rate` or `eviction_rate`. Kinds
+  from different clouds measure different things and must not be compared.
+- Arrays are never null. `data_source.sources` always has at least one complete entry; a
+  provider that cannot describe its provenance returns `DATA_UNAVAILABLE` instead.
+
+#### Error Schema
+
+An error result has `isError=true` and a single text content item containing:
+
+```json
+{
+  "schema_version": "spotinfo.error/v1",
+  "code": "DATA_UNAVAILABLE",
+  "message": "human-readable stable summary",
+  "cloud": "gcp"
+}
+```
+
+| Code | Meaning |
+| --- | --- |
+| `INVALID_ARGUMENT` | A value outside the documented vocabulary or bounds |
+| `UNSUPPORTED_CAPABILITY` | A valid request the selected cloud cannot answer |
+| `DATA_UNAVAILABLE` | A recognised cloud whose snapshot is missing or unusable |
+| `NO_CANDIDATES` | A served request with no matching machine |
+| `INTERNAL` | An unclassified failure |
+
+`cloud` echoes the value the caller supplied, or `null` when it could not be read. The MCP
+host rejects a `cloud` outside the input enum before the handler runs.
+
+---
+
 ## Error Handling
 
-All tools return standard MCP error responses when issues occur:
+The v1 tools return standard MCP error responses when issues occur.
+`recommend_spot_instances` returns the `spotinfo.error/v1` payload documented above.
 
 ### Error Response Format
 

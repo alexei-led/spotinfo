@@ -24,22 +24,22 @@ func TestNewServer(t *testing.T) {
 		{
 			name: "valid configuration",
 			cfg: Config{
-				Version:    "1.0.0",
-				Logger:     slog.Default(),
-				SpotClient: newEmbeddedClient(),
+				Version:   "1.0.0",
+				Logger:    slog.Default(),
+				Providers: newEmbeddedRegistry(),
 			},
 			wantErr: false,
 		},
 		{
 			name: "missing logger uses default",
 			cfg: Config{
-				Version:    "1.0.0",
-				SpotClient: newEmbeddedClient(),
+				Version:   "1.0.0",
+				Providers: newEmbeddedRegistry(),
 			},
 			wantErr: false,
 		},
 		{
-			name: "nil spot client is allowed",
+			name: "nil provider registry is allowed",
 			cfg: Config{
 				Version: "1.0.0",
 				Logger:  slog.Default(),
@@ -66,9 +66,9 @@ func TestNewServer(t *testing.T) {
 // TestServerToolRegistration verifies tools are registered during server creation
 func TestServerToolRegistration(t *testing.T) {
 	cfg := Config{
-		Version:    "1.0.0",
-		Logger:     slog.Default(),
-		SpotClient: newEmbeddedClient(),
+		Version:   "1.0.0",
+		Logger:    slog.Default(),
+		Providers: newEmbeddedRegistry(),
 	}
 
 	server, err := NewServer(cfg)
@@ -80,16 +80,6 @@ func TestServerToolRegistration(t *testing.T) {
 	assert.NotNil(t, server.mcpServer)
 }
 
-// stubProvider stands in for a compiled provider: the server only asks for an
-// identifier, so nothing here reaches a cloud.
-type stubProvider struct{ id cloud.ProviderID }
-
-func (p stubProvider) ID() cloud.ProviderID             { return p.id }
-func (p stubProvider) Capabilities() cloud.Capabilities { return cloud.Capabilities{} }
-func (p stubProvider) Query(context.Context, *cloud.Query) (cloud.Result, error) {
-	return cloud.Result{Provider: p.id}, nil
-}
-
 func testProviderRegistry(t *testing.T, ids ...cloud.ProviderID) *providers.Registry {
 	t.Helper()
 
@@ -97,7 +87,7 @@ func testProviderRegistry(t *testing.T, ids ...cloud.ProviderID) *providers.Regi
 	for _, id := range ids {
 		registrations = append(registrations, providers.Registration{
 			ID:    id,
-			Build: func() (cloud.Provider, error) { return stubProvider{id: id}, nil },
+			Build: func() (cloud.Provider, error) { return &stubProvider{id: id}, nil },
 		})
 	}
 
@@ -107,14 +97,13 @@ func testProviderRegistry(t *testing.T, ids ...cloud.ProviderID) *providers.Regi
 	return registry
 }
 
-// The server accepts the registry through a neutral interface. Task 3 does not
-// change which tools are registered: the AWS v1 names must survive.
+// Every tool is served from the registry now. The AWS v1 names must survive
+// alongside the neutral recommendation tool.
 func TestServerAcceptsAProviderRegistryWithoutChangingAWSToolNames(t *testing.T) {
 	server, err := NewServer(Config{
-		Version:    "1.0.0",
-		Logger:     slog.Default(),
-		SpotClient: newEmbeddedClient(),
-		Providers:  testProviderRegistry(t, cloud.ProviderAWS, cloud.ProviderGCP),
+		Version:   "1.0.0",
+		Logger:    slog.Default(),
+		Providers: testProviderRegistry(t, cloud.ProviderAWS, cloud.ProviderGCP),
 	})
 	require.NoError(t, err)
 
@@ -130,7 +119,7 @@ func TestServerAcceptsAProviderRegistryWithoutChangingAWSToolNames(t *testing.T)
 // A binary composed without a registry still serves the AWS tools rather than
 // failing to start.
 func TestServerWithoutAProviderRegistryReportsNoProviders(t *testing.T) {
-	server, err := NewServer(Config{Version: "1.0.0", Logger: slog.Default(), SpotClient: newEmbeddedClient()})
+	server, err := NewServer(Config{Version: "1.0.0", Logger: slog.Default()})
 	require.NoError(t, err)
 
 	assert.Nil(t, server.availableProviders())
@@ -147,10 +136,9 @@ func TestDisabledProvidersAreNotReportedAsAvailable(t *testing.T) {
 	require.NoError(t, err)
 
 	server, err := NewServer(Config{
-		Version:    "1.0.0",
-		Logger:     slog.Default(),
-		SpotClient: newEmbeddedClient(),
-		Providers:  registry,
+		Version:   "1.0.0",
+		Logger:    slog.Default(),
+		Providers: registry,
 	})
 	require.NoError(t, err)
 
@@ -160,9 +148,9 @@ func TestDisabledProvidersAreNotReportedAsAvailable(t *testing.T) {
 // TestServeStdio_ContextCancellation tests that stdio server respects context cancellation
 func TestServeStdio_ContextCancellation(t *testing.T) {
 	cfg := Config{
-		Version:    "1.0.0",
-		Logger:     slog.Default(),
-		SpotClient: newEmbeddedClient(),
+		Version:   "1.0.0",
+		Logger:    slog.Default(),
+		Providers: newEmbeddedRegistry(),
 	}
 
 	server, err := NewServer(cfg)
@@ -196,9 +184,9 @@ func TestServeStdio_ContextCancellation(t *testing.T) {
 // TestServeSSE_ContextCancellation tests that SSE server respects context cancellation
 func TestServeSSE_ContextCancellation(t *testing.T) {
 	cfg := Config{
-		Version:    "1.0.0",
-		Logger:     slog.Default(),
-		SpotClient: newEmbeddedClient(),
+		Version:   "1.0.0",
+		Logger:    slog.Default(),
+		Providers: newEmbeddedRegistry(),
 	}
 
 	server, err := NewServer(cfg)
@@ -234,9 +222,9 @@ func TestServeSSE_ContextCancellation(t *testing.T) {
 // TestServeSSE_InvalidPort tests error handling for invalid port
 func TestServeSSE_InvalidPort(t *testing.T) {
 	cfg := Config{
-		Version:    "1.0.0",
-		Logger:     slog.Default(),
-		SpotClient: newEmbeddedClient(),
+		Version:   "1.0.0",
+		Logger:    slog.Default(),
+		Providers: newEmbeddedRegistry(),
 	}
 
 	server, err := NewServer(cfg)
@@ -253,9 +241,9 @@ func TestServeSSE_InvalidPort(t *testing.T) {
 // TestServerConcurrentAccess tests that multiple operations can be performed concurrently
 func TestServerConcurrentAccess(t *testing.T) {
 	cfg := Config{
-		Version:    "1.0.0",
-		Logger:     slog.Default(),
-		SpotClient: newEmbeddedClient(),
+		Version:   "1.0.0",
+		Logger:    slog.Default(),
+		Providers: newEmbeddedRegistry(),
 	}
 
 	server, err := NewServer(cfg)
@@ -288,9 +276,9 @@ func TestServerConcurrentAccess(t *testing.T) {
 // BenchmarkServerCreation benchmarks server creation performance
 func BenchmarkServerCreation(b *testing.B) {
 	cfg := Config{
-		Version:    "1.0.0",
-		Logger:     slog.Default(),
-		SpotClient: newEmbeddedClient(),
+		Version:   "1.0.0",
+		Logger:    slog.Default(),
+		Providers: newEmbeddedRegistry(),
 	}
 
 	b.ResetTimer()

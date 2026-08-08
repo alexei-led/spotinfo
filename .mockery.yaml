@@ -13,6 +13,3 @@ packages:
   spotinfo/cmd/spotinfo:
     interfaces:
       spotClient:
-  spotinfo/internal/mcp:
-    interfaces:
-      spotClient:

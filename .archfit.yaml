@@ -106,6 +106,18 @@ modules:
     role: adapter
     subdomain: supporting
     volatility: medium
+  cmd_archfitcheck:
+    paths:
+      - cmd/archfitcheck/**
+    public:
+      - cmd/archfitcheck
+    layer: cmd
+    owner: spotinfo
+    role: composition_root
+    subdomain: generic
+    # low: it reads an archfit report and exits. Its shape changes only when
+    # archfit's own report shape does.
+    volatility: low
   cmd_spotinfo:
     paths:
       - cmd/spotinfo/**
@@ -121,6 +133,10 @@ rules:
   # pass it with zero violations. It fails the build if a provider ever imports
   # cmd/spotinfo or internal/mcp, or if the neutral domain reaches back up.
   # internal/cloud/dependencies_test.go covers the same intent at package level.
+  #
+  # Balanced-Coupling advisories stay warnings for this rule gate: their
+  # severity is enforced by cmd/archfitcheck, which `make verify-architecture`
+  # runs over the analysis and which fails on any open Critical or High finding.
   - id: no-layer-back-edges
     type: forbidden_layer_direction
     gate: fail

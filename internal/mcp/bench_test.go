@@ -10,7 +10,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"spotinfo/internal/spot"
+	"spotinfo/internal/cloud"
 )
 
 // BenchmarkParseParameters benchmarks parameter parsing performance
@@ -35,39 +35,21 @@ func BenchmarkParseParameters(b *testing.B) {
 
 // BenchmarkBuildResponse benchmarks response building performance
 func BenchmarkBuildResponse(b *testing.B) {
-	advices := []spot.Advice{
-		{
-			Instance: "m5.large",
-			Region:   "us-east-1",
-			Price:    0.0928,
-			Savings:  70,
-			Range:    spot.Range{Min: 5, Max: 10, Label: "<5%"},
-			Info:     spot.TypeInfo{Cores: 2, RAM: 8.0},
-		},
-		{
-			Instance: "t3.medium",
-			Region:   "eu-west-1",
-			Price:    0.0416,
-			Savings:  65,
-			Range:    spot.Range{Min: 10, Max: 15, Label: "5-10%"},
-			Info:     spot.TypeInfo{Cores: 2, RAM: 4.0},
-		},
-		{
-			Instance: "c5.xlarge",
-			Region:   "ap-south-1",
-			Price:    0.192,
-			Savings:  75,
-			Range:    spot.Range{Min: 0, Max: 5, Label: "<5%"},
-			Info:     spot.TypeInfo{Cores: 4, RAM: 8.0},
-		},
-	}
+	candidates := buildCandidates(
+		testCandidate{Machine: "m5.large", Region: "us-east-1", Price: 0.0928, Savings: 70,
+			RiskLabel: "<5%", RiskMin: 5, RiskMax: 10, VCPU: 2, MemoryGiB: 8},
+		testCandidate{Machine: "t3.medium", Region: "eu-west-1", Price: 0.0416, Savings: 65,
+			RiskLabel: "5-10%", RiskMin: 10, RiskMax: 15, VCPU: 2, MemoryGiB: 4},
+		testCandidate{Machine: "c5.xlarge", Region: "ap-south-1", Price: 0.192, Savings: 75,
+			RiskLabel: "<5%", RiskMin: 0, RiskMax: 5, VCPU: 4, MemoryGiB: 8},
+	)
 
 	startTime := time.Now()
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		response := buildResponse(advices, startTime, spot.DataSourceEmbedded)
+		response := buildResponse(candidates, startTime, cloud.DataModeEmbeddedSnapshot)
 		_ = response // Prevent optimization
 	}
 }
@@ -115,13 +97,12 @@ func BenchmarkMarshalResponse(b *testing.B) {
 // BenchmarkFilterByInterruption benchmarks interruption filtering performance
 func BenchmarkFilterByInterruption(b *testing.B) {
 	// Create a large slice of advices for realistic benchmarking
-	advices := make([]spot.Advice, 1000)
-	for i := range advices {
-		advices[i] = spot.Advice{
-			Instance: "test-instance",
-			Region:   "us-east-1",
-			Range:    spot.Range{Min: i % 50, Max: (i % 50) + 10}, // Varying interruption rates
-		}
+	candidates := make([]cloud.Candidate, 1000)
+	for i := range candidates {
+		candidates[i] = testCandidate{
+			Machine: "test-instance", Region: "us-east-1",
+			RiskLabel: "varying", RiskMin: float64(i % 50), RiskMax: float64((i % 50) + 10),
+		}.build()
 	}
 
 	maxInterruption := 25.0
@@ -129,7 +110,7 @@ func BenchmarkFilterByInterruption(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		result := filterByInterruption(advices, maxInterruption)
+		result := filterByInterruption(candidates, maxInterruption)
 		_ = result // Prevent optimization
 	}
 }
@@ -137,13 +118,11 @@ func BenchmarkFilterByInterruption(b *testing.B) {
 // BenchmarkApplyLimit benchmarks result limiting performance
 func BenchmarkApplyLimit(b *testing.B) {
 	// Create a large slice of advices
-	advices := make([]spot.Advice, 10000)
-	for i := range advices {
-		advices[i] = spot.Advice{
-			Instance: "test-instance",
-			Region:   "us-east-1",
-			Savings:  i % 100,
-		}
+	candidates := make([]cloud.Candidate, 10000)
+	for i := range candidates {
+		candidates[i] = testCandidate{
+			Machine: "test-instance", Region: "us-east-1", Savings: i % 100,
+		}.build()
 	}
 
 	limit := 50
@@ -151,18 +130,18 @@ func BenchmarkApplyLimit(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		result := applyLimit(advices, limit)
+		result := applyLimit(candidates, limit)
 		_ = result // Prevent optimization
 	}
 }
 
 // BenchmarkCalculateAvgInterruption benchmarks interruption calculation performance
 func BenchmarkCalculateAvgInterruption(b *testing.B) {
-	testRange := spot.Range{Min: 10, Max: 20}
+	testRisk := testCandidate{RiskLabel: "10-20%", RiskMin: 10, RiskMax: 20}.build().Risk
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		result := calculateAvgInterruption(testRange)
+		result := calculateAvgInterruption(&testRisk)
 		_ = result // Prevent optimization
 	}
 }
@@ -218,9 +197,9 @@ func BenchmarkHelperFunctions(b *testing.B) {
 // for livePriceTimeout per call without AWS credentials and makes the numbers
 // measure network failure rather than handler work.
 func BenchmarkToolHandlerComplete(b *testing.B) {
-	client := newEmbeddedClient()
+	registry := newEmbeddedRegistry()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	tool := NewFindSpotInstancesTool(client, logger)
+	tool := NewFindSpotInstancesTool(registry, logger)
 
 	req := mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
@@ -292,16 +271,14 @@ func BenchmarkJSONOperations(b *testing.B) {
 	})
 }
 
-// BenchmarkConvertSortParams benchmarks sort parameter conversion
-func BenchmarkConvertSortParams(b *testing.B) {
+// BenchmarkSortOrderFor benchmarks sort parameter conversion
+func BenchmarkSortOrderFor(b *testing.B) {
 	testCases := []string{"price", "reliability", "savings", "unknown"}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		sortBy := testCases[i%len(testCases)]
-		sortType, desc := convertSortParams(sortBy)
-		_ = sortType
-		_ = desc
+		order := sortOrderFor(testCases[i%len(testCases)])
+		_ = order
 	}
 }
 
@@ -312,9 +289,9 @@ func BenchmarkColdVsWarmStartup(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			// Create fresh client each time to force cold start
-			client := newEmbeddedClient()
+			registry := newEmbeddedRegistry()
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-			tool := NewFindSpotInstancesTool(client, logger)
+			tool := NewFindSpotInstancesTool(registry, logger)
 
 			req := mcp.CallToolRequest{
 				Params: mcp.CallToolParams{
@@ -335,9 +312,9 @@ func BenchmarkColdVsWarmStartup(b *testing.B) {
 
 	b.Run("WarmStart", func(b *testing.B) {
 		// Pre-warm the client
-		client := newEmbeddedClient()
+		registry := newEmbeddedRegistry()
 		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-		tool := NewFindSpotInstancesTool(client, logger)
+		tool := NewFindSpotInstancesTool(registry, logger)
 
 		// Warm up call
 		req := mcp.CallToolRequest{
@@ -364,9 +341,9 @@ func BenchmarkColdVsWarmStartup(b *testing.B) {
 
 // BenchmarkDatasetSizes benchmarks performance with different dataset sizes
 func BenchmarkDatasetSizes(b *testing.B) {
-	client := newEmbeddedClient()
+	registry := newEmbeddedRegistry()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	tool := NewFindSpotInstancesTool(client, logger)
+	tool := NewFindSpotInstancesTool(registry, logger)
 
 	// Warm up
 	req := mcp.CallToolRequest{
@@ -433,9 +410,9 @@ func BenchmarkDatasetSizes(b *testing.B) {
 
 // BenchmarkConcurrentThroughput benchmarks concurrent throughput
 func BenchmarkConcurrentThroughput(b *testing.B) {
-	client := newEmbeddedClient()
+	registry := newEmbeddedRegistry()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	tool := NewFindSpotInstancesTool(client, logger)
+	tool := NewFindSpotInstancesTool(registry, logger)
 
 	req := mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
@@ -467,16 +444,12 @@ func BenchmarkConcurrentThroughput(b *testing.B) {
 // BenchmarkMemoryAllocations focuses on allocation patterns
 func BenchmarkMemoryAllocations(b *testing.B) {
 	// Create realistic test data for memory allocation analysis
-	testAdvices := make([]spot.Advice, 100)
-	for i := range testAdvices {
-		testAdvices[i] = spot.Advice{
-			Instance: "t2.micro",
-			Region:   "us-east-1",
-			Price:    0.0116,
-			Savings:  50,
-			Range:    spot.Range{Min: 0, Max: 5, Label: "<5%"},
-			Info:     spot.TypeInfo{Cores: 1, RAM: 1.0},
-		}
+	testCandidates := make([]cloud.Candidate, 100)
+	for i := range testCandidates {
+		testCandidates[i] = testCandidate{
+			Machine: "t2.micro", Region: "us-east-1", Price: 0.0116, Savings: 50,
+			RiskLabel: "<5%", RiskMin: 0, RiskMax: 5, VCPU: 1, MemoryGiB: 1,
+		}.build()
 	}
 
 	b.Run("ParameterParsing", func(b *testing.B) {
@@ -503,14 +476,14 @@ func BenchmarkMemoryAllocations(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			response := buildResponse(testAdvices, startTime, spot.DataSourceEmbedded)
+			response := buildResponse(testCandidates, startTime, cloud.DataModeEmbeddedSnapshot)
 			_ = response
 		}
 	})
 
 	b.Run("JSONMarshaling", func(b *testing.B) {
 		startTime := time.Now()
-		response := buildResponse(testAdvices, startTime, spot.DataSourceEmbedded)
+		response := buildResponse(testCandidates, startTime, cloud.DataModeEmbeddedSnapshot)
 
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -527,7 +500,7 @@ func BenchmarkMemoryAllocations(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			filtered := filterByInterruption(testAdvices, 25.0)
+			filtered := filterByInterruption(testCandidates, 25.0)
 			limited := applyLimit(filtered, 20)
 			_ = limited
 		}

@@ -1,0 +1,54 @@
+{
+  "schema_version": "1",
+  "verdict": "pass",
+  "summary": {
+    "gate_findings": 0,
+    "warnings": 1
+  },
+  "findings": [
+    {
+      "id": "bac6b2e4f1019c672ac2eec8dc470b31",
+      "kind": "advisory",
+      "rule_id": "bc/imbalanced_coupling",
+      "status": "new",
+      "severity": "critical",
+      "edge": {
+        "from": {
+          "module": "mcp",
+          "path": "internal/mcp/server.go"
+        },
+        "to": {
+          "module": "spot",
+          "path": "internal/spot"
+        },
+        "kind": "imports"
+      },
+      "locations": [
+        {
+          "file": "internal/mcp/server.go",
+          "line": 13
+        }
+      ],
+      "why": "balanced coupling: model integration strength x cross_module_same_owner distance x high volatility -> critical severity"
+    },
+    {
+      "id": "afce8fd54153d859cf8d3c61085a6a4e",
+      "kind": "advisory",
+      "rule_id": "bc/imbalanced_coupling",
+      "status": "new",
+      "severity": "medium",
+      "edge": {
+        "from": {
+          "module": "cmd_spotinfo",
+          "path": "cmd/spotinfo/provider_flags.go"
+        },
+        "to": {
+          "module": "cloud",
+          "path": "internal/cloud"
+        },
+        "kind": "imports"
+      },
+      "why": "balanced coupling: functional integration strength -> medium severity"
+    }
+  ]
+}

@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -145,7 +146,24 @@ func TestQueryMapsAdviceToNeutralCandidate(t *testing.T) {
 	assert.Equal(t, "us-east-1b", candidate.Placements[2].Location.Zone)
 
 	assert.Equal(t, cloud.DataModeEmbeddedSnapshot, result.Mode)
-	assert.Empty(t, result.Sources, "snapshot provenance arrives with manifests, and is never invented")
+	assertCommittedProvenance(t, result.Sources)
+}
+
+// assertCommittedProvenance checks that a result describes where its answer
+// came from. Every field the published v2 payload requires must be present:
+// provenance is read from the committed sidecar manifests, never invented.
+func assertCommittedProvenance(t *testing.T, sources []cloud.SourceRef) {
+	t.Helper()
+
+	require.NotEmpty(t, sources, "a result must report the snapshots it was built from")
+
+	for _, source := range sources {
+		assert.True(t, strings.HasPrefix(source.URL, "https://"), "source url %q", source.URL)
+		assert.False(t, source.FetchedAt.IsZero(), "source %q has no fetch time", source.URL)
+		assert.Regexp(t, "^[0-9a-f]{64}$", source.ContentSHA256, "source %q", source.URL)
+		assert.NotEmpty(t, source.ParserVersion, "source %q", source.URL)
+		assert.NotEmpty(t, source.SchemaVersion, "source %q", source.URL)
+	}
 }
 
 func TestQueryLeavesOptionalObservationsAbsent(t *testing.T) {
@@ -323,3 +341,38 @@ func TestProviderSatisfiesTheNeutralInterface(t *testing.T) {
 	var provider cloud.Provider = testProvider(t, &stubClient{})
 	assert.Equal(t, cloud.ProviderAWS, provider.ID())
 }
+
+// The advisor feed publishes an unvalidated savings integer. A figure outside
+// the 1..100 range is not a percentage of an on-demand price, so it is absent
+// rather than published — the same treatment an unpriced instance gets.
+func TestSavingsOutsideTheValidRangeIsNotPublished(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name    string
+		savings int
+		want    *int
+	}{
+		{name: "no data", savings: 0},
+		{name: "negative", savings: -5},
+		{name: "above one hundred percent", savings: 150},
+		{name: "lower bound", savings: 1, want: intPtr(1)},
+		{name: "upper bound", savings: 100, want: intPtr(100)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			client := &stubClient{advices: []spot.Advice{{
+				Region: "us-east-1", Instance: "m6i.large", Price: 0.0416, Savings: test.savings,
+				Info: spot.TypeInfo{Cores: 2, RAM: 8}, Range: spot.Range{Label: "<5%", Max: 5},
+			}}}
+
+			result, err := testProvider(t, client).Query(t.Context(), linuxQuery())
+			require.NoError(t, err)
+			require.Len(t, result.Candidates, 1)
+			assert.Equal(t, test.want, result.Candidates[0].SavingsPercent)
+		})
+	}
+}
+
+func intPtr(value int) *int { return &value }

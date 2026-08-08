@@ -608,15 +608,111 @@ Manual checks:
 - Confirm that unavailable risk is explicit and that `cost` does not imply interruption safety.
 - Confirm that the critical archfit finding is fixed, not hidden by configuration metadata.
 
-- [ ] Freeze the neutral cost-policy and `spotinfo.recommend/v2` contracts.
-- [ ] Move neutral recommendation filtering and ordering onto neutral candidates.
-- [ ] Preserve AWS recommendation v1 through an adapter and golden tests.
-- [ ] Add `recommend_spot_instances` and exact AWS/fake-provider MCP contracts.
-- [ ] Route existing AWS MCP response shaping through the neutral adapter without changing the existing tool contract.
-- [ ] Remove the direct `internal/mcp -> internal/spot` import.
-- [ ] Run focused, full, race, data, lint, build, and architecture gates.
-- [ ] Stop if any Critical or High archfit finding remains.
-- [ ] Commit the #38 slice before starting Task 5.
+- [x] Freeze the neutral cost-policy and `spotinfo.recommend/v2` contracts.
+- [x] Move neutral recommendation filtering and ordering onto neutral candidates.
+- [x] Preserve AWS recommendation v1 through an adapter and golden tests.
+- [x] Add `recommend_spot_instances` and exact AWS/fake-provider MCP contracts.
+- [x] Route existing AWS MCP response shaping through the neutral adapter without changing the existing tool contract.
+- [x] Remove the direct `internal/mcp -> internal/spot` import.
+- [x] Run focused, full, race, data, lint, build, and architecture gates.
+- [x] Stop if any Critical or High archfit finding remains.
+- [x] Commit the #38 slice before starting Task 5.
+
+Task 4 results:
+
+- Critical finding `bac6b2e4f1019c672ac2eec8dc470b31` is **fixed, not waived**: the
+  `internal/mcp -> internal/spot` edge no longer exists in production code, so
+  archfit reports neither the critical `mcp -> spot` advisory from `server.go`
+  nor the medium one from `tools.go`. Findings dropped 15 → 13, all medium;
+  coupling score 36 → 44; `critical-band edges: 0`.
+- `find_spot_instances` was **not** routed through `cloud.Provider.Query`
+  unchanged. `cloud.Query` carried none of the acquisition knobs that tool
+  advertises, so routing through it as it stood would have silently made
+  `with_score`, `min_score`, `az`, `score_timeout` and `sort_by` no-ops — and the
+  recorded golden would still have passed, because it injects a `RegionScore`
+  into fixed advice rather than asking for one. `cloud.Query` therefore gained
+  `Sort SortOrder` and `Placement PlacementRequest`, both already part of the
+  declared capability vocabulary, and
+  `TestToolParametersReachTheProviderQuery` asserts every parameter lands on the
+  query. Sorting still happens inside `internal/spot`; the adapter preserves the
+  provider's order, which `Result` now documents.
+- v1 compatibility is byte-identical against both goldens. The neutral domain
+  models an unknown price, an unpublished savings figure and an unlabelled risk
+  range as absences; `find_spot_instances` maps them back to the zeros v1
+  published, because it is the compatibility surface. `data_source` keeps its own
+  vocabulary (`aws`/`embedded`) mapped from `DataMode`.
+- Risk kinds are mapped to the wire enum through a table in `internal/cloud/schema.go`,
+  not by renaming the domain constants. The success schema freezes
+  `interruption_bucket|preemption_rate|eviction_rate`;
+  `TestEveryDeclaredRiskKindHasAPublishedName` scans the package AST for every
+  `RiskKind` constant, so a kind added in Task 5 fails there instead of shipping
+  a value outside the enum. An unmapped kind fails closed as `INTERNAL`.
+- `data_source.sources` requires at least one complete entry, so the AWS provider
+  now reads `spot.EmbeddedSourceRefs()` in `New` and a build that cannot describe
+  its provenance is disabled by the registry. The architecture manifest has no
+  upstream hash — nobody fetched and hashed the AWS documentation page — so
+  `Manifest.SourceRefs()` falls back to the payload hash there. Every published
+  reference then identifies bytes this repository can verify; for a raw feed the
+  two hashes are equal by construction, so nothing else changed. A live answer
+  still reports the committed manifests: they are the provenance of the data the
+  parser was written against.
+- CLI schema routing: AWS under `web`, `ci` or `batch` keeps `spotinfo.recommend/v1`
+  and its legacy acquisition path. Every other combination — another cloud, or
+  the risk-free `cost` policy on any cloud including AWS — is answered by the
+  neutral engine and `spotinfo.recommend/v2`. `--workload` lost its `Value:` for
+  the same reason `--cloud` did in Task 3: the default depends on the provider
+  (`web` where risk is published, `cost` where it is not), so "unset" has to stay
+  distinguishable from "set to web".
+- Task 3's `TestRecommendRejectsAProviderWithoutRisk` encoded the behaviour this
+  task changes and was replaced: a risk-free provider now defaults to `cost` and
+  is served, reporting `NO_CANDIDATES` for an empty result rather than
+  `UNSUPPORTED_CAPABILITY`. Asking for a capped workload explicitly still fails
+  before acquisition.
+- The ranker re-applies every constraint over neutral candidates rather than
+  trusting the provider, and `compareScored` is a total order over
+  (price nanos, excess vCPU, excess memory, region, machine), so
+  `TestRankingIsIndependentOfCandidateOrder` runs all 24 permutations of a
+  four-candidate set and gets one answer. A risk-aware workload drops a candidate
+  whose risk is unknown instead of ranking it as if it had cleared the cap.
+- No JSON Schema library was added, keeping the zero-dependency runtime. The
+  contracts in `docs/plans/contracts/` are enforced by a ~130-line checker in
+  `internal/mcp/jsonschema_test.go` covering exactly the keywords they use. Its
+  ceiling is documented there: reach for a real validator if the contracts start
+  using `$ref`, `allOf`, or conditionals.
+- The advisor feed publishes an unvalidated savings integer, and the v2 schema
+  bounds `savings_percent` to 0..100. The AWS adapter now treats a figure above
+  100 as unpublished, exactly as it already treated `<= 0`, and
+  `recommendationDTO` fails closed on an out-of-range value so a Task 5 provider
+  that derives savings rather than reading it cannot publish a payload the
+  schema rejects.
+- `find_spot_instances` and `list_spot_regions` are AWS-only by contract:
+  `queryAWS` resolves `cloud.ProviderAWS` and nothing else, which is why
+  `Query.CapabilityNeeds()` demanding risk only for a risk-ordered query is safe
+  here — the tools render an interruption column and AWS always publishes one.
+  `queryAWS` is not a generic helper; a second cloud on those tools would need
+  the capability request widened first.
+- `make verify-architecture` was checked on both paths: it passes on the current
+  tree, and a failing analyze step aborts the target instead of feeding an empty
+  document to the checker (verified against a simulated failure, since archfit
+  itself does not fail here).
+- `internal/mcp/mocks_test.go` was deleted and the `spotinfo/internal/mcp` entry
+  removed from `.mockery.yaml`: the mocked `spotClient` interface is gone, and the
+  remaining seam is a two-method registry where a programmable stub reads better
+  than a generated mock.
+- `internal/mcp` test helpers still build the real embedded AWS client — that is
+  the point of the race and bench tests, which exercise `spot.Client`'s
+  `sync.Once` and shared providers. The new `mcp` import policy in
+  `dependencies_test.go` is therefore `productionOnly`; archfit gates the shipped
+  boundary, and the policy walker now keys imports by file rather than by
+  directory so a policy can apply to production code without exempting a package.
+- `make verify-architecture` runs the rule gate, then writes
+  `archfit analyze --json` to a temporary file and feeds it to
+  `go run ./cmd/archfitcheck`. A pipeline would report only the last command's
+  status and hand the checker an empty document on an archfit failure. The
+  checker treats only `fixed`, `resolved`, `waived` and `baselined` as closed —
+  any status it has not seen counts as open, so a new archfit status cannot hide
+  a Critical finding. CI runs `make verify-architecture` in place of the
+  rule-only target.
 
 ### Task 5: Add GCP and Azure providers, then run final verification and documentation
 

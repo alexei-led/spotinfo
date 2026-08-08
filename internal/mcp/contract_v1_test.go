@@ -10,10 +10,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-
-	"spotinfo/internal/spot"
 )
 
 // The goldens in testdata record the AWS v1 MCP contract before the
@@ -25,7 +22,7 @@ import (
 // can alter the schema without any change in this repository.
 
 func TestFindSpotInstancesInputSchemaMatchesRecordedV1Contract(t *testing.T) {
-	server, err := NewServer(Config{Version: "1.0.0", Logger: slog.Default(), SpotClient: newMockspotClient(t)})
+	server, err := NewServer(Config{Version: "1.0.0", Logger: slog.Default(), Providers: newEmbeddedRegistry()})
 	require.NoError(t, err)
 
 	registered, ok := server.mcpServer.ListTools()["find_spot_instances"]
@@ -38,23 +35,19 @@ func TestFindSpotInstancesInputSchemaMatchesRecordedV1Contract(t *testing.T) {
 
 func TestFindSpotInstancesResponseMatchesRecordedV1Contract(t *testing.T) {
 	regionScore := 8
-	client := newMockspotClient(t)
-	client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return([]spot.Advice{
-		{
-			Region: "us-east-1", Instance: "m6i.large", InstanceType: "m6i.large",
-			Range: spot.Range{Label: "<5%", Min: 0, Max: 5}, Savings: 72,
-			Info: spot.TypeInfo{Cores: 2, RAM: 8}, Price: 0.0416,
+	_, registry := awsStub(buildCandidates(
+		testCandidate{
+			Region: "us-east-1", Machine: "m6i.large", Price: 0.0416, Savings: 72,
+			RiskLabel: "<5%", RiskMin: 0, RiskMax: 5, VCPU: 2, MemoryGiB: 8,
 		},
-		{
-			Region: "us-west-2", Instance: "m5.xlarge", InstanceType: "m5.xlarge",
-			Range: spot.Range{Label: "5-10%", Min: 5, Max: 11}, Savings: 65,
-			Info: spot.TypeInfo{Cores: 4, RAM: 16}, Price: 0.1234, LivePrice: true,
+		testCandidate{
+			Region: "us-west-2", Machine: "m5.xlarge", Price: 0.1234, Savings: 65, Live: true,
+			RiskLabel: "5-10%", RiskMin: 5, RiskMax: 11, VCPU: 4, MemoryGiB: 16,
 			RegionScore: &regionScore,
 		},
-	}, nil).Once()
-	client.EXPECT().DataSource().Return(spot.DataSourceEmbedded).Once()
+	)...)
 
-	result, err := NewFindSpotInstancesTool(client, slog.Default()).
+	result, err := NewFindSpotInstancesTool(registry, slog.Default()).
 		Handle(t.Context(), mcp.CallToolRequest{})
 	require.NoError(t, err)
 	require.False(t, result.IsError)

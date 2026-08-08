@@ -28,6 +28,10 @@ const (
 
 	bitSize32 = 32
 	bitSize64 = 64
+
+	// maxSavingsPercent is the largest savings figure that can be a percentage
+	// of an on-demand price. The feed publishes an unvalidated integer.
+	maxSavingsPercent = 100
 )
 
 // savingsClient is the slice of the legacy AWS client this adapter consumes.
@@ -47,11 +51,16 @@ type architectureLookup interface {
 type Provider struct {
 	client        savingsClient
 	architectures architectureLookup
+	sources       []cloud.SourceRef
 }
 
 // New builds the AWS provider. Both collaborators are required: without the
 // architecture lookup the provider would have to guess architectures, and
 // guessing is what the reviewed snapshot exists to prevent.
+//
+// Provenance is read once, from the committed sidecar manifests. A build that
+// cannot describe where its data came from fails here, so the registry disables
+// AWS rather than serving answers with invented provenance.
 func New(client savingsClient, architectures architectureLookup) (*Provider, error) {
 	if client == nil {
 		return nil, errors.New("aws provider requires a spot client")
@@ -60,7 +69,12 @@ func New(client savingsClient, architectures architectureLookup) (*Provider, err
 		return nil, errors.New("aws provider requires an architecture lookup")
 	}
 
-	return &Provider{client: client, architectures: architectures}, nil
+	sources, err := spot.EmbeddedSourceRefs()
+	if err != nil {
+		return nil, fmt.Errorf("aws snapshot provenance: %w", err)
+	}
+
+	return &Provider{client: client, architectures: architectures, sources: sources}, nil
 }
 
 // ID identifies this provider.
@@ -119,8 +133,10 @@ func (p *Provider) Query(ctx context.Context, query *cloud.Query) (cloud.Result,
 	return cloud.Result{
 		Provider: cloud.ProviderAWS,
 		Mode:     dataMode(p.client.DataSource()),
-		// Sources stays empty until AWS snapshots carry sidecar manifests (#36).
-		// An invented URL and fetch time would be worse than no provenance.
+		// The committed manifests describe the snapshots this binary parses. A
+		// live answer still reports them: they are the provenance of the data the
+		// parser was written against, and the live feed publishes none of its own.
+		Sources:    slices.Clone(p.sources),
 		Candidates: candidates,
 	}, nil
 }
@@ -150,6 +166,48 @@ func legacyOptions(query *cloud.Query) []spot.GetSpotSavingsOption {
 	}
 	if query.MaxPrice != nil {
 		opts = append(opts, spot.WithMaxPrice(query.MaxPrice.Float64()))
+	}
+	opts = append(opts, spot.WithSort(legacySortBy(query.Sort.Key), query.Sort.Descending))
+
+	return append(opts, legacyPlacementOptions(&query.Placement)...)
+}
+
+// legacySortBy maps a neutral sort key onto the legacy client's own ordering.
+// An unset key keeps the legacy default, so a query that expresses no
+// preference gets the order every existing AWS caller already sees.
+func legacySortBy(key cloud.SortKey) spot.SortBy {
+	switch key {
+	case cloud.SortByPrice:
+		return spot.SortByPrice
+	case cloud.SortBySavings:
+		return spot.SortBySavings
+	case cloud.SortByMachine:
+		return spot.SortByInstance
+	case cloud.SortByRegion:
+		return spot.SortByRegion
+	case cloud.SortByPlacementScore:
+		return spot.SortByScore
+	case cloud.SortByRisk:
+		return spot.SortByRange
+	default:
+		return spot.SortByRange
+	}
+}
+
+// legacyPlacementOptions mirrors the legacy split exactly: score enrichment and
+// its zone and timeout settings are requested together, while a minimum score
+// filters whatever scores are present.
+func legacyPlacementOptions(placement *cloud.PlacementRequest) []spot.GetSpotSavingsOption {
+	var opts []spot.GetSpotSavingsOption
+
+	if placement.Enabled {
+		opts = append(opts, spot.WithScores(true), spot.WithSingleAvailabilityZone(placement.SingleZone))
+		if placement.Timeout > 0 {
+			opts = append(opts, spot.WithScoreTimeout(placement.Timeout))
+		}
+	}
+	if placement.MinScore > 0 {
+		opts = append(opts, spot.WithMinScore(placement.MinScore))
 	}
 
 	return opts
@@ -301,10 +359,12 @@ func risk(advisorRange spot.Range) cloud.RiskObservation {
 	}
 }
 
-// savingsPercent keeps a savings figure only when the feed published one. Zero
-// is the advisor's "no data" value, not a claim that spot costs list price.
+// savingsPercent keeps a savings figure only when the feed published a usable
+// one. Zero is the advisor's "no data" value, not a claim that spot costs list
+// price, and a figure above 100 is not a percentage of on-demand at all — both
+// are absences rather than measurements.
 func savingsPercent(savings int) *int {
-	if savings <= 0 {
+	if savings <= 0 || savings > maxSavingsPercent {
 		return nil
 	}
 

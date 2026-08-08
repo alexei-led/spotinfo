@@ -7,12 +7,15 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v2"
 
+	"spotinfo/internal/cloud"
+	"spotinfo/internal/providers"
 	"spotinfo/internal/spot"
 )
 
@@ -270,4 +273,166 @@ func TestSpotinfoAppAssemblyPreservesRootInvocationAndRegistersRecommend(t *test
 	err := app.Run([]string{"spotinfo", "--type", "m6i.*", "--output", "json"})
 	require.NoError(t, err)
 	assert.Contains(t, output.String(), "m6i.large")
+}
+
+// neutralCandidate is one offline Linux machine with no published risk — the
+// shape a committed GCP or Azure snapshot has.
+func neutralCandidate(id cloud.ProviderID, region, machine, price string, vcpu int, memoryGiB float64) cloud.Candidate {
+	amount, err := cloud.ParseMoney(price)
+	if err != nil {
+		panic(err)
+	}
+	location := cloud.Location{Region: cloud.Region(region)}
+
+	return cloud.Candidate{
+		Provider: id,
+		OS:       cloud.OSLinux,
+		Location: location,
+		Machine: cloud.MachineSpec{
+			ID: cloud.MachineID(machine), Architecture: cloud.ArchitectureX8664,
+			MemoryGiB: memoryGiB, VCPU: vcpu,
+		},
+		Spot: &cloud.PriceObservation{
+			Location: location, Class: cloud.PriceClassSpot, Currency: cloud.CurrencyUSD,
+			Unit: cloud.BillingUnitInstanceHour, Amount: amount,
+		},
+		Risk: cloud.UnavailableRisk(),
+	}
+}
+
+func neutralResult(id cloud.ProviderID, candidates ...cloud.Candidate) cloud.Result {
+	return cloud.Result{
+		Provider: id,
+		Mode:     cloud.DataModeEmbeddedSnapshot,
+		Sources: []cloud.SourceRef{{
+			FetchedAt:     time.Date(2026, time.August, 6, 8, 58, 27, 0, time.UTC),
+			URL:           "https://example.invalid/catalog.json",
+			ContentSHA256: "f42df66cd52c9dc3ac28b6bb7e525627696eec60692d5cf56658c679f0012393",
+			ParserVersion: "test-parser/1",
+			SchemaVersion: "test-feed/v1",
+		}},
+		Candidates: candidates,
+	}
+}
+
+// offlineRegistry registers one enabled provider serving committed Linux prices
+// with no risk data.
+func offlineRegistry(id cloud.ProviderID, candidates ...cloud.Candidate) *providers.Registry {
+	return mustRegistry(registrationOf(stubProvider{
+		id:           id,
+		capabilities: offlineLinuxCapabilities(),
+		result:       neutralResult(id, candidates...),
+	}))
+}
+
+// A cloud other than AWS is answered by the neutral engine and the v2 schema.
+func TestRecommendServesANonAWSCloudWithTheV2Schema(t *testing.T) {
+	registry := offlineRegistry(cloud.ProviderGCP,
+		neutralCandidate(cloud.ProviderGCP, "europe-west1", "n2-standard-2", "0.021", 2, 8),
+		neutralCandidate(cloud.ProviderGCP, "us-central1", "n2-standard-4", "0.011", 4, 16),
+	)
+
+	var output bytes.Buffer
+	app := newSpotinfoApp(
+		func(*cli.Context) error { return nil },
+		func(ctx *cli.Context) error {
+			return execRecommendCmd(ctx, context.Background(), registry, newMockspotClient(t), &output)
+		},
+	)
+	require.NoError(t, app.Run(recommendArgs("--cloud", "gcp", "--region", "all", "--output", "json")))
+
+	var report cloud.RecommendReport
+	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+
+	assert.Equal(t, cloud.SchemaVersionRecommendV2, report.SchemaVersion)
+	assert.Equal(t, cloud.ProviderGCP, report.Request.Cloud)
+	assert.Equal(t, cloud.WorkloadCost, report.Request.Workload,
+		"a cloud without risk data defaults to the risk-free cost policy")
+	require.Len(t, report.Recommendations, 2)
+	assert.Equal(t, cloud.MachineID("n2-standard-4"), report.Recommendations[0].Machine, "cheapest first")
+	assert.Equal(t, cloud.RiskStatusUnavailable, report.Recommendations[0].Risk.Status)
+	assert.Equal(t, cloud.RankingPolicy(), report.RankingPolicy)
+}
+
+// The cost policy is served by the neutral engine on every cloud, including
+// AWS, which the v1 schema never offered.
+func TestRecommendServesTheCostPolicyOnAWSWithTheV2Schema(t *testing.T) {
+	registry := mustRegistry(registrationOf(stubProvider{
+		id:           cloud.ProviderAWS,
+		capabilities: awsCapabilities(),
+		result: neutralResult(cloud.ProviderAWS,
+			neutralCandidate(cloud.ProviderAWS, "us-east-1", "m6i.large", "0.0416", 2, 8)),
+	}))
+
+	var output bytes.Buffer
+	app := newSpotinfoApp(
+		func(*cli.Context) error { return nil },
+		func(ctx *cli.Context) error {
+			return execRecommendCmd(ctx, context.Background(), registry, newMockspotClient(t), &output)
+		},
+	)
+	require.NoError(t, app.Run(recommendArgs("--workload", "cost", "--output", "json")))
+
+	var report cloud.RecommendReport
+	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+	assert.Equal(t, cloud.SchemaVersionRecommendV2, report.SchemaVersion)
+	assert.Equal(t, cloud.ProviderAWS, report.Request.Cloud)
+	assert.Equal(t, cloud.WorkloadCost, report.Request.Workload)
+	require.Len(t, report.Recommendations, 1)
+	assert.Equal(t, "0.041600000", report.Recommendations[0].SpotUSDPerHour)
+}
+
+// The v2 table names the risk status rather than leaving a blank column that
+// could read as "no interruptions".
+func TestNeutralRecommendationTableNamesUnavailableRisk(t *testing.T) {
+	registry := offlineRegistry(cloud.ProviderGCP,
+		neutralCandidate(cloud.ProviderGCP, "europe-west1", "n2-standard-2", "0.021", 2, 8))
+
+	var output bytes.Buffer
+	app := newSpotinfoApp(
+		func(*cli.Context) error { return nil },
+		func(ctx *cli.Context) error {
+			return execRecommendCmd(ctx, context.Background(), registry, newMockspotClient(t), &output)
+		},
+	)
+	require.NoError(t, app.Run(recommendArgs("--cloud", "gcp", "--region", "all")))
+
+	assert.Contains(t, output.String(), "RANK  CLOUD")
+	assert.Contains(t, output.String(), "n2-standard-2")
+	assert.Contains(t, output.String(), string(cloud.RiskStatusUnavailable))
+	assert.Contains(t, output.String(), "COST_POLICY")
+}
+
+// An AWS request under a v1 workload still produces the v1 schema.
+func TestRecommendKeepsTheV1SchemaForAWSWorkloads(t *testing.T) {
+	client := newMockspotClient(t)
+	client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return([]spot.Advice{{
+		Region: "us-east-1", Instance: "m6i.large", Price: 0.04, Savings: 72,
+		Info: spot.TypeInfo{Cores: 2, RAM: 8}, Range: spot.Range{Label: "<5%", Max: 5},
+	}}, nil).Once()
+
+	var output bytes.Buffer
+	require.NoError(t, recommendTestApp(client, &output).Run(recommendArgs("--output", "json")))
+
+	var report recommendationReport
+	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+	assert.Equal(t, recommendationSchemaVersion, report.SchemaVersion)
+	assert.Equal(t, spot.WorkloadWeb, report.Request.Workload, "AWS still defaults to the web interruption cap")
+}
+
+// The v2 path reports no candidates rather than an empty recommendation list.
+func TestNeutralRecommendReportsNoCandidates(t *testing.T) {
+	registry := offlineRegistry(cloud.ProviderGCP)
+
+	var output bytes.Buffer
+	app := newSpotinfoApp(
+		func(*cli.Context) error { return nil },
+		func(ctx *cli.Context) error {
+			return execRecommendCmd(ctx, context.Background(), registry, newMockspotClient(t), &output)
+		},
+	)
+
+	err := app.Run(recommendArgs("--cloud", "gcp", "--region", "all", "--output", "json"))
+	require.ErrorIs(t, err, cloud.ErrNoCandidates)
+	assert.Empty(t, output.String())
 }

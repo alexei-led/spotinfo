@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/spf13/cast"
 
-	"spotinfo/internal/spot"
+	"spotinfo/internal/cloud"
 )
 
 // Constants for configuration values
@@ -47,6 +49,9 @@ const (
 	argScoreTimeout        = "score_timeout"
 	// allRegions is the "regions" argument value meaning every AWS region.
 	allRegions = "all"
+	// jsonSchemaType and jsonTypeString declare an array item's element type.
+	jsonSchemaType = "type"
+	jsonTypeString = "string"
 )
 
 // JSON field names of the MCP tool responses.
@@ -79,6 +84,14 @@ const (
 	fieldTotal             = "total"
 )
 
+// data_source values of the v1 AWS tools. They are the legacy vocabulary the
+// tool published before providers existed and are kept verbatim: a client
+// matching on "embedded" must keep working.
+const (
+	dataSourceLive     = "aws"
+	dataSourceEmbedded = "embedded"
+)
+
 // Freshness reported alongside the data source. Derived from the source rather
 // than asserted: metadata claiming "current" while serving a months-old
 // embedded snapshot is worse than no metadata at all.
@@ -87,9 +100,18 @@ const (
 	dataFreshnessSnapshot = "embedded-snapshot"
 )
 
-// freshnessFor maps a spot data source onto the freshness it can honestly claim.
-func freshnessFor(source string) string {
-	if source == spot.DataSourceAWS {
+// dataSourceFor maps a neutral data mode onto the v1 data_source value.
+func dataSourceFor(mode cloud.DataMode) string {
+	if mode == cloud.DataModeLive {
+		return dataSourceLive
+	}
+
+	return dataSourceEmbedded
+}
+
+// freshnessFor maps a neutral data mode onto the freshness it can honestly claim.
+func freshnessFor(mode cloud.DataMode) string {
+	if mode == cloud.DataModeLive {
 		return dataFreshnessLive
 	}
 
@@ -98,15 +120,15 @@ func freshnessFor(source string) string {
 
 // FindSpotInstancesTool implements the find_spot_instances MCP tool
 type FindSpotInstancesTool struct {
-	client spotClient
-	logger *slog.Logger
+	providers providerRegistry
+	logger    *slog.Logger
 }
 
 // NewFindSpotInstancesTool creates a new find_spot_instances tool handler
-func NewFindSpotInstancesTool(client spotClient, logger *slog.Logger) *FindSpotInstancesTool {
+func NewFindSpotInstancesTool(providers providerRegistry, logger *slog.Logger) *FindSpotInstancesTool {
 	return &FindSpotInstancesTool{
-		client: client,
-		logger: logger,
+		providers: providers,
+		logger:    logger,
 	}
 }
 
@@ -120,43 +142,17 @@ func (t *FindSpotInstancesTool) Handle(ctx context.Context, req mcp.CallToolRequ
 	t.logger.Debug("handling find_spot_instances request", slog.Any("arguments", req.Params.Arguments))
 
 	params := parseParameters(req.Params.Arguments)
-	spotSortBy, sortDesc := convertSortParams(params.sortBy)
 
-	// Build options from parameters
-	opts := []spot.GetSpotSavingsOption{
-		spot.WithRegions(params.regions),
-		spot.WithPattern(params.instanceTypes),
-		spot.WithOS("linux"),
-		spot.WithCPU(params.minVCPU),
-		spot.WithMemory(params.minMemoryGB),
-		spot.WithMaxPrice(params.maxPrice),
-		spot.WithSort(spotSortBy, sortDesc),
-	}
-
-	// Add score-related options if requested
-	if params.withScore {
-		scoreOpts := []spot.GetSpotSavingsOption{
-			spot.WithScores(true),
-			spot.WithSingleAvailabilityZone(params.az),
-		}
-		if params.scoreTimeout > 0 {
-			scoreOpts = append(scoreOpts, spot.WithScoreTimeout(time.Duration(params.scoreTimeout)*time.Second))
-		}
-		opts = append(opts, scoreOpts...)
-	}
-	if params.minScore > 0 {
-		opts = append(opts, spot.WithMinScore(params.minScore))
-	}
-
-	advices, err := t.client.GetSpotSavings(ctx, opts...)
+	result, err := queryAWS(ctx, t.providers, params.query())
 	if err != nil {
 		t.logger.Error("failed to get spot savings", slog.Any("error", err))
+
 		return createErrorResult(fmt.Sprintf("Failed to get spot recommendations: %v", err)), nil
 	}
 
-	filteredAdvices := filterByInterruption(advices, params.maxInterruption)
-	limitedAdvices := applyLimit(filteredAdvices, params.limit)
-	response := buildResponse(limitedAdvices, startTime, t.client.DataSource())
+	filtered := filterByInterruption(result.Candidates, params.maxInterruption)
+	limited := applyLimit(filtered, params.limit)
+	response := buildResponse(limited, startTime, result.Mode)
 
 	results, ok := response[fieldResults].([]map[string]any)
 	if !ok {
@@ -167,6 +163,24 @@ func (t *FindSpotInstancesTool) Handle(ctx context.Context, req mcp.CallToolRequ
 		slog.Int64(fieldQueryTimeMS, time.Since(startTime).Milliseconds()))
 
 	return marshalResponse(response)
+}
+
+// queryAWS resolves the AWS provider and acquires candidates. The capability
+// check runs before acquisition, so an unsupported request costs no I/O.
+func queryAWS(ctx context.Context, registry providerRegistry, query *cloud.Query) (cloud.Result, error) {
+	if registry == nil {
+		return cloud.Result{}, fmt.Errorf("%w: no provider registry is configured", cloud.ErrDataUnavailable)
+	}
+
+	provider, err := registry.Get(cloud.ProviderAWS)
+	if err != nil {
+		return cloud.Result{}, err
+	}
+	if err := provider.Capabilities().Require(query.CapabilityNeeds()); err != nil {
+		return cloud.Result{}, err
+	}
+
+	return provider.Query(ctx, query)
 }
 
 // params holds parsed parameters for easier handling
@@ -183,6 +197,38 @@ type params struct { //nolint:govet
 	minScore        int
 	az              bool
 	scoreTimeout    int
+}
+
+// query builds the neutral acquisition request. A zero maximum price is the v1
+// "no ceiling" value, not a ceiling of nothing; an unparsable price is dropped
+// rather than turned into a filter the caller did not ask for.
+func (p *params) query() *cloud.Query {
+	regions := make([]cloud.Region, 0, len(p.regions))
+	for _, region := range p.regions {
+		regions = append(regions, cloud.Region(region))
+	}
+
+	query := &cloud.Query{
+		MachinePattern: p.instanceTypes,
+		OS:             cloud.OSLinux,
+		Regions:        regions,
+		Sort:           sortOrderFor(p.sortBy),
+		Placement: cloud.PlacementRequest{
+			Timeout:    time.Duration(p.scoreTimeout) * time.Second,
+			MinScore:   p.minScore,
+			SingleZone: p.az,
+			Enabled:    p.withScore,
+		},
+		MinMemoryGiB: float64(p.minMemoryGB),
+		MinVCPU:      p.minVCPU,
+	}
+	if p.maxPrice > 0 {
+		if ceiling, err := cloud.MoneyFromFloat(p.maxPrice); err == nil {
+			query.MaxPrice = &ceiling
+		}
+	}
+
+	return query
 }
 
 // parseParameters extracts all parameters from the request arguments
@@ -213,105 +259,156 @@ func parseParameters(arguments any) *params {
 	}
 }
 
-// convertSortParams converts string sort parameter to internal types
-func convertSortParams(sortBy string) (spot.SortBy, bool) {
+// sortOrderFor converts the tool's sort_by parameter to a neutral sort order.
+func sortOrderFor(sortBy string) cloud.SortOrder {
 	switch sortBy {
 	case sortByPrice:
-		return spot.SortByPrice, false
+		return cloud.SortOrder{Key: cloud.SortByPrice}
 	case sortByReliability:
-		return spot.SortByRange, false
+		return cloud.SortOrder{Key: cloud.SortByRisk}
 	case sortBySavings:
-		return spot.SortBySavings, true
+		return cloud.SortOrder{Key: cloud.SortBySavings, Descending: true}
 	case sortByScore:
-		return spot.SortByScore, false
+		return cloud.SortOrder{Key: cloud.SortByPlacementScore}
 	default:
-		return spot.SortByRange, false
+		return cloud.SortOrder{Key: cloud.SortByRisk}
 	}
 }
 
-// filterByInterruption filters advices by maximum interruption rate
-func filterByInterruption(advices []spot.Advice, maxInterruptionParam float64) []spot.Advice {
+// filterByInterruption filters candidates by maximum interruption rate
+func filterByInterruption(candidates []cloud.Candidate, maxInterruptionParam float64) []cloud.Candidate {
 	if maxInterruptionParam <= 0 || maxInterruptionParam >= maxInterruption {
-		return advices
+		return candidates
 	}
 
-	filtered := make([]spot.Advice, 0, len(advices))
-	for _, advice := range advices {
-		if calculateAvgInterruption(advice.Range) <= maxInterruptionParam {
-			filtered = append(filtered, advice)
+	filtered := make([]cloud.Candidate, 0, len(candidates))
+	for i := range candidates {
+		if calculateAvgInterruption(&candidates[i].Risk) <= maxInterruptionParam {
+			filtered = append(filtered, candidates[i])
 		}
 	}
+
 	return filtered
 }
 
 // applyLimit limits the number of results
-func applyLimit(advices []spot.Advice, limit int) []spot.Advice {
-	if len(advices) <= limit {
-		return advices
+func applyLimit(candidates []cloud.Candidate, limit int) []cloud.Candidate {
+	if len(candidates) <= limit {
+		return candidates
 	}
-	return advices[:limit]
+
+	return candidates[:limit]
 }
 
-// buildResponse creates the response map from filtered advices
-func buildResponse(advices []spot.Advice, startTime time.Time, dataSource string) map[string]any {
-	results := make([]map[string]any, len(advices))
+// buildResponse creates the response map from filtered candidates
+func buildResponse(candidates []cloud.Candidate, startTime time.Time, mode cloud.DataMode) map[string]any {
+	results := make([]map[string]any, len(candidates))
 	regionsSearched := make(map[string]bool)
 
-	for i, advice := range advices {
-		regionsSearched[advice.Region] = true
-		avgInterruption := calculateAvgInterruption(advice.Range)
+	for i := range candidates {
+		candidate := &candidates[i]
+		regionsSearched[string(candidate.Location.Region)] = true
+		avgInterruption := calculateAvgInterruption(&candidate.Risk)
+		price := spotPrice(candidate)
 
 		result := map[string]any{
-			fieldInstanceType:      advice.Instance,
-			fieldRegion:            advice.Region,
-			fieldSpotPricePerHour:  advice.Price,
-			fieldSpotPrice:         fmt.Sprintf("$%.4f/hour", advice.Price),
-			fieldSavingsPercentage: advice.Savings,
-			fieldSavings:           fmt.Sprintf("%d%% cheaper than on-demand", advice.Savings),
+			fieldInstanceType:      string(candidate.Machine.ID),
+			fieldRegion:            string(candidate.Location.Region),
+			fieldSpotPricePerHour:  price,
+			fieldSpotPrice:         fmt.Sprintf("$%.4f/hour", price),
+			fieldSavingsPercentage: savingsPercent(candidate),
+			fieldSavings:           fmt.Sprintf("%d%% cheaper than on-demand", savingsPercent(candidate)),
 			fieldInterruptionRate:  avgInterruption,
-			fieldInterruptionFreq:  advice.Range.Label,
-			fieldInterruptionRange: fmt.Sprintf("%d-%d%%", advice.Range.Min, advice.Range.Max),
-			fieldVCPU:              advice.Info.Cores,
-			fieldMemoryGB:          advice.Info.RAM,
-			fieldSpecs:             fmt.Sprintf("%d vCPU, %.0f GB RAM", advice.Info.Cores, advice.Info.RAM),
+			fieldInterruptionFreq:  candidate.Risk.Label,
+			fieldInterruptionRange: interruptionRange(&candidate.Risk),
+			fieldVCPU:              candidate.Machine.VCPU,
+			fieldMemoryGB:          candidate.Machine.MemoryGiB,
+			fieldSpecs:             fmt.Sprintf("%d vCPU, %.0f GB RAM", candidate.Machine.VCPU, candidate.Machine.MemoryGiB),
 			fieldReliabilityScore:  calculateReliabilityScore(avgInterruption),
-			fieldLivePrice:         advice.LivePrice,
+			fieldLivePrice:         candidate.Spot != nil && candidate.Spot.Live,
 		}
-
-		// Add score-related fields when available
-		if advice.RegionScore != nil {
-			result[fieldRegionScore] = *advice.RegionScore
-		}
-		if len(advice.ZoneScores) > 0 {
-			result[fieldZoneScores] = advice.ZoneScores
-		}
-		if advice.ScoreFetchedAt != nil {
-			result[fieldScoreFetchedAt] = advice.ScoreFetchedAt.Format(time.RFC3339)
-		}
+		addPlacementFields(result, candidate.Placements)
 
 		results[i] = result
-	}
-
-	searchedRegions := make([]string, 0, len(regionsSearched))
-	for region := range regionsSearched {
-		searchedRegions = append(searchedRegions, region)
 	}
 
 	return map[string]any{
 		fieldResults: results,
 		fieldMetadata: map[string]any{
 			fieldTotalResults:    len(results),
-			fieldRegionsSearched: searchedRegions,
+			fieldRegionsSearched: slices.Collect(maps.Keys(regionsSearched)),
 			fieldQueryTimeMS:     time.Since(startTime).Milliseconds(),
-			fieldDataSource:      dataSource,
-			fieldDataFreshness:   freshnessFor(dataSource),
+			fieldDataSource:      dataSourceFor(mode),
+			fieldDataFreshness:   freshnessFor(mode),
 		},
 	}
 }
 
+// addPlacementFields republishes placement scores in their v1 shape: one
+// regional score, or a zone-to-score map, with the fetch time they share.
+func addPlacementFields(result map[string]any, placements []cloud.PlacementObservation) {
+	zoneScores := make(map[string]int)
+
+	for i := range placements {
+		placement := &placements[i]
+		if placement.Location.Zone == "" {
+			result[fieldRegionScore] = placement.Score
+		} else {
+			zoneScores[placement.Location.Zone] = placement.Score
+		}
+		if placement.FetchedAt != nil {
+			result[fieldScoreFetchedAt] = placement.FetchedAt.Format(time.RFC3339)
+		}
+	}
+
+	if len(zoneScores) > 0 {
+		result[fieldZoneScores] = zoneScores
+	}
+}
+
+// spotPrice reports the v1 price. An unknown price stays zero: that is what the
+// v1 contract published, and this tool is the compatibility surface.
+func spotPrice(candidate *cloud.Candidate) float64 {
+	if candidate.Spot == nil {
+		return 0
+	}
+
+	return candidate.Spot.Amount.Float64()
+}
+
+// savingsPercent reports the v1 savings figure, where zero means "not published".
+func savingsPercent(candidate *cloud.Candidate) int {
+	if candidate.SavingsPercent == nil {
+		return 0
+	}
+
+	return *candidate.SavingsPercent
+}
+
+// interruptionRange renders the v1 percentage range. A candidate with no
+// published risk renders the same "0-0%" v1 produced for an unlabelled range.
+func interruptionRange(risk *cloud.RiskObservation) string {
+	low, high := interruptionBounds(risk)
+
+	return fmt.Sprintf("%d-%d%%", int(low), int(high))
+}
+
+func interruptionBounds(risk *cloud.RiskObservation) (low, high float64) {
+	if risk.MinPercent != nil {
+		low = *risk.MinPercent
+	}
+	if risk.MaxPercent != nil {
+		high = *risk.MaxPercent
+	}
+
+	return low, high
+}
+
 // calculateAvgInterruption calculates average interruption rate
-func calculateAvgInterruption(r spot.Range) float64 {
-	return float64(r.Min+r.Max) / avgDivisor
+func calculateAvgInterruption(risk *cloud.RiskObservation) float64 {
+	low, high := interruptionBounds(risk)
+
+	return (low + high) / avgDivisor
 }
 
 // calculateReliabilityScore creates a reliability score based on interruption frequency
@@ -365,15 +462,15 @@ func getStringSliceWithDefault(args map[string]any, key string, defaultValue []s
 
 // ListSpotRegionsTool implements the list_spot_regions MCP tool
 type ListSpotRegionsTool struct {
-	client spotClient
-	logger *slog.Logger
+	providers providerRegistry
+	logger    *slog.Logger
 }
 
 // NewListSpotRegionsTool creates a new list_spot_regions tool handler
-func NewListSpotRegionsTool(client spotClient, logger *slog.Logger) *ListSpotRegionsTool {
+func NewListSpotRegionsTool(providers providerRegistry, logger *slog.Logger) *ListSpotRegionsTool {
 	return &ListSpotRegionsTool{
-		client: client,
-		logger: logger,
+		providers: providers,
+		logger:    logger,
 	}
 }
 
@@ -398,29 +495,32 @@ func (t *ListSpotRegionsTool) Handle(ctx context.Context, _ mcp.CallToolRequest)
 	return marshalResponse(response)
 }
 
-// fetchRegions gets all available regions from the spot client
+// fetchRegions gets every region the AWS provider publishes candidates for.
 func (t *ListSpotRegionsTool) fetchRegions(ctx context.Context) ([]string, error) {
-	opts := []spot.GetSpotSavingsOption{
-		spot.WithRegions([]string{allRegions}),
-		spot.WithPattern(""),
-		spot.WithOS("linux"),
-		spot.WithSort(spot.SortByRegion, false),
+	query := &cloud.Query{
+		OS:      cloud.OSLinux,
+		Regions: []cloud.Region{allRegions},
+		Sort:    cloud.SortOrder{Key: cloud.SortByRegion},
 	}
 
-	allAdvices, err := t.client.GetSpotSavings(ctx, opts...)
+	result, err := queryAWS(ctx, t.providers, query)
 	if err != nil {
 		return nil, err
 	}
 
 	regionSet := make(map[string]bool)
-	for _, advice := range allAdvices {
-		regionSet[advice.Region] = true
+	for i := range result.Candidates {
+		regionSet[string(result.Candidates[i].Location.Region)] = true
 	}
 
-	regions := make([]string, 0, len(regionSet))
-	for region := range regionSet {
-		regions = append(regions, region)
-	}
+	return regionNames(regionSet), nil
+}
 
-	return regions, nil
+// regionNames flattens a region set. The slice is always allocated so an empty
+// result serialises as [] rather than null, which is what the v1 contract
+// published.
+func regionNames(regionSet map[string]bool) []string {
+	names := make([]string, 0, len(regionSet))
+
+	return append(names, slices.Collect(maps.Keys(regionSet))...)
 }

@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -219,12 +218,11 @@ func runMCPServer(_ *cli.Context, execCtx context.Context) error {
 
 	// Create MCP server
 	mcpServer, err := mcp.NewServer(mcp.Config{
-		Version:    Version,
-		Transport:  transport,
-		Port:       port,
-		Logger:     log,
-		SpotClient: client,
-		Providers:  registry,
+		Version:   Version,
+		Transport: transport,
+		Port:      port,
+		Logger:    log,
+		Providers: registry,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create MCP server: %w", err)
@@ -259,50 +257,6 @@ func getMCPPort() string {
 
 type spotClient interface {
 	GetSpotSavings(ctx context.Context, opts ...spot.GetSpotSavingsOption) ([]spot.Advice, error)
-}
-
-const recommendationSchemaVersion = "spotinfo.recommend/v1"
-
-type recommendationRequest struct { //nolint:govet // JSON request field grouping is clearer than memory-layout optimization.
-	Architecture              spot.Architecture `json:"architecture"`
-	InstanceRegexp            string            `json:"instance_regexp"`
-	Regions                   []string          `json:"regions"`
-	OS                        string            `json:"os"`
-	MinimumVCPU               int               `json:"minimum_vcpu"`
-	MinimumMemoryGiB          int               `json:"minimum_memory_gib"`
-	MaximumUSDPerInstanceHour *float64          `json:"maximum_usd_per_instance_hour"`
-	Workload                  spot.Workload     `json:"workload"`
-	Top                       int               `json:"top"`
-}
-
-type recommendationReport struct {
-	SchemaVersion   string                `json:"schema_version"`
-	Request         recommendationRequest `json:"request"`
-	RankingPolicy   []string              `json:"ranking_policy"`
-	Recommendations []spot.Recommendation `json:"recommendations"`
-}
-
-// normalizeRecommendationRegions validates and deterministically deduplicates
-// recommendation regions before candidate acquisition and report rendering.
-func normalizeRecommendationRegions(regions []string) ([]string, error) {
-	unique := make(map[string]struct{}, len(regions))
-	for _, region := range regions {
-		region = strings.TrimSpace(region)
-		if region == "" {
-			return nil, fmt.Errorf("%w: region must not be empty", spot.ErrInvalidRecommendationInput)
-		}
-		unique[region] = struct{}{}
-	}
-	if _, hasAll := unique[allRegions]; hasAll && len(unique) > 1 {
-		return nil, fmt.Errorf("%w: region all cannot be combined with explicit regions", spot.ErrInvalidRecommendationInput)
-	}
-
-	normalized := make([]string, 0, len(unique))
-	for region := range unique {
-		normalized = append(normalized, region)
-	}
-	sort.Strings(normalized)
-	return normalized, nil
 }
 
 // flagLineageContext returns the nearest context that explicitly set one of
@@ -431,127 +385,6 @@ func execMainCmd(ctx *cli.Context, execCtx context.Context, registry providerReg
 		printAdvicesTable(advices, true, printRegion, output)
 	default:
 		printAdvicesNumber(advices, printRegion, output)
-	}
-
-	return nil
-}
-
-// execRecommendCmd fetches candidate advice and renders only the dedicated,
-// deterministic recommendation DTO. Recommendation ranking itself lives in
-// internal/spot and performs no I/O.
-func execRecommendCmd(ctx *cli.Context, execCtx context.Context, registry providerRegistry, client spotClient, output io.Writer) error { //nolint:gocyclo,cyclop // CLI validation and rendering have explicit error paths.
-	budget := ctx.Float64(flagBudget)
-	if ctx.IsSet(flagBudget) && budget <= 0 {
-		return fmt.Errorf("%w: budget must be a positive USD instance-hour price", spot.ErrInvalidRecommendationInput)
-	}
-	if ctx.IsSet(flagTop) && ctx.Int(flagTop) <= 0 {
-		return fmt.Errorf("%w: top must be positive", spot.ErrInvalidRecommendationInput)
-	}
-	outputFormat := lineageString(ctx, flagOutput)
-	if outputFormat != outputTable && outputFormat != outputJSON {
-		return fmt.Errorf("%w: output must be table or json", spot.ErrInvalidRecommendationInput)
-	}
-
-	opts := spot.RecommendationOptions{
-		Architecture: spot.Architecture(ctx.String(flagArchitecture)),
-		Instance:     ctx.String(flagInstance),
-		OS:           lineageString(ctx, flagOS),
-		CPU:          lineageInt(ctx, flagCPU, "vcpu"),
-		Memory:       lineageInt(ctx, flagMemory, "memory-gib"),
-		Budget:       budget,
-		Workload:     spot.Workload(ctx.String(flagWorkload)),
-		Top:          ctx.Int(flagTop),
-	}
-	if err := spot.ValidateRecommendationOptions(&opts); err != nil {
-		return err
-	}
-
-	regions, err := normalizeRecommendationRegions(lineageStringSlice(ctx, flagRegion))
-	if err != nil {
-		return err
-	}
-
-	// Provider selection and capability checks run before acquisition, so an
-	// unsupported request costs no I/O.
-	if providerErr := resolveAWSProvider(ctx, registry, recommendCapabilityRequest(ctx)); providerErr != nil {
-		return providerErr
-	}
-
-	lookup, err := spot.LoadEmbeddedArchitectureLookup()
-	if err != nil {
-		return fmt.Errorf("load recommendation architecture data: %w", err)
-	}
-
-	queryOpts := []spot.GetSpotSavingsOption{
-		spot.WithRegions(regions),
-		spot.WithOS(opts.OS),
-		spot.WithCPU(opts.CPU),
-		spot.WithMemory(opts.Memory),
-	}
-	if opts.Instance != "" {
-		queryOpts = append(queryOpts, spot.WithPattern(opts.Instance))
-	}
-	if opts.Budget > 0 {
-		queryOpts = append(queryOpts, spot.WithMaxPrice(opts.Budget))
-	}
-
-	advices, err := client.GetSpotSavings(execCtx, queryOpts...)
-	if err != nil {
-		return fmt.Errorf("failed to get recommendation candidates: %w", err)
-	}
-
-	recommendations, err := spot.Recommend(advices, &opts, lookup)
-	if err != nil {
-		return err
-	}
-
-	report := recommendationReport{
-		SchemaVersion: recommendationSchemaVersion,
-		Request: recommendationRequest{
-			Architecture:     opts.Architecture,
-			InstanceRegexp:   opts.Instance,
-			Regions:          regions,
-			OS:               opts.OS,
-			MinimumVCPU:      opts.CPU,
-			MinimumMemoryGiB: opts.Memory,
-			Workload:         opts.Workload,
-			Top:              opts.Top,
-		},
-		RankingPolicy:   spot.RecommendationRankingPolicy(),
-		Recommendations: recommendations,
-	}
-	if opts.Budget > 0 {
-		report.Request.MaximumUSDPerInstanceHour = &opts.Budget
-	}
-
-	switch outputFormat {
-	case outputTable:
-		return writeRecommendationTable(report.Recommendations, output)
-	case outputJSON:
-		encoded, err := json.MarshalIndent(report, "", "  ")
-		if err != nil {
-			return fmt.Errorf("render recommendation JSON: %w", err)
-		}
-		if _, err := fmt.Fprintln(output, string(encoded)); err != nil {
-			return fmt.Errorf("write recommendation output: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func writeRecommendationTable(recommendations []spot.Recommendation, output io.Writer) error {
-	if _, err := fmt.Fprintln(output, "RANK  REGION       INSTANCE       ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR  SAVINGS  INTERRUPTION  WHY"); err != nil {
-		return fmt.Errorf("write recommendation output: %w", err)
-	}
-	for index, recommendation := range recommendations {
-		if _, err := fmt.Fprintf(output, "%4d  %-11s %-14s %-12s %4d  %10.1f  %8.4f  %6d%%  %-12s  %s\n",
-			index+1, recommendation.Region, recommendation.Instance, recommendation.Architecture,
-			recommendation.VCPU, recommendation.MemoryGiB, recommendation.PriceUSDPerHour,
-			recommendation.SavingsPercent, recommendation.InterruptionFrequency,
-			strings.Join(recommendation.RationaleCodes, ",")); err != nil {
-			return fmt.Errorf("write recommendation output: %w", err)
-		}
 	}
 
 	return nil
@@ -919,7 +752,14 @@ func recommendCommand(action cli.ActionFunc) *cli.Command {
 			&cli.IntFlag{Name: flagMemory, Aliases: []string{"memory-gib"}, Usage: "required minimum memory GiB"},
 			&cli.Float64Flag{Name: flagBudget, Usage: "positive maximum USD per candidate instance-hour"},
 			&cli.StringFlag{Name: flagOS, Usage: "instance operating system: linux|windows", Value: spot.OperatingSystemLinux},
-			&cli.StringFlag{Name: flagWorkload, Usage: "interruption cap: web|ci|batch", Value: string(spot.WorkloadWeb)},
+			// No default value: "not set" must stay distinguishable from "set to
+			// web", because the default depends on the provider. A cloud that
+			// publishes no risk cannot honestly claim an interruption ceiling, so
+			// it defaults to the risk-free cost policy instead.
+			&cli.StringFlag{
+				Name:  flagWorkload,
+				Usage: "ranking policy: cost|web|ci|batch (default: web on a cloud with interruption data, otherwise cost)",
+			},
 			&cli.IntFlag{Name: flagTop, Usage: "maximum recommendations to return", Value: spot.DefaultRecommendationTop},
 			&cli.StringFlag{Name: flagOutput, Usage: "format output: table|json", Value: outputTable},
 		},

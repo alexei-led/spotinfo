@@ -26,12 +26,19 @@ import (
 type stubProvider struct {
 	id           cloud.ProviderID
 	capabilities cloud.Capabilities
+	// result is what Query answers with. The zero value carries no candidates,
+	// which is what makes a capability or routing failure visible as such
+	// instead of being masked by fixture data.
+	result cloud.Result
 }
 
 func (p stubProvider) ID() cloud.ProviderID             { return p.id }
 func (p stubProvider) Capabilities() cloud.Capabilities { return p.capabilities }
 func (p stubProvider) Query(context.Context, *cloud.Query) (cloud.Result, error) {
-	return cloud.Result{Provider: p.id}, nil
+	result := p.result
+	result.Provider = p.id
+
+	return result, nil
 }
 
 // awsCapabilities mirrors the production AWS adapter.
@@ -237,23 +244,28 @@ func withPlacementScore(capabilities cloud.Capabilities) cloud.Capabilities {
 	return capabilities
 }
 
-func TestRecommendRejectsAProviderWithoutRisk(t *testing.T) {
+// A provider that publishes no risk defaults to the cost policy rather than
+// being rejected: the request is served, and the empty stub result is reported
+// as no candidates instead of as an unsupported capability.
+func TestRecommendDefaultsARiskFreeProviderToTheCostPolicy(t *testing.T) {
 	registry := mustRegistry(registrationOf(stubProvider{id: cloud.ProviderGCP, capabilities: offlineLinuxCapabilities()}))
 
 	err := runRecommend(t, registry, validRecommendArgs("--cloud", "gcp")...)
-	require.ErrorIs(t, err, cloud.ErrUnsupportedCapability)
-	assert.Contains(t, err.Error(), string(cloud.CapabilityRisk))
+	require.ErrorIs(t, err, cloud.ErrNoCandidates)
+	assert.Equal(t, cloud.CodeNoCandidates, cloud.CodeOf(err))
+	assert.Contains(t, err.Error(), string(cloud.WorkloadCost))
 }
 
-// Every v1 workload caps interruption frequency, so a risk-free provider is
-// rejected whichever one is chosen.
-func TestRecommendRejectsARiskFreeProviderForEveryWorkload(t *testing.T) {
+// Every interruption-capped workload needs published risk, so asking for one
+// explicitly on a risk-free provider fails before acquisition.
+func TestRecommendRejectsARiskFreeProviderForEveryCappedWorkload(t *testing.T) {
 	registry := mustRegistry(registrationOf(stubProvider{id: cloud.ProviderGCP, capabilities: offlineLinuxCapabilities()}))
 
 	for _, workload := range []string{"web", "ci", "batch"} {
 		t.Run(workload, func(t *testing.T) {
 			err := runRecommend(t, registry, validRecommendArgs("--cloud", "gcp", "--workload", workload)...)
 			require.ErrorIs(t, err, cloud.ErrUnsupportedCapability)
+			assert.Contains(t, err.Error(), string(cloud.CapabilityRisk))
 		})
 	}
 }

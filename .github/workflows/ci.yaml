@@ -50,8 +50,11 @@ jobs:
     - name: Install archfit
       run: go install github.com/alexei-led/archfit/cmd/archfit@v1.6.0
 
-    - name: Verify architecture rules
-      run: make verify-architecture-rules
+    # Full gate: package boundaries plus finding severity. archfit's own verdict
+    # stays "pass" while a Critical Balanced-Coupling advisory stands, so
+    # cmd/archfitcheck fails the build on any open Critical or High finding.
+    - name: Verify architecture
+      run: make verify-architecture
 
     - name: Build binary
       run: make build

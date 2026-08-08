@@ -12,17 +12,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"spotinfo/internal/spot"
+	"spotinfo/internal/cloud"
 )
 
 // TestConcurrentSameClient tests concurrent access to the same spot client instance
 // This tests the real shared state in spot.Client (sync.Once, cached data)
 func TestConcurrentSameClient(t *testing.T) {
 	// Use real client to test actual shared state concurrency issues
-	realClient := newEmbeddedClient() // Has internal sync.Once and shared data providers
+	registry := newEmbeddedRegistry() // Wraps a client with internal sync.Once and shared data providers
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	findTool := NewFindSpotInstancesTool(realClient, logger)
+	findTool := NewFindSpotInstancesTool(registry, logger)
 
 	const numGoroutines = 20
 	var wg sync.WaitGroup
@@ -66,9 +66,9 @@ func TestConcurrentSameClient(t *testing.T) {
 
 // TestConcurrentDifferentParameters tests concurrent calls with different parameters
 func TestConcurrentDifferentParameters(t *testing.T) {
-	realClient := newEmbeddedClient()
+	registry := newEmbeddedRegistry()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	findTool := NewFindSpotInstancesTool(realClient, logger)
+	findTool := NewFindSpotInstancesTool(registry, logger)
 
 	testCases := []map[string]any{
 		{"regions": []any{"us-east-1"}, "instance_types": "t2.micro", "limit": 5},
@@ -104,9 +104,9 @@ func TestConcurrentDifferentParameters(t *testing.T) {
 
 // TestConcurrentRegionsToolAccess tests concurrent access to regions tool
 func TestConcurrentRegionsToolAccess(t *testing.T) {
-	realClient := newEmbeddedClient()
+	registry := newEmbeddedRegistry()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	regionsTool := NewListSpotRegionsTool(realClient, logger)
+	regionsTool := NewListSpotRegionsTool(registry, logger)
 
 	const numGoroutines = 15
 	var wg sync.WaitGroup
@@ -148,9 +148,9 @@ func TestConcurrentServerCreation(t *testing.T) {
 		go func(index int) {
 			defer wg.Done()
 			cfg := Config{
-				Version:    "1.0.0",
-				Logger:     slog.Default(),
-				SpotClient: newEmbeddedClient(), // Each gets its own client
+				Version:   "1.0.0",
+				Logger:    slog.Default(),
+				Providers: newEmbeddedRegistry(), // Each gets its own client
 			}
 			server, err := NewServer(cfg)
 			servers[index] = server
@@ -220,25 +220,13 @@ func TestConcurrentParameterParsing(t *testing.T) {
 
 // TestConcurrentResponseBuilding tests concurrent response building with shared data
 func TestConcurrentResponseBuilding(t *testing.T) {
-	// Shared test advice data (simulates what would come from spot client)
-	testAdvices := []spot.Advice{
-		{
-			Instance: "t2.micro",
-			Region:   "us-east-1",
-			Price:    0.0116,
-			Savings:  50,
-			Range:    spot.Range{Min: 0, Max: 5, Label: "<5%"},
-			Info:     spot.TypeInfo{Cores: 1, RAM: 1.0},
-		},
-		{
-			Instance: "t2.small",
-			Region:   "us-west-2",
-			Price:    0.023,
-			Savings:  45,
-			Range:    spot.Range{Min: 5, Max: 10, Label: "5-10%"},
-			Info:     spot.TypeInfo{Cores: 1, RAM: 2.0},
-		},
-	}
+	// Shared test candidates (simulates what would come from a provider)
+	testCandidates := buildCandidates(
+		testCandidate{Machine: "t2.micro", Region: "us-east-1", Price: 0.0116, Savings: 50,
+			RiskLabel: "<5%", RiskMin: 0, RiskMax: 5, VCPU: 1, MemoryGiB: 1},
+		testCandidate{Machine: "t2.small", Region: "us-west-2", Price: 0.023, Savings: 45,
+			RiskLabel: "5-10%", RiskMin: 5, RiskMax: 10, VCPU: 1, MemoryGiB: 2},
+	)
 
 	const numGoroutines = 25
 	var wg sync.WaitGroup
@@ -251,7 +239,7 @@ func TestConcurrentResponseBuilding(t *testing.T) {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-			response := buildResponse(testAdvices, startTime, spot.DataSourceEmbedded)
+			response := buildResponse(testCandidates, startTime, cloud.DataModeEmbeddedSnapshot)
 			responses[index] = response
 		}(i)
 	}
@@ -265,7 +253,7 @@ func TestConcurrentResponseBuilding(t *testing.T) {
 
 		results, ok := response["results"].([]map[string]any)
 		require.True(t, ok, "Results should be a slice of maps")
-		assert.Len(t, results, len(testAdvices), "Should have correct number of results")
+		assert.Len(t, results, len(testCandidates), "Should have correct number of results")
 
 		// Verify content consistency across all concurrent calls
 		if i > 0 {
@@ -335,9 +323,9 @@ func TestConcurrentDataProviderInitialization(t *testing.T) {
 			defer wg.Done()
 
 			// Create fresh client for each goroutine to trigger initialization race
-			freshClient := newEmbeddedClient()
+			freshRegistry := newEmbeddedRegistry()
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-			tool := NewFindSpotInstancesTool(freshClient, logger)
+			tool := NewFindSpotInstancesTool(freshRegistry, logger)
 
 			req := createTestCallToolRequest(map[string]any{
 				"regions": []any{"us-east-1"},
@@ -361,11 +349,11 @@ func TestConcurrentDataProviderInitialization(t *testing.T) {
 
 // TestConcurrentMixedOperations tests different operations triggering different code paths
 func TestConcurrentMixedOperations(t *testing.T) {
-	sharedClient := newEmbeddedClient()
+	sharedRegistry := newEmbeddedRegistry()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	findTool := NewFindSpotInstancesTool(sharedClient, logger)
-	regionsTool := NewListSpotRegionsTool(sharedClient, logger)
+	findTool := NewFindSpotInstancesTool(sharedRegistry, logger)
+	regionsTool := NewListSpotRegionsTool(sharedRegistry, logger)
 
 	const numGoroutines = 30
 	var wg sync.WaitGroup
@@ -417,9 +405,9 @@ func TestConcurrentMixedOperations(t *testing.T) {
 
 // TestConcurrentContextCancellation tests concurrent context cancellation scenarios
 func TestConcurrentContextCancellation(t *testing.T) {
-	client := newEmbeddedClient()
+	registry := newEmbeddedRegistry()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	tool := NewFindSpotInstancesTool(client, logger)
+	tool := NewFindSpotInstancesTool(registry, logger)
 
 	const numGoroutines = 20
 	var wg sync.WaitGroup
@@ -465,9 +453,9 @@ func TestConcurrentContextCancellation(t *testing.T) {
 
 // TestConcurrentLargeDatasets tests concurrent access with realistic large datasets
 func TestConcurrentLargeDatasets(t *testing.T) {
-	client := newEmbeddedClient()
+	registry := newEmbeddedRegistry()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	tool := NewFindSpotInstancesTool(client, logger)
+	tool := NewFindSpotInstancesTool(registry, logger)
 
 	const numGoroutines = 15
 	var wg sync.WaitGroup

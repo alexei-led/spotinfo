@@ -1,0 +1,6 @@
+{
+  "cloud": "gcp",
+  "code": "DATA_UNAVAILABLE",
+  "message": "data unavailable: cloud provider \"gcp\" is unavailable (PROVIDER_NOT_REGISTERED)",
+  "schema_version": "spotinfo.error/v1"
+}

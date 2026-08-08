@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"os"
 	"testing"
@@ -11,11 +10,14 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"spotinfo/internal/spot"
+	"spotinfo/internal/cloud"
 )
+
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+}
 
 func TestParseParameters(t *testing.T) {
 	tests := []struct {
@@ -123,73 +125,97 @@ func TestParseParameters(t *testing.T) {
 	}
 }
 
-func TestConvertSortParams(t *testing.T) {
+func TestSortOrderFor(t *testing.T) {
 	tests := []struct {
-		name         string
-		sortBy       string
-		expectedSort spot.SortBy
-		expectedDesc bool
+		name   string
+		sortBy string
+		want   cloud.SortOrder
 	}{
-		{"price", "price", spot.SortByPrice, false},
-		{"reliability", "reliability", spot.SortByRange, false},
-		{"savings", "savings", spot.SortBySavings, true},
-		{"score", "score", spot.SortByScore, false},
-		{"default", "unknown", spot.SortByRange, false},
-		{"empty", "", spot.SortByRange, false},
+		{"price", "price", cloud.SortOrder{Key: cloud.SortByPrice}},
+		{"reliability", "reliability", cloud.SortOrder{Key: cloud.SortByRisk}},
+		{"savings", "savings", cloud.SortOrder{Key: cloud.SortBySavings, Descending: true}},
+		{"score", "score", cloud.SortOrder{Key: cloud.SortByPlacementScore}},
+		{"default", "unknown", cloud.SortOrder{Key: cloud.SortByRisk}},
+		{"empty", "", cloud.SortOrder{Key: cloud.SortByRisk}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sortBy, sortDesc := convertSortParams(tt.sortBy)
-			assert.Equal(t, tt.expectedSort, sortBy)
-			assert.Equal(t, tt.expectedDesc, sortDesc)
+			assert.Equal(t, tt.want, sortOrderFor(tt.sortBy))
 		})
 	}
 }
 
+// Every acquisition-shaping parameter must reach the provider. Asserting the
+// response alone would pass even if score, zone, ordering and price options
+// were dropped, because a fixture can carry scores the request never asked for.
+func TestToolParametersReachTheProviderQuery(t *testing.T) {
+	provider, registry := awsStub()
+
+	_, err := NewFindSpotInstancesTool(registry, testLogger()).Handle(context.Background(),
+		createTestCallToolRequest(map[string]any{
+			"regions":            []any{"us-east-1", "eu-west-1"},
+			"instance_types":     "m5.*",
+			"min_vcpu":           4,
+			"min_memory_gb":      16,
+			"max_price_per_hour": 0.25,
+			"sort_by":            "savings",
+			"with_score":         true,
+			"min_score":          7,
+			"az":                 true,
+			"score_timeout":      60,
+		}))
+	require.NoError(t, err)
+
+	query := provider.lastQuery()
+	assert.Equal(t, []cloud.Region{"us-east-1", "eu-west-1"}, query.Regions)
+	assert.Equal(t, "m5.*", query.MachinePattern)
+	assert.Equal(t, cloud.OSLinux, query.OS)
+	assert.Equal(t, 4, query.MinVCPU)
+	assert.InDelta(t, 16.0, query.MinMemoryGiB, 0)
+	require.NotNil(t, query.MaxPrice)
+	assert.Equal(t, "0.250000000", query.MaxPrice.String())
+	assert.Equal(t, cloud.SortOrder{Key: cloud.SortBySavings, Descending: true}, query.Sort)
+	assert.Equal(t, cloud.PlacementRequest{
+		Timeout:    60 * time.Second,
+		MinScore:   7,
+		SingleZone: true,
+		Enabled:    true,
+	}, query.Placement)
+}
+
+// A zero max_price_per_hour is the v1 "no ceiling" value, not a ceiling of zero.
+func TestZeroMaxPriceRequestsNoCeiling(t *testing.T) {
+	provider, registry := awsStub()
+
+	_, err := NewFindSpotInstancesTool(registry, testLogger()).Handle(context.Background(),
+		createTestCallToolRequest(map[string]any{"max_price_per_hour": 0}))
+	require.NoError(t, err)
+
+	assert.Nil(t, provider.lastQuery().MaxPrice)
+}
+
 func TestFilterByInterruption(t *testing.T) {
-	testAdvices := []spot.Advice{
-		{Range: spot.Range{Min: 0, Max: 5}},   // avg = 2.5
-		{Range: spot.Range{Min: 10, Max: 20}}, // avg = 15
-		{Range: spot.Range{Min: 30, Max: 40}}, // avg = 35
-	}
+	candidates := buildCandidates(
+		testCandidate{RiskLabel: "<5%", RiskMin: 0, RiskMax: 5},      // avg = 2.5
+		testCandidate{RiskLabel: "10-20%", RiskMin: 10, RiskMax: 20}, // avg = 15
+		testCandidate{RiskLabel: "30-40%", RiskMin: 30, RiskMax: 40}, // avg = 35
+	)
 
 	tests := []struct {
 		name            string
-		advices         []spot.Advice
 		maxInterruption float64
 		expectedCount   int
 	}{
-		{
-			name:            "filter by 10 - should keep 1",
-			advices:         testAdvices,
-			maxInterruption: 10,
-			expectedCount:   1,
-		},
-		{
-			name:            "filter by 25 - should keep 2",
-			advices:         testAdvices,
-			maxInterruption: 25,
-			expectedCount:   2,
-		},
-		{
-			name:            "no filter (0) - should keep all",
-			advices:         testAdvices,
-			maxInterruption: 0,
-			expectedCount:   3,
-		},
-		{
-			name:            "no filter (>=100) - should keep all",
-			advices:         testAdvices,
-			maxInterruption: 100,
-			expectedCount:   3,
-		},
+		{name: "filter by 10 - should keep 1", maxInterruption: 10, expectedCount: 1},
+		{name: "filter by 25 - should keep 2", maxInterruption: 25, expectedCount: 2},
+		{name: "no filter (0) - should keep all", maxInterruption: 0, expectedCount: 3},
+		{name: "no filter (>=100) - should keep all", maxInterruption: 100, expectedCount: 3},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := filterByInterruption(tt.advices, tt.maxInterruption)
-			assert.Len(t, result, tt.expectedCount)
+			assert.Len(t, filterByInterruption(candidates, tt.maxInterruption), tt.expectedCount)
 		})
 	}
 }
@@ -198,74 +224,87 @@ func TestBuildResponse(t *testing.T) {
 	startTime := time.Now()
 	scoreValue := 8
 	scoreTime := time.Now()
-	testAdvices := []spot.Advice{
-		{
-			Instance:       "m5.large",
-			Region:         "us-east-1",
-			Price:          0.0928,
-			Savings:        70,
-			Range:          spot.Range{Min: 5, Max: 10, Label: "5-10%"},
-			Info:           spot.TypeInfo{Cores: 2, RAM: 8.0},
-			RegionScore:    &scoreValue,
+	candidates := buildCandidates(
+		testCandidate{
+			Machine: "m5.large", Region: "us-east-1", Price: 0.0928, Savings: 70,
+			RiskLabel: "5-10%", RiskMin: 5, RiskMax: 10, VCPU: 2, MemoryGiB: 8,
+			RegionScore: &scoreValue, ScoreFetchedAt: &scoreTime,
+		},
+		testCandidate{
+			Machine: "t3.medium", Region: "eu-west-1", Price: 0.0416, Savings: 65,
+			RiskLabel: "10-15%", RiskMin: 10, RiskMax: 15, VCPU: 2, MemoryGiB: 4,
+			ZoneScores:     map[string]int{"eu-west-1a": 7, "eu-west-1b": 9},
 			ScoreFetchedAt: &scoreTime,
 		},
-		{
-			Instance: "t3.medium",
-			Region:   "eu-west-1",
-			Price:    0.0416,
-			Savings:  65,
-			Range:    spot.Range{Min: 10, Max: 15, Label: "10-15%"},
-			Info:     spot.TypeInfo{Cores: 2, RAM: 4.0},
-			ZoneScores: map[string]int{
-				"eu-west-1a": 7,
-				"eu-west-1b": 9,
-			},
-			ScoreFetchedAt: &scoreTime,
-		},
-	}
+	)
 
-	response := buildResponse(testAdvices, startTime, spot.DataSourceEmbedded)
+	response := buildResponse(candidates, startTime, cloud.DataModeEmbeddedSnapshot)
 
-	// Check response structure
 	assert.Contains(t, response, "results")
 	assert.Contains(t, response, "metadata")
 
-	// Check results
 	results, ok := response["results"].([]map[string]any)
-	assert.True(t, ok, "results should be a slice of maps")
-	assert.Len(t, results, 2)
+	require.True(t, ok, "results should be a slice of maps")
+	require.Len(t, results, 2)
 
-	// Check first result with region score
 	firstResult := results[0]
 	assert.Equal(t, "m5.large", firstResult["instance_type"])
 	assert.Equal(t, "us-east-1", firstResult["region"])
-	assert.Equal(t, 0.0928, firstResult["spot_price_per_hour"])
+	assert.InDelta(t, 0.0928, firstResult["spot_price_per_hour"], 0)
 	assert.Equal(t, 70, firstResult["savings_percentage"])
-	assert.Equal(t, 7.5, firstResult["interruption_rate"]) // (5+10)/2
-	assert.Equal(t, 92, firstResult["reliability_score"])  // 100-7.5
+	assert.InDelta(t, 7.5, firstResult["interruption_rate"], 0) // (5+10)/2
+	assert.Equal(t, 92, firstResult["reliability_score"])       // 100-7.5
+	assert.Equal(t, 8, firstResult["region_score"])
 
-	// Check metadata
+	assert.Equal(t, map[string]int{"eu-west-1a": 7, "eu-west-1b": 9}, results[1]["zone_scores"])
+
 	metadata, ok := response["metadata"].(map[string]any)
-	assert.True(t, ok, "metadata should be a map")
+	require.True(t, ok, "metadata should be a map")
 	assert.Equal(t, 2, metadata["total_results"])
 	assert.Equal(t, "embedded", metadata["data_source"])
+	assert.Equal(t, dataFreshnessSnapshot, metadata["data_freshness"])
+}
+
+// An unknown price and an unpublished savings figure are absences in the
+// neutral domain. The v1 response reported both as zero, and this tool is the
+// compatibility surface, so they stay zero here.
+func TestBuildResponseReportsAbsentObservationsAsTheV1Zero(t *testing.T) {
+	response := buildResponse(buildCandidates(testCandidate{
+		Machine: "m5.large", Region: "us-east-1", VCPU: 2, MemoryGiB: 8,
+	}), time.Now(), cloud.DataModeLive)
+
+	results, ok := response["results"].([]map[string]any)
+	require.True(t, ok)
+	require.Len(t, results, 1)
+
+	assert.InDelta(t, 0.0, results[0]["spot_price_per_hour"], 0)
+	assert.Equal(t, "$0.0000/hour", results[0]["spot_price"])
+	assert.Equal(t, 0, results[0]["savings_percentage"])
+	assert.Equal(t, "0-0%", results[0]["interruption_range"])
+	assert.Equal(t, false, results[0]["live_price"])
+	assert.NotContains(t, results[0], "region_score")
+
+	metadata, ok := response["metadata"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "aws", metadata["data_source"])
+	assert.Equal(t, dataFreshnessLive, metadata["data_freshness"])
 }
 
 func TestCalculateAvgInterruption(t *testing.T) {
 	tests := []struct {
 		name     string
-		r        spot.Range
+		fixture  testCandidate
 		expected float64
 	}{
-		{"normal range", spot.Range{Min: 10, Max: 20}, 15.0},
-		{"zero range", spot.Range{Min: 0, Max: 0}, 0.0},
-		{"single value", spot.Range{Min: 5, Max: 5}, 5.0},
+		{"normal range", testCandidate{RiskLabel: "10-20%", RiskMin: 10, RiskMax: 20}, 15.0},
+		{"no published risk", testCandidate{}, 0.0},
+		{"single value", testCandidate{RiskLabel: "5%", RiskMin: 5, RiskMax: 5}, 5.0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := calculateAvgInterruption(tt.r)
-			assert.Equal(t, tt.expected, result)
+			risk := tt.fixture.build().Risk
+			assert.InDelta(t, tt.expected, calculateAvgInterruption(&risk), 0)
 		})
 	}
 }
@@ -284,18 +323,16 @@ func TestCalculateReliabilityScore(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := calculateReliabilityScore(tt.avgInterruption)
-			assert.Equal(t, tt.expected, result)
+			assert.Equal(t, tt.expected, calculateReliabilityScore(tt.avgInterruption))
 		})
 	}
 }
 
-//nolint:maintidx // Complex table-driven test with multiple scenarios
 func TestFindSpotInstancesTool_Handle(t *testing.T) {
 	tests := []struct {
 		name           string
 		arguments      any
-		mockSetup      func(*mockspotClient)
+		registry       providerRegistry
 		validateResult func(*testing.T, *mcp.CallToolResult)
 	}{
 		{
@@ -305,37 +342,13 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 				"instance_types": "t3.micro",
 				"sort_by":        "price",
 			},
-			mockSetup: func(m *mockspotClient) {
-				advices := []spot.Advice{
-					{
-						Instance: "t3.micro",
-						Region:   "us-east-1",
-						Price:    0.0104,
-						Savings:  68,
-						Range:    spot.Range{Min: 0, Max: 5, Label: "<5%"},
-						Info:     spot.TypeInfo{Cores: 2, RAM: 1.0},
-					},
-				}
-				// We can't match the exact options, so we use mock.Anything
-				// The test validates behavior through the returned data
-				m.EXPECT().GetSpotSavings(
-					mock.Anything,
-					mock.Anything,
-				).Return(advices, nil).Once()
-			},
+			registry: registryOf(testCandidate{
+				Machine: "t3.micro", Region: "us-east-1", Price: 0.0104, Savings: 68,
+				RiskLabel: "<5%", RiskMin: 0, RiskMax: 5, VCPU: 2, MemoryGiB: 1,
+			}),
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
-				require.False(t, result.IsError)
-				require.Len(t, result.Content, 1)
-				textContent, ok := result.Content[0].(mcp.TextContent)
-				require.True(t, ok)
-
-				var response map[string]any
-				err := json.Unmarshal([]byte(textContent.Text), &response)
-				require.NoError(t, err)
-
-				results, ok := response["results"].([]any)
-				require.True(t, ok)
-				assert.Len(t, results, 1)
+				results := decodeResults(t, result)
+				require.Len(t, results, 1)
 
 				firstResult, ok := results[0].(map[string]any)
 				require.True(t, ok)
@@ -352,51 +365,20 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 				"min_score":      7,
 				"sort_by":        "score",
 			},
-			mockSetup: func(m *mockspotClient) {
-				score8 := 8
-				score5 := 5
-				now := time.Now()
-				advices := []spot.Advice{
-					{
-						Instance:       "m5.large",
-						Region:         "us-west-2",
-						Price:          0.096,
-						Savings:        70,
-						Range:          spot.Range{Min: 5, Max: 10, Label: "5-10%"},
-						Info:           spot.TypeInfo{Cores: 2, RAM: 8.0},
-						RegionScore:    &score8,
-						ScoreFetchedAt: &now,
-					},
-					{
-						Instance:       "m5.large",
-						Region:         "us-west-2",
-						Price:          0.092,
-						Savings:        72,
-						Range:          spot.Range{Min: 10, Max: 15, Label: "10-15%"},
-						Info:           spot.TypeInfo{Cores: 2, RAM: 8.0},
-						RegionScore:    &score5, // This should be filtered out by min_score
-						ScoreFetchedAt: &now,
-					},
-				}
-				m.EXPECT().GetSpotSavings(
-					mock.Anything,
-					mock.Anything,
-				).Return(advices, nil).Once()
-			},
+			registry: registryOf(
+				testCandidate{
+					Machine: "m5.large", Region: "us-west-2", Price: 0.096, Savings: 70,
+					RiskLabel: "5-10%", RiskMin: 5, RiskMax: 10, VCPU: 2, MemoryGiB: 8,
+					RegionScore: scorePtr(8),
+				},
+			),
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
-				require.False(t, result.IsError)
+				results := decodeResults(t, result)
+				require.Len(t, results, 1, "the minimum-score filter is applied by the provider")
 
-				var response map[string]any
-				textContent, ok := result.Content[0].(mcp.TextContent)
+				firstResult, ok := results[0].(map[string]any)
 				require.True(t, ok)
-				err := json.Unmarshal([]byte(textContent.Text), &response)
-				require.NoError(t, err)
-
-				// No results because filterByMinScore is not implemented in tools.go
-				// This test verifies the parameters are parsed correctly
-				results, ok := response["results"].([]any)
-				require.True(t, ok)
-				assert.Len(t, results, 2) // Both should be returned since filtering happens in client
+				assert.InDelta(t, 8.0, firstResult["region_score"], 0)
 			},
 		},
 		{
@@ -407,41 +389,18 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 				"az":            true,
 				"score_timeout": 60,
 			},
-			mockSetup: func(m *mockspotClient) {
-				now := time.Now()
-				advices := []spot.Advice{
-					{
-						Instance: "t3.small",
-						Region:   "eu-west-1",
-						Price:    0.0208,
-						Savings:  68,
-						Range:    spot.Range{Min: 5, Max: 10, Label: "5-10%"},
-						Info:     spot.TypeInfo{Cores: 2, RAM: 2.0},
-						ZoneScores: map[string]int{
-							"eu-west-1a": 9,
-							"eu-west-1b": 7,
-							"eu-west-1c": 8,
-						},
-						ScoreFetchedAt: &now,
-					},
-				}
-				m.EXPECT().GetSpotSavings(
-					mock.Anything,
-					mock.Anything,
-				).Return(advices, nil).Once()
-			},
+			registry: registryOf(testCandidate{
+				Machine: "t3.small", Region: "eu-west-1", Price: 0.0208, Savings: 68,
+				RiskLabel: "5-10%", RiskMin: 5, RiskMax: 10, VCPU: 2, MemoryGiB: 2,
+				ZoneScores: map[string]int{"eu-west-1a": 9, "eu-west-1b": 7, "eu-west-1c": 8},
+			}),
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
-				require.False(t, result.IsError)
+				results := decodeResults(t, result)
+				require.Len(t, results, 1)
 
-				var response map[string]any
-				textContent, ok := result.Content[0].(mcp.TextContent)
+				firstResult, ok := results[0].(map[string]any)
 				require.True(t, ok)
-				err := json.Unmarshal([]byte(textContent.Text), &response)
-				require.NoError(t, err)
-
-				results, ok := response["results"].([]any)
-				require.True(t, ok)
-				assert.Len(t, results, 1)
+				assert.Len(t, firstResult["zone_scores"], 3)
 			},
 		},
 		{
@@ -450,40 +409,19 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 				"regions":               []any{"us-east-1"},
 				"max_interruption_rate": 7.5,
 			},
-			mockSetup: func(m *mockspotClient) {
-				advices := []spot.Advice{
-					{
-						Instance: "t3.micro",
-						Region:   "us-east-1",
-						Range:    spot.Range{Min: 0, Max: 5}, // avg = 2.5, should pass
-						Price:    0.01,
-						Info:     spot.TypeInfo{Cores: 2, RAM: 1.0},
-					},
-					{
-						Instance: "t3.small",
-						Region:   "us-east-1",
-						Range:    spot.Range{Min: 10, Max: 20}, // avg = 15, should be filtered
-						Price:    0.02,
-						Info:     spot.TypeInfo{Cores: 2, RAM: 2.0},
-					},
-				}
-				m.EXPECT().GetSpotSavings(
-					mock.Anything,
-					mock.Anything,
-				).Return(advices, nil).Once()
-			},
+			registry: registryOf(
+				testCandidate{
+					Machine: "t3.micro", Region: "us-east-1", Price: 0.01, VCPU: 2, MemoryGiB: 1,
+					RiskLabel: "<5%", RiskMin: 0, RiskMax: 5, // avg = 2.5, should pass
+				},
+				testCandidate{
+					Machine: "t3.small", Region: "us-east-1", Price: 0.02, VCPU: 2, MemoryGiB: 2,
+					RiskLabel: "10-20%", RiskMin: 10, RiskMax: 20, // avg = 15, should be filtered
+				},
+			),
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
-				require.False(t, result.IsError)
-
-				var response map[string]any
-				textContent, ok := result.Content[0].(mcp.TextContent)
-				require.True(t, ok)
-				err := json.Unmarshal([]byte(textContent.Text), &response)
-				require.NoError(t, err)
-
-				results, ok := response["results"].([]any)
-				require.True(t, ok)
-				assert.Len(t, results, 1, "Should filter out high interruption instances")
+				results := decodeResults(t, result)
+				require.Len(t, results, 1, "Should filter out high interruption instances")
 
 				firstResult, ok := results[0].(map[string]any)
 				require.True(t, ok)
@@ -491,69 +429,48 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 			},
 		},
 		{
-			name:      "error handling",
+			name:      "acquisition failure",
 			arguments: map[string]any{"regions": []any{"invalid-region"}},
-			mockSetup: func(m *mockspotClient) {
-				m.EXPECT().GetSpotSavings(
-					mock.Anything,
-					mock.Anything,
-				).Return(nil, errors.New("AWS API error: invalid region")).Once()
-			},
+			registry:  failingAWSStub(errAcquisition),
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				assert.True(t, result.IsError)
 				textContent, ok := result.Content[0].(mcp.TextContent)
 				require.True(t, ok)
 				assert.Contains(t, textContent.Text, "Failed to get spot recommendations")
-				assert.Contains(t, textContent.Text, "AWS API error")
+				assert.Contains(t, textContent.Text, "acquisition failed")
+			},
+		},
+		{
+			name:      "unavailable provider",
+			arguments: map[string]any{},
+			registry:  newStubRegistry(),
+			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
+				assert.True(t, result.IsError)
+				textContent, ok := result.Content[0].(mcp.TextContent)
+				require.True(t, ok)
+				assert.Contains(t, textContent.Text, "PROVIDER_NOT_REGISTERED")
 			},
 		},
 		{
 			name:      "empty results",
 			arguments: map[string]any{"instance_types": "z99.mega"},
-			mockSetup: func(m *mockspotClient) {
-				m.EXPECT().GetSpotSavings(
-					mock.Anything,
-					mock.Anything,
-				).Return([]spot.Advice{}, nil).Once()
-			},
+			registry:  registryOf(),
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
-				require.False(t, result.IsError)
+				assert.Empty(t, decodeResults(t, result))
 
-				var response map[string]any
-				textContent, ok := result.Content[0].(mcp.TextContent)
-				require.True(t, ok)
-				err := json.Unmarshal([]byte(textContent.Text), &response)
-				require.NoError(t, err)
-
-				results, ok := response["results"].([]any)
-				require.True(t, ok)
-				assert.Empty(t, results)
-
-				metadata, ok := response["metadata"].(map[string]any)
-				require.True(t, ok)
-				assert.Equal(t, float64(0), metadata["total_results"])
+				metadata := decodeMetadata(t, result)
+				assert.InDelta(t, 0.0, metadata["total_results"], 0)
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockClient := newMockspotClient(t)
-			mockClient.EXPECT().DataSource().Return(spot.DataSourceEmbedded).Maybe()
-			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-			tool := NewFindSpotInstancesTool(mockClient, logger)
+			tool := NewFindSpotInstancesTool(tt.registry, testLogger())
 
-			if tt.mockSetup != nil {
-				tt.mockSetup(mockClient)
-			}
-
-			req := mcp.CallToolRequest{
-				Params: mcp.CallToolParams{
-					Arguments: tt.arguments,
-				},
-			}
-
-			result, err := tool.Handle(context.Background(), req)
+			result, err := tool.Handle(context.Background(), mcp.CallToolRequest{
+				Params: mcp.CallToolParams{Arguments: tt.arguments},
+			})
 
 			require.NoError(t, err)
 			require.NotNil(t, result)
@@ -565,33 +482,22 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 func TestListSpotRegionsTool_Handle(t *testing.T) {
 	tests := []struct {
 		name           string
-		mockSetup      func(*mockspotClient)
+		registry       providerRegistry
 		validateResult func(*testing.T, *mcp.CallToolResult)
 	}{
 		{
 			name: "successful regions list",
-			mockSetup: func(m *mockspotClient) {
-				advices := []spot.Advice{
-					{Region: "us-east-1", Instance: "t3.micro"},
-					{Region: "us-west-2", Instance: "t3.small"},
-					{Region: "us-east-1", Instance: "m5.large"}, // duplicate region
-					{Region: "eu-west-1", Instance: "t3.medium"},
-					{Region: "ap-south-1", Instance: "t3.large"},
-				}
-				m.EXPECT().GetSpotSavings(
-					mock.Anything,
-					mock.Anything,
-				).Return(advices, nil).Once()
-			},
+			registry: registryOf(
+				testCandidate{Region: "us-east-1", Machine: "t3.micro"},
+				testCandidate{Region: "us-west-2", Machine: "t3.small"},
+				testCandidate{Region: "us-east-1", Machine: "m5.large"}, // duplicate region
+				testCandidate{Region: "eu-west-1", Machine: "t3.medium"},
+				testCandidate{Region: "ap-south-1", Machine: "t3.large"},
+			),
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				require.False(t, result.IsError)
 
-				var response map[string]any
-				textContent, ok := result.Content[0].(mcp.TextContent)
-				require.True(t, ok)
-				err := json.Unmarshal([]byte(textContent.Text), &response)
-				require.NoError(t, err)
-
+				response := decodeResponse(t, result)
 				regions, ok := response["regions"].([]any)
 				require.True(t, ok)
 				assert.Len(t, regions, 4, "Should deduplicate regions")
@@ -606,68 +512,42 @@ func TestListSpotRegionsTool_Handle(t *testing.T) {
 				assert.Contains(t, regionStrs, "eu-west-1")
 				assert.Contains(t, regionStrs, "ap-south-1")
 
-				assert.Equal(t, float64(4), response["total"])
+				assert.InDelta(t, 4.0, response["total"], 0)
 			},
 		},
 		{
-			name: "empty regions",
-			mockSetup: func(m *mockspotClient) {
-				m.EXPECT().GetSpotSavings(
-					mock.Anything,
-					mock.Anything,
-				).Return([]spot.Advice{}, nil).Once()
-			},
+			name:     "empty regions",
+			registry: registryOf(),
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				require.False(t, result.IsError)
 
-				var response map[string]any
-				textContent, ok := result.Content[0].(mcp.TextContent)
-				require.True(t, ok)
-				err := json.Unmarshal([]byte(textContent.Text), &response)
-				require.NoError(t, err)
-
+				response := decodeResponse(t, result)
 				regions, ok := response["regions"].([]any)
 				require.True(t, ok)
 				assert.Empty(t, regions)
-				assert.Equal(t, float64(0), response["total"])
+				assert.InDelta(t, 0.0, response["total"], 0)
 			},
 		},
 		{
-			name: "error handling",
-			mockSetup: func(m *mockspotClient) {
-				m.EXPECT().GetSpotSavings(
-					mock.Anything,
-					mock.Anything,
-				).Return(nil, errors.New("network timeout")).Once()
-			},
+			name:     "acquisition failure",
+			registry: failingAWSStub(errAcquisition),
 			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
 				assert.True(t, result.IsError)
 				textContent, ok := result.Content[0].(mcp.TextContent)
 				require.True(t, ok)
 				assert.Contains(t, textContent.Text, "Failed to retrieve regions")
-				assert.Contains(t, textContent.Text, "network timeout")
+				assert.Contains(t, textContent.Text, "acquisition failed")
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockClient := newMockspotClient(t)
-			mockClient.EXPECT().DataSource().Return(spot.DataSourceEmbedded).Maybe()
-			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-			tool := NewListSpotRegionsTool(mockClient, logger)
+			tool := NewListSpotRegionsTool(tt.registry, testLogger())
 
-			if tt.mockSetup != nil {
-				tt.mockSetup(mockClient)
-			}
-
-			req := mcp.CallToolRequest{
-				Params: mcp.CallToolParams{
-					Arguments: map[string]any{},
-				},
-			}
-
-			result, err := tool.Handle(context.Background(), req)
+			result, err := tool.Handle(context.Background(), mcp.CallToolRequest{
+				Params: mcp.CallToolParams{Arguments: map[string]any{}},
+			})
 
 			require.NoError(t, err)
 			require.NotNil(t, result)
@@ -676,26 +556,75 @@ func TestListSpotRegionsTool_Handle(t *testing.T) {
 	}
 }
 
-// Freshness is derived from the data source, never asserted. Metadata claiming
+// Freshness is derived from the data mode, never asserted. Metadata claiming
 // "current" while serving a months-old embedded snapshot is worse than none.
-func TestFreshnessFor(t *testing.T) {
+func TestFreshnessAndDataSourceAreDerivedFromTheDataMode(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name   string
-		source string
-		want   string
+		name          string
+		mode          cloud.DataMode
+		wantFreshness string
+		wantSource    string
 	}{
-		{name: "live AWS data", source: spot.DataSourceAWS, want: dataFreshnessLive},
-		{name: "embedded snapshot", source: spot.DataSourceEmbedded, want: dataFreshnessSnapshot},
-		{name: "unknown source is not claimed as live", source: "something-else", want: dataFreshnessSnapshot},
+		{name: "live provider data", mode: cloud.DataModeLive, wantFreshness: dataFreshnessLive, wantSource: dataSourceLive},
+		{
+			name: "embedded snapshot", mode: cloud.DataModeEmbeddedSnapshot,
+			wantFreshness: dataFreshnessSnapshot, wantSource: dataSourceEmbedded,
+		},
+		{
+			name: "unknown mode is not claimed as live", mode: "something-else",
+			wantFreshness: dataFreshnessSnapshot, wantSource: dataSourceEmbedded,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, freshnessFor(tc.source))
+			assert.Equal(t, tc.wantFreshness, freshnessFor(tc.mode))
+			assert.Equal(t, tc.wantSource, dataSourceFor(tc.mode))
 		})
 	}
+}
+
+func registryOf(fixtures ...testCandidate) providerRegistry {
+	_, registry := awsStub(buildCandidates(fixtures...)...)
+
+	return registry
+}
+
+func scorePtr(score int) *int { return &score }
+
+func decodeResponse(t *testing.T, result *mcp.CallToolResult) map[string]any {
+	t.Helper()
+
+	require.False(t, result.IsError)
+	require.Len(t, result.Content, 1)
+
+	textContent, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+
+	var response map[string]any
+	require.NoError(t, json.Unmarshal([]byte(textContent.Text), &response))
+
+	return response
+}
+
+func decodeResults(t *testing.T, result *mcp.CallToolResult) []any {
+	t.Helper()
+
+	results, ok := decodeResponse(t, result)["results"].([]any)
+	require.True(t, ok)
+
+	return results
+}
+
+func decodeMetadata(t *testing.T, result *mcp.CallToolResult) map[string]any {
+	t.Helper()
+
+	metadata, ok := decodeResponse(t, result)["metadata"].(map[string]any)
+	require.True(t, ok)
+
+	return metadata
 }
