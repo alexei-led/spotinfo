@@ -36,6 +36,7 @@ DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestParseArchitectureSnapshotRejectsInvali
 DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestEmbeddedSnapshotManifests|TestEmbeddedManifestsDescribeTheirOwnFiles
 DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestEmbeddedSourceRefsCoverEverySnapshot
 DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestValidateCoverageRejectsATruncatedLiveFeed
+DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestEmbeddedPricesSatisfyTheNeutralRecordContract
 
 # Go environment
 export GO111MODULE=on

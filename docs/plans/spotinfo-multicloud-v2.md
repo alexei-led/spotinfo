@@ -385,6 +385,20 @@ Task 2 results:
 - `internal/snapshot` is declared in the `domain` layer: both `internal/spot`
   (legacy) and future provider packages depend on it, so any other placement
   would create a back edge.
+- Duplicate rule, corrected against real data: the committed AWS price feed
+  lists 118 region/size pairs twice (8 GPU machine types) with **identical**
+  prices. That is redundancy, not ambiguity, so `ValidatePrices` rejects only a
+  key priced two *different* ways and counts distinct keys toward the floor.
+  Rejecting exact repeats would have made the gate unusable on real AWS data
+  without catching anything the success criteria ask for.
+  `TestEmbeddedPricesSatisfyTheNeutralRecordContract` runs the neutral record
+  validator over the whole embedded feed, so `ValidatePrices` has a real
+  consumer now rather than waiting for Task 5.
+- `.golangci.yaml` depguard trap fixed. depguard prefix-checks only the nearest
+  allow entry in sorted order, so `spotinfo/internal/spot` sitting alongside
+  `spotinfo/internal` silently denied every package sorting between them —
+  `internal/snapshot` here, and `internal/providers` in Task 3. The narrower
+  entries are removed; a single `spotinfo/internal` now covers all of them.
 
 ### Task 3: Add the provider registry and capability-aware CLI routing
 

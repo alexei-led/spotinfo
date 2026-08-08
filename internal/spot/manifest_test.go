@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"spotinfo/internal/cloud"
 	"spotinfo/internal/snapshot"
 )
 
@@ -129,6 +130,63 @@ func TestEmbeddedSourceRefsCoverEverySnapshot(t *testing.T) {
 		assert.NotEmpty(t, ref.SchemaVersion)
 		assert.False(t, ref.FetchedAt.IsZero())
 	}
+}
+
+// The neutral record validator run against the real feed. It is the only check
+// that would catch the same machine being priced twice in one region and OS —
+// the shape a feed takes when it starts listing a size under two families.
+func TestEmbeddedPricesSatisfyTheNeutralRecordContract(t *testing.T) {
+	t.Parallel()
+
+	data, err := loadEmbeddedPricingData()
+	require.NoError(t, err)
+
+	manifest, err := priceManifest()
+	require.NoError(t, err)
+
+	require.NoError(t, snapshot.ValidatePrices(embeddedPriceRecords(data, manifest), manifest))
+}
+
+// embeddedPriceRecords flattens the feed into neutral records. Zero and
+// unparseable cells are skipped: an unknown price is an absent record, and the
+// coverage floor counts only the priced ones.
+func embeddedPriceRecords(data *rawPriceData, manifest *snapshot.Manifest) []snapshot.PriceRecord {
+	records := make([]snapshot.PriceRecord, 0, manifest.MinRecords.Prices)
+
+	for _, region := range data.Config.Regions {
+		for _, instanceType := range region.InstanceTypes {
+			for _, size := range instanceType.Sizes {
+				for _, column := range size.ValueColumns {
+					price, ok := parsePrice(column.Prices.USD)
+					if !ok || price == 0 {
+						continue
+					}
+
+					amount, err := cloud.MoneyFromFloat(price)
+					if err != nil {
+						continue
+					}
+
+					instanceOS := cloud.OSLinux
+					if column.Name == priceColumnWindows {
+						instanceOS = cloud.OSWindows
+					}
+
+					records = append(records, snapshot.PriceRecord{
+						Region:   cloud.Region(region.Region),
+						Machine:  cloud.MachineID(size.Size),
+						OS:       instanceOS,
+						Class:    cloud.PriceClassSpot,
+						Currency: manifest.Currency,
+						Unit:     manifest.BillingUnit,
+						Amount:   amount,
+					})
+				}
+			}
+		}
+	}
+
+	return records
 }
 
 // A live feed that parses but covers far less than the committed snapshot is a

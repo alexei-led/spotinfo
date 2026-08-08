@@ -55,6 +55,23 @@ func TestValidatePricesAcceptsDistinctPricedRecords(t *testing.T) {
 	require.NoError(t, ValidatePrices(records, priceManifest(t)))
 }
 
+// The AWS feed lists 118 region/size pairs twice with identical prices. That is
+// redundancy, not ambiguity, and it must not fail the gate — but a repeat must
+// not pad the coverage count either.
+func TestValidatePricesTreatsAnExactRepeatAsOnePrice(t *testing.T) {
+	t.Parallel()
+
+	repeated := record(t, "us-central1", "n2-standard-2", "0.0212")
+
+	manifest := priceManifest(t)
+	manifest.MinRecords = Coverage{Regions: 1, Machines: 1, Prices: 2}
+
+	require.ErrorIs(t, ValidatePrices([]PriceRecord{repeated, repeated}, manifest), ErrCoverage)
+
+	manifest.MinRecords.Prices = 1
+	require.NoError(t, ValidatePrices([]PriceRecord{repeated, repeated}, manifest))
+}
+
 func TestValidatePricesFailsClosed(t *testing.T) {
 	t.Parallel()
 
@@ -82,7 +99,7 @@ func TestValidatePricesFailsClosed(t *testing.T) {
 			wantErr: ErrInvalidManifest,
 		},
 		{
-			name: "the same price twice",
+			name: "one machine with two different prices",
 			records: []PriceRecord{
 				record(t, "us-central1", "n2-standard-2", "0.0212"),
 				record(t, "us-central1", "n2-standard-2", "0.0299"),

@@ -45,7 +45,7 @@ func ValidatePrices(records []PriceRecord, manifest *Manifest) error {
 		return fmt.Errorf("%w: kind %q does not carry prices", ErrInvalidManifest, manifest.Kind)
 	}
 
-	seen := make(map[priceKey]struct{}, len(records))
+	seen := make(map[priceKey]cloud.Money, len(records))
 	regions := make(map[cloud.Region]struct{})
 	machines := make(map[cloud.MachineID]struct{})
 
@@ -55,18 +55,23 @@ func ValidatePrices(records []PriceRecord, manifest *Manifest) error {
 			return fmt.Errorf("record %d: %w", i, err)
 		}
 
+		// A repeat of the same amount is harmless redundancy — the AWS feed
+		// lists 118 region/size pairs twice with identical prices. Two different
+		// amounts for one key is ambiguity, and there is no safe way to pick.
 		key := priceKey{region: record.Region, machine: record.Machine, os: record.OS, class: record.Class}
-		if _, duplicate := seen[key]; duplicate {
-			return fmt.Errorf("%w: %s/%s/%s/%s appears more than once",
-				ErrDuplicateRecord, record.Region, record.Machine, record.OS, record.Class)
+		if previous, repeated := seen[key]; repeated && previous != record.Amount {
+			return fmt.Errorf("%w: %s/%s/%s/%s is priced %s and %s",
+				ErrDuplicateRecord, record.Region, record.Machine, record.OS, record.Class,
+				previous, record.Amount)
 		}
 
-		seen[key] = struct{}{}
+		seen[key] = record.Amount
 		regions[record.Region] = struct{}{}
 		machines[record.Machine] = struct{}{}
 	}
 
-	actual := Coverage{Regions: len(regions), Machines: len(machines), Prices: len(records)}
+	// Distinct prices, so a feed cannot pad its coverage by repeating rows.
+	actual := Coverage{Regions: len(regions), Machines: len(machines), Prices: len(seen)}
 
 	return ValidateCoverage(actual, manifest.MinRecords)
 }

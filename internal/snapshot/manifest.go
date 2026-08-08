@@ -46,8 +46,10 @@ var (
 	// ErrCoverage identifies a snapshot that parsed but carries less data than
 	// its manifest requires.
 	ErrCoverage = errors.New("snapshot coverage below the manifest floor")
-	// ErrDuplicateRecord identifies two records that describe the same price.
-	ErrDuplicateRecord = errors.New("duplicate snapshot record")
+	// ErrDuplicateRecord identifies one machine priced two different ways in the
+	// same region, OS, and class. An exact repeat is not an error; a conflict is,
+	// because nothing can choose between the two amounts.
+	ErrDuplicateRecord = errors.New("ambiguous snapshot record")
 )
 
 // Kind names what a snapshot contains. Each kind has its own parser contract.

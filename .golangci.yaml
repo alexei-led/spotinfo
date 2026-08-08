@@ -1,5 +1,4 @@
 version: "2"
-
 linters:
   settings:
     govet:
@@ -64,10 +63,12 @@ linters:
             - $all
           allow:
             - $gostd
-            - spotinfo/internal/spot
+            # One entry for every internal package, deliberately. depguard only
+            # prefix-checks the nearest allow entry in sorted order, so listing
+            # `spotinfo/internal/spot` alongside `spotinfo/internal` silently
+            # denied every package sorting between them (internal/snapshot,
+            # internal/providers). Keep this list free of narrower entries.
             - spotinfo/internal
-            - spotinfo/internal/mcp
-            - spotinfo/internal/snapshot
             - github.com/jedib0t/go-pretty/v6
             - github.com/urfave/cli/v2
             - github.com/stretchr/testify
@@ -84,7 +85,6 @@ linters:
     tagalign:
       align: true
       sort: true
-
   # please, do not use `enable-all`: it's deprecated and will be removed soon.
   # inverted configuration with `enable-all` and `disable` is not scalable during updates of golangci-lint
   default: none
@@ -97,7 +97,6 @@ linters:
     - staticcheck # Comprehensive static analysis
     - unused # Unused code
     - errorlint # Error wrapping issues
-
     # Code quality and best practices
     - bodyclose # HTTP response body close check
     - contextcheck # Context usage patterns
@@ -122,10 +121,8 @@ linters:
     - unconvert # Unnecessary conversions
     - unparam # Unused parameters
     - wastedassign # Wasted assignments
-
     # Performance-related
     - prealloc # Slice preallocation
-
     # Additional best practices (keep important ones)
     - durationcheck # Duration multiplication
     - errname # Error naming conventions
@@ -137,7 +134,6 @@ linters:
     - nosprintfhostport # Sprintf host:port misuse
     - reassign # Package variable reassignment
     - forcetypeassert # Type assertion without check
-
   # Explicitly disabled linters with reasons
   # - gochecknoglobals  # Too restrictive for CLI apps that need global flags/config
   # - gocognit          # Redundant with cyclop
@@ -149,12 +145,11 @@ linters:
   # - iface             # Too opinionated
   # - inamedparam       # Too verbose
   # - intrange          # Go 1.22+ feature not always available
-
   exclusions:
     rules:
-      - path: '(.+)\.go$'
+      - path: (.+)\.go$
         text: Using the variable on range scope `tt` in function literal
-      - path: '(.+)_test\.go'
+      - path: (.+)_test\.go
         linters:
           - funlen
           - gocyclo
@@ -173,7 +168,7 @@ linters:
           - staticcheck
           - unused
           - gosec
-      - path: 'mocks_test\.go'
+      - path: mocks_test\.go
         linters:
           - stylecheck
           - revive
@@ -182,13 +177,12 @@ linters:
           - unused
           - deadcode
           - typecheck
-      - path: 'cmd/main\.go'
+      - path: cmd/main\.go
         linters:
           - exhaustruct
       - linters:
           - lll
-        source: "^//go:generate "
-
+        source: '^//go:generate '
 formatters:
   enable:
     - gci
@@ -203,4 +197,3 @@ formatters:
     goimports:
       local-prefixes:
         - spotinfo
-
