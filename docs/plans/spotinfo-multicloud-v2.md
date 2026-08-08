@@ -339,13 +339,52 @@ Manual checks:
 - Confirm the update path cannot replace a valid snapshot with empty or partial output.
 - Confirm that raw source hashes and parsed payload hashes describe different artifacts.
 
-- [ ] Define manifest, payload, parser, and source schema versions.
-- [ ] Add AWS sidecar manifests without changing AWS runtime output.
-- [ ] Add and validate the provider source-contract schema and generic approved/rejected fixtures.
-- [ ] Add atomic output writing and fail-closed validation.
-- [ ] Extend `make verify-data` and the AWS update workflow.
-- [ ] Run focused data tests, race tests, build, and verification gates.
-- [ ] Commit the #36 slice before starting Task 3.
+- [x] Define manifest, payload, parser, and source schema versions.
+- [x] Add AWS sidecar manifests without changing AWS runtime output.
+- [x] Add and validate the provider source-contract schema and generic approved/rejected fixtures.
+- [x] Add atomic output writing and fail-closed validation.
+- [x] Extend `make verify-data` and the AWS update workflow.
+- [x] Run focused data tests, race tests, build, and verification gates.
+- [x] Commit the #36 slice before starting Task 3.
+
+Task 2 results:
+
+- Hash model: `payload.sha256` is the hash of the **committed** file, so
+  `make verify-data` can recompute it offline. `sources[].sha256` is upstream
+  provenance. `payload.form` names the relationship: `raw-source` (AWS embeds
+  the feed verbatim — the two hashes must be equal) or `parsed-catalog` (GCP and
+  Azure commit a derived catalogue — the payload hash must differ from every
+  source hash). No canonicalizer was written; a parse-derived hash would have
+  forced a manifest rewrite on every weekly refresh for no extra signal.
+- `min_records` is a **floor**, not a census. A refresh may grow the data; a
+  shrink below the reviewed floor fails. That is what keeps a weekly refresh
+  from rewriting review metadata, and it matches the `min_regions`/`min_machines`
+  thresholds in the source-contract schema. AWS floors are ~75-80% of observed:
+  price 30 regions / 1000 machines / 25000 priced cells (observed 40 / 1339 /
+  36082), advisor 25 / 900 (observed 34 / 1192), architecture 140 families
+  (observed 170).
+- The coverage floor is also applied to the **live** AWS fetch. A feed that
+  returns HTTP 200 with a truncated document now falls back to the embedded
+  snapshot instead of replacing it. Embedded loads are not re-hashed at runtime:
+  the bytes are compiled in, so that is a gate fact, not a runtime one.
+- No JSON Schema library was added. `internal/snapshot/source_contract.go`
+  mirrors `docs/plans/contracts/provider-source-contract.schema.json` in Go and
+  names it as normative; the binary keeps its zero-dependency scratch-image
+  runtime. Both fixtures are synthetic — the schema restricts `provider` to
+  `gcp` and `azure`, and neither is approved here.
+- Regeneration reuses the repo's `UPDATE_GOLDEN=1` convention:
+  `make refresh-manifests`, invoked automatically by `update-data` and
+  `update-price`. It rewrites hashes and, for raw feeds, the fetch time. Floors
+  and reviewed provenance are never regenerated. The update workflow runs it a
+  second time and fails on any diff, so a stale manifest cannot be merged.
+- Archfit after the change: `verdict pass`, no new Critical. The four new medium
+  advisories are the expected value-object edges (`snapshot -> cloud` ×2,
+  `spot -> cloud`, `spot -> snapshot`). Critical
+  `bac6b2e4f1019c672ac2eec8dc470b31` (`mcp -> spot`) is unchanged and remains
+  Task 4's target.
+- `internal/snapshot` is declared in the `domain` layer: both `internal/spot`
+  (legacy) and future provider packages depend on it, so any other placement
+  would create a back edge.
 
 ### Task 3: Add the provider registry and capability-aware CLI routing
 

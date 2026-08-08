@@ -51,6 +51,18 @@ modules:
     # medium, not low: the neutral contract is still being shaped through the
     # multi-cloud migration. Revisit once GCP and Azure have landed.
     volatility: medium
+  snapshot:
+    paths:
+      - internal/snapshot/**
+    public:
+      - internal/snapshot
+    layer: domain
+    owner: spotinfo
+    role: core
+    subdomain: core
+    # medium: the manifest and source-contract shapes are still settling as GCP
+    # and Azure snapshots land. Revisit once both providers have shipped.
+    volatility: medium
   spot:
     paths:
       - internal/spot/**

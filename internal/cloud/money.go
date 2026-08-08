@@ -8,9 +8,10 @@ import (
 )
 
 const (
-	// moneyScale is the number of fractional decimal digits Money stores.
-	moneyScale = 9
-	// nanosPerUnit is 10^moneyScale — one currency unit in nano units.
+	// MoneyScale is the number of fractional decimal digits Money stores exactly.
+	// A source that publishes finer amounts must raise it deliberately.
+	MoneyScale = 9
+	// nanosPerUnit is 10^MoneyScale — one currency unit in nano units.
 	nanosPerUnit = 1_000_000_000
 	// maxWholeUnits keeps whole units × nanosPerUnit inside int64.
 	maxWholeUnits = 9_223_372_035
@@ -43,8 +44,8 @@ func ParseMoney(text string) (Money, error) {
 	if !decimalDigits(whole) || (hasFraction && !decimalDigits(fraction)) {
 		return Money{}, fmt.Errorf("%w: %q is not a non-negative decimal amount", ErrInvalidArgument, text)
 	}
-	if len(fraction) > moneyScale {
-		return Money{}, fmt.Errorf("%w: %q exceeds %d fractional digits", ErrPrecisionLoss, text, moneyScale)
+	if len(fraction) > MoneyScale {
+		return Money{}, fmt.Errorf("%w: %q exceeds %d fractional digits", ErrPrecisionLoss, text, MoneyScale)
 	}
 
 	units, err := strconv.ParseInt(whole, 10, 64)
@@ -54,7 +55,7 @@ func ParseMoney(text string) (Money, error) {
 
 	nanos := int64(0)
 	if hasFraction {
-		nanos, err = strconv.ParseInt(fraction+strings.Repeat("0", moneyScale-len(fraction)), 10, 64)
+		nanos, err = strconv.ParseInt(fraction+strings.Repeat("0", MoneyScale-len(fraction)), 10, 64)
 		if err != nil {
 			return Money{}, fmt.Errorf("%w: %q is out of range", ErrInvalidArgument, text)
 		}
@@ -86,7 +87,7 @@ func (m Money) IsZero() bool { return m.nanos == 0 }
 // Lossy by definition: never use it for storage, comparison, or rendering.
 func (m Money) Float64() float64 { return float64(m.nanos) / nanosPerUnit }
 
-// String renders the canonical decimal form with exactly moneyScale fractional
+// String renders the canonical decimal form with exactly MoneyScale fractional
 // digits, so the same amount always serialises to the same bytes.
 func (m Money) String() string {
 	return fmt.Sprintf("%d.%09d", m.nanos/nanosPerUnit, m.nanos%nanosPerUnit)

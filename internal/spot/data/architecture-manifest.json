@@ -1,0 +1,25 @@
+{
+  "schema_version": "spotinfo.snapshot-manifest/v1",
+  "data_schema_version": "aws.architecture-snapshot/v1",
+  "parser_version": "aws-architecture-snapshot/1",
+  "provider": "aws",
+  "kind": "machine-architecture",
+  "payload": {
+    "file": "architecture-snapshot.json",
+    "form": "parsed-catalog",
+    "sha256": "a175aecee97a8365aad359d61eee3086380eeb7fb0dc1d5ab74fd2c93f9025c7"
+  },
+  "sources": [
+    {
+      "fetched_at": "2026-08-06T00:00:00Z",
+      "observed_at": null,
+      "url": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-types.html",
+      "sha256": ""
+    }
+  ],
+  "min_records": {
+    "regions": 0,
+    "machines": 140,
+    "prices": 0
+  }
+}

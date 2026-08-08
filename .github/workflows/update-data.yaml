@@ -56,10 +56,20 @@ jobs:
           }
           check "spot advisor feed" "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json" 180
           check "spot price feed"   "https://website.spot.ec2.aws.a2z.com/spot.json" 30
+      # Each target rewrites the sidecar manifest for the file it downloaded, so
+      # data and provenance are always committed together.
       - name: Refresh feeds
         run: make update-data update-price
-      - name: Verify embedded data parses
+      # Fails on a manifest that lost coverage, no longer matches its data file,
+      # or was left behind by the refresh.
+      - name: Verify embedded data, manifests and parser contracts
         run: make verify-data
+      # A refresh must never leave a manifest stale. If refresh-manifests did its
+      # job, a second run changes nothing.
+      - name: Confirm manifests are settled
+        run: |
+          make refresh-manifests
+          git diff --exit-code -- internal/spot/data/'*-manifest.json'
       - name: Run tests
         run: go test ./... -count=1
       - name: Open or update pull request

@@ -29,12 +29,20 @@ DATA_DIR = internal/spot/data
 # Pinned so every developer and CI regenerate byte-identical mocks.
 MOCKERY_VERSION = v3.7.2
 
+# The embedded-data gate. Every test here runs offline against committed bytes.
+DATA_GATE_TESTS = TestLoadEmbeddedAdvisorData|TestLoadEmbeddedPricingData
+DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestLoadEmbeddedArchitectureLookup_ClassifiesAdvisorFamiliesAndReviewedRegressions
+DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestParseArchitectureSnapshotRejectsInvalidData
+DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestEmbeddedSnapshotManifests|TestEmbeddedManifestsDescribeTheirOwnFiles
+DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestEmbeddedSourceRefsCoverEverySnapshot
+DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestValidateCoverageRejectsATruncatedLiveFeed
+
 # Go environment
 export GO111MODULE=on
 export CGO_ENABLED=0
 
 .PHONY: all build test test-verbose test-race test-coverage lint fmt clean help version
-.PHONY: update-data update-price verify-data check-deps setup-tools release mocks hooks
+.PHONY: update-data update-price refresh-manifests verify-data check-deps setup-tools release mocks hooks
 
 # Default target
 all: build
@@ -91,19 +99,33 @@ update-data: check-deps
 	@wget -nv $(SPOT_ADVISOR_URL) -O $(DATA_DIR)/spot-advisor-data.json.tmp || (rm -f $(DATA_DIR)/spot-advisor-data.json.tmp; exit 1)
 	@test -s $(DATA_DIR)/spot-advisor-data.json.tmp || (rm -f $(DATA_DIR)/spot-advisor-data.json.tmp; echo "Error: empty advisor download"; exit 1)
 	@mv $(DATA_DIR)/spot-advisor-data.json.tmp $(DATA_DIR)/spot-advisor-data.json
+	@$(MAKE) --no-print-directory refresh-manifests
 
 update-price: check-deps
 	@echo "Updating spot pricing data..."
 	@wget -nv $(SPOT_PRICE_URL) -O $(DATA_DIR)/spot-price-data.json.tmp || (rm -f $(DATA_DIR)/spot-price-data.json.tmp; exit 1)
 	@test -s $(DATA_DIR)/spot-price-data.json.tmp || (rm -f $(DATA_DIR)/spot-price-data.json.tmp; echo "Error: empty price download"; exit 1)
 	@mv $(DATA_DIR)/spot-price-data.json.tmp $(DATA_DIR)/spot-price-data.json
+	@$(MAKE) --no-print-directory refresh-manifests
 
-# Deterministic embedded-data gate. The architecture snapshot test validates its
-# review metadata and fail-closed coverage of every Advisor family, so a feed refresh
+# Rewrites each sidecar manifest's payload hash, and the source hash and fetch
+# time of the raw feeds, for whatever was just downloaded. Coverage floors and
+# reviewed provenance stay hand-curated: regenerating a floor from the data that
+# just arrived would ratchet the gate into always passing.
+refresh-manifests:
+	@echo "Refreshing snapshot manifests..."
+	@UPDATE_GOLDEN=1 go test ./internal/spot/ -run TestEmbeddedSnapshotManifests -count=1
+
+# Deterministic embedded-data gate, run offline. It checks the generic snapshot
+# manifest and source-contract validators, then every committed AWS snapshot:
+# it must parse, hash to what its sidecar manifest declares, and still cover its
+# reviewed floor. The architecture snapshot additionally validates its review
+# metadata and fail-closed coverage of every Advisor family, so a feed refresh
 # surfaces families that require a manual reviewed snapshot update.
 verify-data:
-	@echo "Verifying embedded data and reviewed architecture coverage..."
-	@go test ./internal/spot/ -run 'TestLoadEmbeddedAdvisorData|TestLoadEmbeddedPricingData|TestLoadEmbeddedArchitectureLookup_ClassifiesAdvisorFamiliesAndReviewedRegressions|TestParseArchitectureSnapshotRejectsInvalidData' -count=1
+	@echo "Verifying embedded data, snapshot manifests and reviewed architecture coverage..."
+	@go test ./internal/snapshot/ -count=1
+	@go test ./internal/spot/ -run '$(DATA_GATE_TESTS)' -count=1
 
 # Development tools
 setup-tools:
@@ -162,7 +184,8 @@ help:
 	@echo "  fmt           Format Go code"
 	@echo "  update-data   Update embedded spot advisor data"
 	@echo "  update-price  Update embedded spot pricing data"
-	@echo "  verify-data   Verify embedded data and reviewed architecture coverage"
+	@echo "  refresh-manifests Rewrite snapshot manifest hashes for refreshed data"
+	@echo "  verify-data   Verify embedded data, manifests and architecture coverage"
 	@echo "  mocks         Regenerate testify mocks from .mockery.yaml"
 	@echo "  release       Build binaries for all platforms"
 	@echo "  clean         Remove build artifacts"

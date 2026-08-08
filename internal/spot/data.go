@@ -119,6 +119,10 @@ func fetchAdvisorData(ctx context.Context) (*advisorData, error) {
 	}
 
 	result, err := parseAdvisorResponse(body)
+	if err == nil {
+		err = validateAdvisorCoverage(result)
+	}
+
 	if err != nil {
 		slog.Warn("unusable advisor data from AWS, using embedded data",
 			slog.Any("error", err))
@@ -199,6 +203,10 @@ func fetchPricingData(ctx context.Context, useEmbedded bool) (*rawPriceData, err
 	}
 
 	result, err := parsePricingResponse(bodyBytes)
+	if err == nil {
+		err = validatePriceCoverage(result)
+	}
+
 	if err != nil {
 		slog.Warn("unusable pricing data from AWS, using embedded data",
 			slog.Any("error", err))
