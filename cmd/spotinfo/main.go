@@ -20,7 +20,10 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/urfave/cli/v2"
 
+	"spotinfo/internal/cloud"
 	"spotinfo/internal/mcp"
+	"spotinfo/internal/providers"
+	awsprovider "spotinfo/internal/providers/aws"
 	"spotinfo/internal/spot"
 )
 
@@ -135,7 +138,49 @@ func mainCmd(ctx *cli.Context) error {
 	if isMCPMode(ctx) {
 		return runMCPServer(ctx, mainCtx)
 	}
-	return execMainCmd(ctx, mainCtx, spot.New(), os.Stdout)
+
+	client := spot.New()
+
+	registry, err := newProviderRegistry(client)
+	if err != nil {
+		return err
+	}
+
+	return execMainCmd(ctx, mainCtx, registry, client, os.Stdout)
+}
+
+// newProviderRegistry composes the providers this binary serves. The AWS
+// client is shared with the legacy acquisition path so a single invocation
+// opens one client. GCP and Azure are recognised identifiers with no
+// registration yet, so the registry reports them disabled rather than absent.
+func newProviderRegistry(client *spot.Client) (*providers.Registry, error) {
+	registry, err := providers.New(providers.Registration{
+		ID: cloud.ProviderAWS,
+		Build: func() (cloud.Provider, error) {
+			lookup, err := spot.LoadEmbeddedArchitectureLookup()
+			if err != nil {
+				return nil, fmt.Errorf("load aws architecture data: %w", err)
+			}
+
+			return awsprovider.New(client, lookup)
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Why a cloud is missing is a --debug question, not an error: the request
+	// that selects it reports the same reason code on stderr.
+	for _, status := range registry.Status() {
+		if !status.Enabled {
+			log.Debug("cloud provider unavailable",
+				slog.String("provider", string(status.ID)),
+				slog.String("reason", string(status.Reason)),
+				slog.String("detail", status.Detail))
+		}
+	}
+
+	return registry, nil
 }
 
 // isMCPMode checks if the application should run in MCP server mode
@@ -165,13 +210,21 @@ func runMCPServer(_ *cli.Context, execCtx context.Context) error {
 		slog.String("transport", transport),
 		slog.String("port", port))
 
+	client := spot.New()
+
+	registry, err := newProviderRegistry(client)
+	if err != nil {
+		return err
+	}
+
 	// Create MCP server
 	mcpServer, err := mcp.NewServer(mcp.Config{
 		Version:    Version,
 		Transport:  transport,
 		Port:       port,
 		Logger:     log,
-		SpotClient: spot.New(),
+		SpotClient: client,
+		Providers:  registry,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create MCP server: %w", err)
@@ -252,10 +305,11 @@ func normalizeRecommendationRegions(regions []string) ([]string, error) {
 	return normalized, nil
 }
 
-// recommendationFlagContext returns the nearest context that explicitly set one
-// of names. This preserves root flags placed before recommend without allowing
-// command defaults to shadow them.
-func recommendationFlagContext(ctx *cli.Context, names ...string) *cli.Context {
+// flagLineageContext returns the nearest context that explicitly set one of
+// names. LocalFlagNames reports only flags a context actually parsed, so this
+// preserves root flags placed before a subcommand without letting the
+// subcommand's own defaults shadow them.
+func flagLineageContext(ctx *cli.Context, names ...string) *cli.Context {
 	for _, candidate := range ctx.Lineage() {
 		for _, setName := range candidate.LocalFlagNames() {
 			for _, name := range names {
@@ -269,24 +323,30 @@ func recommendationFlagContext(ctx *cli.Context, names ...string) *cli.Context {
 	return ctx
 }
 
-func recommendationString(ctx *cli.Context, name string) string {
-	return recommendationFlagContext(ctx, name).String(name)
+func lineageString(ctx *cli.Context, name string) string {
+	return flagLineageContext(ctx, name).String(name)
 }
 
-func recommendationStringSlice(ctx *cli.Context, name string) []string {
-	return recommendationFlagContext(ctx, name).StringSlice(name)
+func lineageStringSlice(ctx *cli.Context, name string) []string {
+	return flagLineageContext(ctx, name).StringSlice(name)
 }
 
-func recommendationInt(ctx *cli.Context, name string, aliases ...string) int {
-	return recommendationFlagContext(ctx, append([]string{name}, aliases...)...).Int(name)
+func lineageInt(ctx *cli.Context, name string, aliases ...string) int {
+	return flagLineageContext(ctx, append([]string{name}, aliases...)...).Int(name)
 }
 
 // execMainCmd is the testable version of mainCmd that accepts dependencies.
 //
 //nolint:cyclop,gocyclo,funlen // CLI argument parsing inherently has high complexity due to comprehensive option handling
-func execMainCmd(ctx *cli.Context, execCtx context.Context, client spotClient, output io.Writer) error {
+func execMainCmd(ctx *cli.Context, execCtx context.Context, registry providerRegistry, client spotClient, output io.Writer) error {
 	if v := execCtx.Value("key"); v != nil {
 		log.Debug("context value received", slog.Any("value", v))
+	}
+
+	// Provider selection and capability checks run before acquisition, so an
+	// unsupported request costs no I/O.
+	if providerErr := resolveAWSProvider(ctx, registry, rootCapabilityRequest(ctx)); providerErr != nil {
+		return providerErr
 	}
 
 	regions := ctx.StringSlice(flagRegion)
@@ -379,7 +439,7 @@ func execMainCmd(ctx *cli.Context, execCtx context.Context, client spotClient, o
 // execRecommendCmd fetches candidate advice and renders only the dedicated,
 // deterministic recommendation DTO. Recommendation ranking itself lives in
 // internal/spot and performs no I/O.
-func execRecommendCmd(ctx *cli.Context, execCtx context.Context, client spotClient, output io.Writer) error { //nolint:gocyclo,cyclop // CLI validation and rendering have explicit error paths.
+func execRecommendCmd(ctx *cli.Context, execCtx context.Context, registry providerRegistry, client spotClient, output io.Writer) error { //nolint:gocyclo,cyclop // CLI validation and rendering have explicit error paths.
 	budget := ctx.Float64(flagBudget)
 	if ctx.IsSet(flagBudget) && budget <= 0 {
 		return fmt.Errorf("%w: budget must be a positive USD instance-hour price", spot.ErrInvalidRecommendationInput)
@@ -387,7 +447,7 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, client spotClie
 	if ctx.IsSet(flagTop) && ctx.Int(flagTop) <= 0 {
 		return fmt.Errorf("%w: top must be positive", spot.ErrInvalidRecommendationInput)
 	}
-	outputFormat := recommendationString(ctx, flagOutput)
+	outputFormat := lineageString(ctx, flagOutput)
 	if outputFormat != outputTable && outputFormat != outputJSON {
 		return fmt.Errorf("%w: output must be table or json", spot.ErrInvalidRecommendationInput)
 	}
@@ -395,9 +455,9 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, client spotClie
 	opts := spot.RecommendationOptions{
 		Architecture: spot.Architecture(ctx.String(flagArchitecture)),
 		Instance:     ctx.String(flagInstance),
-		OS:           recommendationString(ctx, flagOS),
-		CPU:          recommendationInt(ctx, flagCPU, "vcpu"),
-		Memory:       recommendationInt(ctx, flagMemory, "memory-gib"),
+		OS:           lineageString(ctx, flagOS),
+		CPU:          lineageInt(ctx, flagCPU, "vcpu"),
+		Memory:       lineageInt(ctx, flagMemory, "memory-gib"),
 		Budget:       budget,
 		Workload:     spot.Workload(ctx.String(flagWorkload)),
 		Top:          ctx.Int(flagTop),
@@ -406,9 +466,15 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, client spotClie
 		return err
 	}
 
-	regions, err := normalizeRecommendationRegions(recommendationStringSlice(ctx, flagRegion))
+	regions, err := normalizeRecommendationRegions(lineageStringSlice(ctx, flagRegion))
 	if err != nil {
 		return err
+	}
+
+	// Provider selection and capability checks run before acquisition, so an
+	// unsupported request costs no I/O.
+	if providerErr := resolveAWSProvider(ctx, registry, recommendCapabilityRequest(ctx)); providerErr != nil {
+		return providerErr
 	}
 
 	lookup, err := spot.LoadEmbeddedArchitectureLookup()
@@ -824,7 +890,14 @@ func handleSignals() context.Context {
 }
 
 func defaultRecommendAction(ctx *cli.Context) error {
-	return execRecommendCmd(ctx, mainCtx, spot.New(), os.Stdout)
+	client := spot.New()
+
+	registry, err := newProviderRegistry(client)
+	if err != nil {
+		return err
+	}
+
+	return execRecommendCmd(ctx, mainCtx, registry, client, os.Stdout)
 }
 
 //nolint:funlen // CLI flag declarations are intentionally kept together.
@@ -834,8 +907,13 @@ func recommendCommand(action cli.ActionFunc) *cli.Command {
 		Usage:  "recommend individual Spot instances by architecture and workload",
 		Action: action,
 		Flags: []cli.Flag{
+			cloudFlag(),
 			&cli.StringFlag{Name: flagArchitecture, Usage: "required instance architecture: x86_64|arm64", Required: true},
-			&cli.StringFlag{Name: flagInstance, Usage: "instance type RE2 regexp (combined with architecture)"},
+			&cli.StringFlag{
+				Name:    flagInstance,
+				Aliases: []string{flagMachine},
+				Usage:   "machine type RE2 regexp (combined with architecture)",
+			},
 			&cli.StringSliceFlag{Name: flagRegion, Usage: regionFlagUsage, Value: cli.NewStringSlice("us-east-1")},
 			&cli.IntFlag{Name: flagCPU, Aliases: []string{"vcpu"}, Usage: "required minimum vCPU cores"},
 			&cli.IntFlag{Name: flagMemory, Aliases: []string{"memory-gib"}, Usage: "required minimum memory GiB"},
@@ -874,6 +952,7 @@ func newSpotinfoApp(rootAction, recommendationAction cli.ActionFunc) *cli.App {
 			return nil
 		},
 		Flags: []cli.Flag{
+			cloudFlag(),
 			&cli.BoolFlag{
 				Name:  flagMCP,
 				Usage: "run as MCP server instead of CLI",
@@ -891,8 +970,9 @@ func newSpotinfoApp(rootAction, recommendationAction cli.ActionFunc) *cli.App {
 				Usage: "output logs in JSON format",
 			},
 			&cli.StringFlag{
-				Name:  flagType,
-				Usage: "EC2 instance type (can be RE2 regexp patten)",
+				Name:    flagType,
+				Aliases: []string{flagMachine},
+				Usage:   "EC2 instance type (can be RE2 regexp patten)",
 			},
 			&cli.StringFlag{
 				Name:  flagOS,

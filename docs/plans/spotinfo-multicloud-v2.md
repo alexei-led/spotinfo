@@ -105,16 +105,32 @@ Add a new `recommend_spot_instances` tool. Its input schema is:
   "additionalProperties": false,
   "required": ["architecture", "min_vcpu", "min_memory_gib"],
   "properties": {
-    "cloud": {"type": "string", "enum": ["aws", "gcp", "azure"], "default": "aws"},
-    "regions": {"type": "array", "items": {"type": "string"}, "default": ["all"]},
-    "machine": {"type": "string", "default": ""},
-    "architecture": {"type": "string", "enum": ["x86_64", "arm64"]},
-    "os": {"type": "string", "enum": ["linux", "windows"], "default": "linux"},
-    "min_vcpu": {"type": "integer", "minimum": 1},
-    "min_memory_gib": {"type": "number", "exclusiveMinimum": 0},
-    "max_price_per_hour": {"type": "number", "exclusiveMinimum": 0},
-    "workload": {"type": "string", "enum": ["cost", "web", "ci", "batch"], "default": "cost"},
-    "top": {"type": "integer", "minimum": 1, "maximum": 50, "default": 3}
+    "cloud": {
+      "type": "string",
+      "enum": ["aws", "gcp", "azure"],
+      "default": "aws"
+    },
+    "regions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": ["all"]
+    },
+    "machine": { "type": "string", "default": "" },
+    "architecture": { "type": "string", "enum": ["x86_64", "arm64"] },
+    "os": {
+      "type": "string",
+      "enum": ["linux", "windows"],
+      "default": "linux"
+    },
+    "min_vcpu": { "type": "integer", "minimum": 1 },
+    "min_memory_gib": { "type": "number", "exclusiveMinimum": 0 },
+    "max_price_per_hour": { "type": "number", "exclusiveMinimum": 0 },
+    "workload": {
+      "type": "string",
+      "enum": ["cost", "web", "ci", "batch"],
+      "default": "cost"
+    },
+    "top": { "type": "integer", "minimum": 1, "maximum": 50, "default": 3 }
   }
 }
 ```
@@ -139,7 +155,13 @@ A successful result has `isError=false`. Its single text content item contains J
     "workload": "cost",
     "top": 3
   },
-  "ranking_policy": ["spot_price_ascending", "excess_vcpu_ascending", "excess_memory_gib_ascending", "region_ascending", "machine_ascending"],
+  "ranking_policy": [
+    "spot_price_ascending",
+    "excess_vcpu_ascending",
+    "excess_memory_gib_ascending",
+    "region_ascending",
+    "machine_ascending"
+  ],
   "data_source": {
     "provider": "aws",
     "mode": "embedded-snapshot",
@@ -177,7 +199,11 @@ A successful result has `isError=false`. Its single text content item contains J
         "source_url": null,
         "observed_at": null
       },
-      "rationale_codes": ["COST_POLICY", "ARCHITECTURE_MATCH", "RESOURCE_MINIMUMS_MET"]
+      "rationale_codes": [
+        "COST_POLICY",
+        "ARCHITECTURE_MATCH",
+        "RESOURCE_MINIMUMS_MET"
+      ]
     }
   ],
   "warnings": []
@@ -388,7 +414,7 @@ Task 2 results:
 - Duplicate rule, corrected against real data: the committed AWS price feed
   lists 118 region/size pairs twice (8 GPU machine types) with **identical**
   prices. That is redundancy, not ambiguity, so `ValidatePrices` rejects only a
-  key priced two *different* ways and counts distinct keys toward the floor.
+  key priced two _different_ ways and counts distinct keys toward the floor.
   Rejecting exact repeats would have made the gate unusable on real AWS data
   without catching anything the success criteria ask for.
   `TestEmbeddedPricesSatisfyTheNeutralRecordContract` runs the neutral record
@@ -447,13 +473,83 @@ Manual checks:
 - Confirm GCP and Azure reject `--with-score`, `--az`, and `--min-score` before snapshot access.
 - Confirm CI uses pinned archfit `v1.6.0`; GitNexus stays a review-only tool.
 
-- [ ] Add the compiled registry and capability vocabulary.
-- [ ] Add provider selection with AWS as the default.
-- [ ] Preserve root `--type` and recommendation `--instance` behavior.
-- [ ] Add unsupported-capability and flag-order tests.
-- [ ] Pin archfit and add the provider-boundary gate to CI.
-- [ ] Run focused and full validation.
-- [ ] Commit the #37 slice before starting Task 4.
+- [x] Add the compiled registry and capability vocabulary.
+- [x] Add provider selection with AWS as the default.
+- [x] Preserve root `--type` and recommendation `--instance` behavior.
+- [x] Add unsupported-capability and flag-order tests.
+- [x] Pin archfit and add the provider-boundary gate to CI.
+- [x] Run focused and full validation.
+- [x] Commit the #37 slice before starting Task 4.
+
+Task 3 results:
+
+- `--cloud` is declared on both the root command and `recommend` with **no**
+  default value, and the AWS default is applied once in `providerID`. Declaring
+  `Value: "aws"` on both would let the subcommand's own default shadow an
+  explicit `spotinfo --cloud gcp recommend …` and answer a GCP question with AWS
+  prices. `TestCloudFlagResolvesAcrossContextLineage` pins both flag positions.
+- `--machine` is the neutral machine-type filter, added as a `cli` **alias** of
+  the AWS spellings (`--type` on root, `--instance` on recommend). Both names
+  reach the same value, so every documented AWS invocation is byte-identical;
+  only the help text gains the alias.
+- Fixed validation order, each step before acquisition: unparseable `--cloud` →
+  `INVALID_ARGUMENT`; recognised but disabled provider → `DATA_UNAVAILABLE`
+  carrying the registry reason code; declared-capability shortfall →
+  `UNSUPPORTED_CAPABILITY`. In the shipped binary `--cloud gcp` therefore reports
+  `DATA_UNAVAILABLE (PROVIDER_NOT_REGISTERED)` — resolution precedes the
+  capability check — so the capability branches are proven against enabled stub
+  providers instead. Both reject before any snapshot access.
+- The root command requires `risk` because it renders an interruption column, so
+  a risk-free provider fails the ordinary capability gate with no special-casing;
+  `--with-score`/`--min-score` add `placement_score` and `--az` adds
+  `zone_detail`. Recommend requires `risk` too: every v1 workload is an
+  interruption cap. The risk-free `cost` policy arrives with the v2 schema.
+- An OS outside the neutral vocabulary is deliberately **not** a capability
+  question — the provider owns that error. That keeps the existing AWS
+  `invalid instance OS` message and its mock-backed test intact; only a
+  well-formed OS is checked against declared support.
+- `resolveAWSProvider` rejects any non-AWS provider from the legacy acquisition
+  path. Both commands still read candidates through the AWS client, so without it
+  a hypothetical enabled provider would be answered with AWS data. Task 4 removes
+  the second half of that function, not the first.
+- Registry builds every factory eagerly, so `Status()` can report a broken
+  snapshot before the first query. It returns all three recognised providers in
+  stable lexical order; construction fails only on wiring bugs (unknown id,
+  duplicate, nil factory, identifier mismatch), never on a provider's own data.
+- `no-layer-back-edges` promoted `warn` → `fail`. Verified both ways: with a
+  temporary `internal/providers` → `internal/mcp` import the gate returned
+  `verdict fail, gate_findings 1, no-layer-back-edges providers -> mcp`; with the
+  probe removed, `verdict pass, gate_findings 0`. The archfit module for the
+  registry uses the `internal/providers/*.go` glob so it does not swallow
+  `providers_aws`; both modules appear with their own edges. 15 medium
+  Balanced-Coupling advisories, up from 10 — the new ones are the expected
+  `cmd_spotinfo -> cloud|providers_aws`, `mcp -> cloud`, `providers -> cloud`
+  edges. Critical `bac6b2e4f1019c672ac2eec8dc470b31` is unchanged and remains
+  Task 4's target.
+- Error vocabulary added to `internal/cloud`: `ErrUnsupportedCapability`,
+  `ErrDataUnavailable`, and `CodeOf`. `NO_CANDIDATES` is deliberately not here —
+  nothing in Task 3 returns it, and it belongs with the v2 contract Task 4
+  freezes.
+- Two test-harness fixes were needed, both pre-existing hazards this task
+  exposed. `TestMainCmd_Integration` built its context with
+  `cli.NewContext(app, nil, nil)`, which carries no parsed flag set: its
+  `ctx.Set` calls silently failed and `LocalFlagNames` panics on it. It now runs
+  through `app.Run`. CLI tests that run the app are not `t.Parallel()` —
+  urfave/cli appends its package-level `HelpFlag` to every parsed command and
+  writes to it in `Apply`, so concurrent `app.Run` calls race inside the library.
+- `make lint` now installs pinned `golangci-lint v2.12.2` instead of `latest`,
+  and CI installs pinned archfit `v1.6.0` before `make verify-architecture-rules`.
+  GitNexus stays a review-only tool and is not installed in CI.
+- `Registry.Status()` has a real consumer: `newProviderRegistry` logs every
+  disabled provider and its reason code at debug level, so `spotinfo --debug`
+  explains a missing cloud without a failing request. The recorded goldens are
+  unchanged — none of them capture help text — so the new `--cloud` and
+  `--machine` entries in `--help` are gated by nothing. Documenting both flags is
+  deferred to Task 5, which already owns `README.md` and `docs/usage.md`.
+- Accepted duplication until Task 4: `execRecommendCmd` parses the 3.9 KB
+  architecture snapshot twice per run — once inside the registry factory, once
+  for the v1 recommender. Threading the lookup through the command signature now
+  would be undone when neutral acquisition replaces that call site.
 
 ### Task 4: Move recommendations and MCP to provider-neutral candidates
 

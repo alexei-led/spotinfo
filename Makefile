@@ -28,6 +28,10 @@ SPOT_PRICE_URL = "https://website.spot.ec2.aws.a2z.com/spot.json"
 DATA_DIR = internal/spot/data
 # Pinned so every developer and CI regenerate byte-identical mocks.
 MOCKERY_VERSION = v3.7.2
+# Pinned so a lint or architecture gate cannot change verdict on a tool release
+# nobody in this repository chose. Bump deliberately.
+GOLANGCI_LINT_VERSION := v2.12.2
+ARCHFIT_VERSION := v1.6.0
 
 # The embedded-data gate. Every test here runs offline against committed bytes.
 DATA_GATE_TESTS = TestLoadEmbeddedAdvisorData|TestLoadEmbeddedPricingData
@@ -44,6 +48,7 @@ export CGO_ENABLED=0
 
 .PHONY: all build test test-verbose test-race test-coverage lint fmt clean help version
 .PHONY: update-data update-price refresh-manifests verify-data check-deps setup-tools release mocks hooks
+.PHONY: verify-architecture-rules
 
 # Default target
 all: build
@@ -128,10 +133,20 @@ verify-data:
 	@go test ./internal/snapshot/ -count=1
 	@go test ./internal/spot/ -run '$(DATA_GATE_TESTS)' -count=1
 
+# Package-boundary gate. Checks the declared layer direction and module
+# metadata in .archfit.yaml; it is not a data-correctness or test substitute.
+# Balanced-Coupling advisories stay warnings here — cmd/archfitcheck turns
+# Critical and High findings into a failure once the current critical edge is
+# fixed (see the plan's Task 4).
+verify-architecture-rules:
+	@echo "Verifying architecture rules..."
+	@command -v archfit > /dev/null 2>&1 || go install github.com/alexei-led/archfit/cmd/archfit@$(ARCHFIT_VERSION)
+	@archfit --gate --config .archfit.yaml --full --format json
+
 # Development tools
 setup-tools:
 	@echo "Installing development tools..."
-	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 	@go install github.com/vektra/mockery/v3@$(MOCKERY_VERSION)
 
 # Opt-in git hooks: staged gofmt/gitleaks on commit, lint+test+gitleaks on push.
@@ -187,6 +202,7 @@ help:
 	@echo "  update-price  Update embedded spot pricing data"
 	@echo "  refresh-manifests Rewrite snapshot manifest hashes for refreshed data"
 	@echo "  verify-data   Verify embedded data, manifests and architecture coverage"
+	@echo "  verify-architecture-rules Verify package boundaries with archfit"
 	@echo "  mocks         Regenerate testify mocks from .mockery.yaml"
 	@echo "  release       Build binaries for all platforms"
 	@echo "  clean         Remove build artifacts"

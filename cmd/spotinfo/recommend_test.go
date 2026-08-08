@@ -19,7 +19,9 @@ import (
 func recommendTestApp(client spotClient, output io.Writer) *cli.App {
 	return newSpotinfoApp(
 		func(*cli.Context) error { return nil },
-		func(ctx *cli.Context) error { return execRecommendCmd(ctx, context.Background(), client, output) },
+		func(ctx *cli.Context) error {
+			return execRecommendCmd(ctx, context.Background(), awsOnlyRegistry(), client, output)
+		},
 	)
 }
 
@@ -257,7 +259,9 @@ func TestSpotinfoAppAssemblyPreservesRootInvocationAndRegistersRecommend(t *test
 	}}, nil).Once()
 	var output bytes.Buffer
 	app := newSpotinfoApp(
-		func(ctx *cli.Context) error { return execMainCmd(ctx, context.Background(), rootClient, &output) },
+		func(ctx *cli.Context) error {
+			return execMainCmd(ctx, context.Background(), awsOnlyRegistry(), rootClient, &output)
+		},
 		func(*cli.Context) error { return nil },
 	)
 

@@ -44,7 +44,15 @@ jobs:
       
     - name: Run golangci-lint
       run: make lint
-      
+
+    # Pinned: an archfit release must not change the verdict on its own.
+    # GitNexus stays a review-only tool and is deliberately not installed here.
+    - name: Install archfit
+      run: go install github.com/alexei-led/archfit/cmd/archfit@v1.6.0
+
+    - name: Verify architecture rules
+      run: make verify-architecture-rules
+
     - name: Build binary
       run: make build
 

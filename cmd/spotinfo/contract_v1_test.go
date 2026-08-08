@@ -49,7 +49,9 @@ func TestAWSRootJSONMatchesRecordedV1Contract(t *testing.T) {
 
 	var output bytes.Buffer
 	app := newSpotinfoApp(
-		func(ctx *cli.Context) error { return execMainCmd(ctx, context.Background(), client, &output) },
+		func(ctx *cli.Context) error {
+			return execMainCmd(ctx, context.Background(), awsOnlyRegistry(), client, &output)
+		},
 		func(*cli.Context) error { return nil },
 	)
 
@@ -64,7 +66,9 @@ func TestAWSRecommendJSONMatchesRecordedV1Contract(t *testing.T) {
 	var output bytes.Buffer
 	app := newSpotinfoApp(
 		func(*cli.Context) error { return nil },
-		func(ctx *cli.Context) error { return execRecommendCmd(ctx, context.Background(), client, &output) },
+		func(ctx *cli.Context) error {
+			return execRecommendCmd(ctx, context.Background(), awsOnlyRegistry(), client, &output)
+		},
 	)
 
 	require.NoError(t, app.Run([]string{

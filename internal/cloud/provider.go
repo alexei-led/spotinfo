@@ -2,7 +2,30 @@ package cloud
 
 import (
 	"context"
+	"fmt"
 	"slices"
+)
+
+// Capability names one optional provider ability. The vocabulary is fixed: a
+// consumer that needs something outside this list must extend it rather than
+// infer support from a provider identifier.
+type Capability string
+
+const (
+	// CapabilitySpotPrice is a spot price per instance-hour.
+	CapabilitySpotPrice Capability = "spot_price"
+	// CapabilityOnDemandPrice is an on-demand price per instance-hour.
+	CapabilityOnDemandPrice Capability = "on_demand_price"
+	// CapabilityMachineSpec is vCPU and memory for a machine type.
+	CapabilityMachineSpec Capability = "machine_spec"
+	// CapabilityRisk is a provider-specific interruption or eviction observation.
+	CapabilityRisk Capability = "risk"
+	// CapabilityPlacementScore is a provider capacity score for a location.
+	CapabilityPlacementScore Capability = "placement_score"
+	// CapabilityZoneDetail is per-zone detail within a region.
+	CapabilityZoneDetail Capability = "zone_detail"
+	// CapabilityLiveEnrichment is a live provider API lookup for missing values.
+	CapabilityLiveEnrichment Capability = "live_enrichment"
 )
 
 // Capabilities declares what a provider can answer. Consumers check it before
@@ -29,6 +52,59 @@ func (c Capabilities) SupportsOS(instanceOS OperatingSystem) bool {
 // architecture from reviewed data.
 func (c Capabilities) SupportsArchitecture(architecture Architecture) bool {
 	return slices.Contains(c.Architectures, architecture)
+}
+
+// Has reports whether the provider publishes one optional capability. An
+// unrecognised capability is never supported.
+func (c Capabilities) Has(capability Capability) bool {
+	switch capability {
+	case CapabilitySpotPrice:
+		return c.SpotPrice
+	case CapabilityOnDemandPrice:
+		return c.OnDemandPrice
+	case CapabilityMachineSpec:
+		return c.MachineSpec
+	case CapabilityRisk:
+		return c.Risk
+	case CapabilityPlacementScore:
+		return c.PlacementScore
+	case CapabilityZoneDetail:
+		return c.ZoneDetail
+	case CapabilityLiveEnrichment:
+		return c.LiveEnrichment
+	default:
+		return false
+	}
+}
+
+// CapabilityRequest is what a consumer needs before it acquires candidates.
+// Zero-valued fields are inactive, matching Query: an empty OS or Architecture
+// is not requested rather than requested-and-empty.
+type CapabilityRequest struct {
+	OS           OperatingSystem
+	Architecture Architecture
+	Needed       []Capability
+}
+
+// Require returns the first shortfall between a request and what the provider
+// declares, wrapped in ErrUnsupportedCapability. Checks run in a fixed order —
+// OS, architecture, then Needed as given — so the reported shortfall is
+// deterministic. Callers run this before acquisition, so an unsupported request
+// costs no I/O.
+func (c Capabilities) Require(request CapabilityRequest) error {
+	if request.OS != "" && !c.SupportsOS(request.OS) {
+		return fmt.Errorf("%w: os %s", ErrUnsupportedCapability, request.OS)
+	}
+	if request.Architecture != "" && !c.SupportsArchitecture(request.Architecture) {
+		return fmt.Errorf("%w: architecture %s", ErrUnsupportedCapability, request.Architecture)
+	}
+	for _, capability := range request.Needed {
+		if !c.Has(capability) {
+			return fmt.Errorf("%w: %s", ErrUnsupportedCapability, capability)
+		}
+	}
+
+	return nil
 }
 
 // Query is a provider-neutral candidate request. Zero-valued filters are

@@ -230,7 +230,7 @@ func TestExecMainCmd_OutputFormats(t *testing.T) {
 
 			// Create CLI app and run it with test args
 			app := createTestApp(func(ctx *cli.Context) error {
-				return execMainCmd(ctx, testCtx, mockClient, &output)
+				return execMainCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
 			})
 
 			// Build command line arguments
@@ -316,7 +316,7 @@ func TestExecMainCmd_SortingAndOrdering(t *testing.T) {
 
 			// Create CLI app and run it with test args
 			app := createTestApp(func(ctx *cli.Context) error {
-				return execMainCmd(ctx, testCtx, mockClient, &output)
+				return execMainCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
 			})
 
 			// Build command line arguments
@@ -429,7 +429,7 @@ func TestExecMainCmd_FilteringOptions(t *testing.T) {
 
 			// Create CLI app and run it with test args
 			app := createTestApp(func(ctx *cli.Context) error {
-				return execMainCmd(ctx, testCtx, mockClient, &output)
+				return execMainCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
 			})
 
 			// Build command line arguments
@@ -500,7 +500,7 @@ func TestExecMainCmd_ErrorConditions(t *testing.T) {
 
 			// Create CLI app and run it with test args
 			app := createTestApp(func(ctx *cli.Context) error {
-				return execMainCmd(ctx, testCtx, mockClient, &output)
+				return execMainCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
 			})
 
 			// Build command line arguments based on test case
@@ -569,7 +569,7 @@ func TestExecMainCmd_RegionHandling(t *testing.T) {
 
 			// Create CLI app and run it with test args
 			app := createTestApp(func(ctx *cli.Context) error {
-				return execMainCmd(ctx, testCtx, mockClient, &output)
+				return execMainCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
 			})
 
 			// Build command line arguments
@@ -598,12 +598,10 @@ func TestMainCmd_Integration(t *testing.T) {
 	mainCtx = testCtx
 	defer func() { mainCtx = oldMainCtx }()
 
-	app := createTestApp(mainCmd)
-	ctx := cli.NewContext(app, nil, nil)
-	ctx.Set("type", "t2.micro")
-	ctx.Set("output", "json")
-
-	err := mainCmd(ctx)
+	// Driven through app.Run rather than a hand-built cli.NewContext: that
+	// context carries no parsed flag set, so its ctx.Set calls silently failed
+	// and nothing under test ever saw --type or --output.
+	err := createTestApp(mainCmd).Run([]string{appName, "--type", "t2.micro", "--output", "json"})
 	require.NoError(t, err, "mainCmd should execute without error")
 }
 
@@ -1437,7 +1435,7 @@ func TestExecMainCmd_VisualFormattingBehavior(t *testing.T) {
 
 			// Create CLI app and run it with test args
 			app := createTestApp(func(ctx *cli.Context) error {
-				return execMainCmd(ctx, testCtx, mockClient, &output)
+				return execMainCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
 			})
 
 			// Build command line arguments

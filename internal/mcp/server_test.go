@@ -2,12 +2,16 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"spotinfo/internal/cloud"
+	"spotinfo/internal/providers"
 )
 
 // TestNewServer tests server creation with different configurations
@@ -74,6 +78,83 @@ func TestServerToolRegistration(t *testing.T) {
 	// The server should have registered tools - we verify this by ensuring
 	// the MCP server was created (tools registration happens in NewServer)
 	assert.NotNil(t, server.mcpServer)
+}
+
+// stubProvider stands in for a compiled provider: the server only asks for an
+// identifier, so nothing here reaches a cloud.
+type stubProvider struct{ id cloud.ProviderID }
+
+func (p stubProvider) ID() cloud.ProviderID             { return p.id }
+func (p stubProvider) Capabilities() cloud.Capabilities { return cloud.Capabilities{} }
+func (p stubProvider) Query(context.Context, *cloud.Query) (cloud.Result, error) {
+	return cloud.Result{Provider: p.id}, nil
+}
+
+func testProviderRegistry(t *testing.T, ids ...cloud.ProviderID) *providers.Registry {
+	t.Helper()
+
+	registrations := make([]providers.Registration, 0, len(ids))
+	for _, id := range ids {
+		registrations = append(registrations, providers.Registration{
+			ID:    id,
+			Build: func() (cloud.Provider, error) { return stubProvider{id: id}, nil },
+		})
+	}
+
+	registry, err := providers.New(registrations...)
+	require.NoError(t, err)
+
+	return registry
+}
+
+// The server accepts the registry through a neutral interface. Task 3 does not
+// change which tools are registered: the AWS v1 names must survive.
+func TestServerAcceptsAProviderRegistryWithoutChangingAWSToolNames(t *testing.T) {
+	server, err := NewServer(Config{
+		Version:    "1.0.0",
+		Logger:     slog.Default(),
+		SpotClient: newEmbeddedClient(),
+		Providers:  testProviderRegistry(t, cloud.ProviderAWS, cloud.ProviderGCP),
+	})
+	require.NoError(t, err)
+
+	tools := server.mcpServer.ListTools()
+	assert.Contains(t, tools, "find_spot_instances")
+	assert.Contains(t, tools, "list_spot_regions")
+	assert.Len(t, tools, totalMCPTools)
+
+	assert.Equal(t, []cloud.ProviderID{cloud.ProviderAWS, cloud.ProviderGCP}, server.availableProviders(),
+		"available providers are reported in stable lexical order")
+}
+
+// A binary composed without a registry still serves the AWS tools rather than
+// failing to start.
+func TestServerWithoutAProviderRegistryReportsNoProviders(t *testing.T) {
+	server, err := NewServer(Config{Version: "1.0.0", Logger: slog.Default(), SpotClient: newEmbeddedClient()})
+	require.NoError(t, err)
+
+	assert.Nil(t, server.availableProviders())
+	assert.Len(t, server.mcpServer.ListTools(), totalMCPTools)
+}
+
+// A disabled provider is absent from the registration log rather than reported
+// as something the server can answer for.
+func TestDisabledProvidersAreNotReportedAsAvailable(t *testing.T) {
+	registry, err := providers.New(providers.Registration{
+		ID:    cloud.ProviderAzure,
+		Build: func() (cloud.Provider, error) { return nil, errors.New("catalog hash mismatch") },
+	})
+	require.NoError(t, err)
+
+	server, err := NewServer(Config{
+		Version:    "1.0.0",
+		Logger:     slog.Default(),
+		SpotClient: newEmbeddedClient(),
+		Providers:  registry,
+	})
+	require.NoError(t, err)
+
+	assert.Empty(t, server.availableProviders())
 }
 
 // TestServeStdio_ContextCancellation tests that stdio server respects context cancellation

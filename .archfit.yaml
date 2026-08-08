@@ -74,6 +74,18 @@ modules:
     subdomain: core
     # high: it tracks two AWS feeds that a weekly workflow refreshes.
     volatility: high
+  providers:
+    paths:
+      - internal/providers/*.go
+    public:
+      - internal/providers
+    layer: provider
+    owner: spotinfo
+    role: core
+    subdomain: core
+    # medium: registrations change as each provider lands, the registry contract
+    # itself does not.
+    volatility: medium
   providers_aws:
     paths:
       - internal/providers/aws/**
@@ -105,8 +117,10 @@ modules:
     subdomain: generic
     volatility: medium
 rules:
-  # Stays at warn until the migrated graph passes it. Promoting it early would
-  # only invite baselining the violations it is meant to remove.
+  # Promoted from warn now that both the pre-Task-3 graph and the registry graph
+  # pass it with zero violations. It fails the build if a provider ever imports
+  # cmd/spotinfo or internal/mcp, or if the neutral domain reaches back up.
+  # internal/cloud/dependencies_test.go covers the same intent at package level.
   - id: no-layer-back-edges
     type: forbidden_layer_direction
-    gate: warn
+    gate: fail

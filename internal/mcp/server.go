@@ -9,6 +9,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"spotinfo/internal/cloud"
 	"spotinfo/internal/spot"
 )
 
@@ -30,23 +31,35 @@ type spotClient interface {
 	DataSource() string
 }
 
+// providerRegistry is the slice of the compiled provider registry this server
+// needs, defined next to its consumer. Tools are registered against the neutral
+// providers it hands out rather than against a provider SDK.
+type providerRegistry interface {
+	Get(id cloud.ProviderID) (cloud.Provider, error)
+	Available() []cloud.Provider
+}
+
 // Server wraps the MCP server with spotinfo-specific configuration
 type Server struct {
 	mcpServer  *server.MCPServer
 	logger     *slog.Logger
 	spotClient spotClient
+	providers  providerRegistry
 }
 
 // Config holds MCP server configuration
 type Config struct {
 	Logger     *slog.Logger
 	SpotClient spotClient
+	Providers  providerRegistry
 	Version    string
 	Transport  string
 	Port       string
 }
 
 // NewServer creates a new MCP server instance with spotinfo tools
+//
+//nolint:gocritic // Config is the public constructor shape; a pointer would break every caller to save one startup copy.
 func NewServer(cfg Config) (*Server, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -64,6 +77,7 @@ func NewServer(cfg Config) (*Server, error) {
 		mcpServer:  mcpServer,
 		logger:     cfg.Logger,
 		spotClient: cfg.SpotClient,
+		providers:  cfg.Providers,
 	}
 
 	// Register tools
@@ -136,7 +150,27 @@ func (s *Server) registerTools() {
 	listSpotRegionsHandler := NewListSpotRegionsTool(s.spotClient, s.logger)
 	s.mcpServer.AddTool(listSpotRegionsTool, listSpotRegionsHandler.Handle)
 
-	s.logger.Info("MCP tools registered", slog.Int("count", totalMCPTools))
+	s.logger.Info("MCP tools registered",
+		slog.Int("count", totalMCPTools),
+		slog.Any("providers", s.availableProviders()))
+}
+
+// availableProviders names the providers this server can serve. The AWS tools
+// above do not consult the registry yet, so an operator needs the log line to
+// see which clouds the binary actually loaded.
+func (s *Server) availableProviders() []cloud.ProviderID {
+	if s.providers == nil {
+		return nil
+	}
+
+	available := s.providers.Available()
+
+	ids := make([]cloud.ProviderID, 0, len(available))
+	for _, provider := range available {
+		ids = append(ids, provider.ID())
+	}
+
+	return ids
 }
 
 // ServeStdio starts the MCP server with stdio transport
