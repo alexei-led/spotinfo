@@ -828,16 +828,91 @@ GCP slice result (#28), recorded for the Azure slice and the final review:
   evidence `https://developers.google.com/site-policies`. The pricing pages carry no Creative
   Commons footer, so the decision rests on the figures being facts. The project owner must
   confirm it before release.
-- [ ] After the GCP slice is reviewed and committed, record the exact Azure support matrix.
-- [ ] Create and approve `internal/providers/azure/data/source-contract.json`; run its schema and threshold gate; stop before Azure code if it fails.
-- [ ] Record Azure filters, page selection, exact Linux machine/region/architecture matrix, terms decision, effective-date rules, coverage thresholds, and binary-size delta.
-- [ ] Implement and verify the Azure updater, parser, snapshot, provider, CLI flow, MCP flow, docs, and update workflow.
-- [ ] Run all Azure-focused gates and commit the #29 slice.
-- [ ] Run the complete repository validation command set.
-- [ ] Record GitNexus detect-changes and all HIGH-impact symbol reviews.
-- [ ] Record archfit findings and prove that no Critical or High finding remains.
-- [ ] Complete user, API, MCP, source, troubleshooting, and support-matrix documentation.
-- [ ] Save the independent architecture review to `docs/reviews/spotinfo-multicloud-v2-architecture-review.md`, disposition every finding, and record the release recommendation.
+- [x] After the GCP slice is reviewed and committed, record the exact Azure support matrix.
+- [x] Create and approve `internal/providers/azure/data/source-contract.json`; run its schema and threshold gate; stop before Azure code if it fails.
+- [x] Record Azure filters, page selection, exact Linux machine/region/architecture matrix, terms decision, effective-date rules, coverage thresholds, and binary-size delta.
+- [x] Implement and verify the Azure updater, parser, snapshot, provider, CLI flow, MCP flow, docs, and update workflow.
+- [x] Run all Azure-focused gates and commit the #29 slice.
+- [x] Run the complete repository validation command set.
+- [x] Record GitNexus detect-changes and all HIGH-impact symbol reviews.
+- [x] Record archfit findings and prove that no Critical or High finding remains.
+- [x] Complete user, API, MCP, source, troubleshooting, and support-matrix documentation.
+- [x] Save the independent architecture review to `docs/reviews/spotinfo-multicloud-v2-architecture-review.md`, disposition every finding, and record the release recommendation.
+
+Azure slice result (#29), and final verification:
+
+- **Two sources, because neither answers the whole question.** The Retail Prices API publishes
+  no vCPU count, memory figure or architecture, so those come from one Microsoft Learn size
+  page per approved series — 27 sources in the contract. Architecture is read from each page's
+  own `[x86-64]`/`[Arm64]` marker and never inferred from a size name.
+- **Three source quirks, each found by a gate rather than by reading docs.**
+  1. `Low Priority` is the retired Batch meter, priced beside Spot under the same size. Excluded.
+  2. Legacy **Cloud Services** meters are published under `serviceName = "Virtual Machines"`
+     against the same `armSkuName` at a different rate. They made ~40 sizes per region
+     ambiguous and failed the refresh. The second spelling — `Eadsv5 Series CloudServices`,
+     no space — survived a first fix that matched only `Cloud Services`, so the marker is
+     matched with spaces removed.
+  3. Memory is labelled `Memory (GiB)` on 18 pages and `Memory (GB)` on the 8 memory-optimized
+     pages, for identical figures (`Standard_E2_v5` reads 16 on one, `Standard_E2s_v5` reads 16
+     on the other). Both accepted as gibibytes; a third label fails.
+- **Effective dates are resolved against an instant passed in, not `time.Now()`.** The API
+  returns expired and future intervals — 289 meters in `eastus` carry more than one row — so a
+  parser that took the first or last row would publish an expired price and pass every other
+  gate. All eight regions resolve against one instant per run. No interval in effect drops the
+  machine and reports it; two intervals in effect at different prices fails the refresh.
+  Resolution runs *after* the reviewed-matrix filter, so a conflict in a size this catalogue
+  never publishes is not a reason to fail a weekly refresh.
+- **The coverage floor is per region**, not global: 180 machines minimum against 224 observed
+  in every region. A global count would let one region return three sizes and be absorbed by
+  seven healthy ones.
+- **Numbers.** 224 sizes, 26 series (37 arm64 sizes across `bpsv2`, `dpdsv5`, `dpsv5`, `dpsv6`,
+  `epsv5`), 8 regions, 3,584 prices, 16,515 compressed bytes, max 6 fractional digits against a
+  `MoneyScale` of 9 — three digits of headroom, unlike GCP's zero. Binary-size delta
+  **+119,536 bytes** (0.20%); `golang.org/x/net/html` was already a dependency.
+- **Region coverage is a reviewed choice, not a source limit** — unlike GCP. The API serves
+  every Azure region; eight bound the weekly refresh to ~100 requests. Widening is a contract
+  edit plus a refresh, no code change.
+- **Cross-checked against the live source at commit time**: `uksouth/Standard_D2as_v6` spot
+  `0.014013` and on-demand `0.106`, `westeurope/Standard_D2ps_v5` spot `0.017002`. Exact matches.
+- Two changes outside Azure. `Money.FractionalDigits` replaced a copy that would have existed in
+  each provider — it is a property of the value object, not of a catalogue. And the neutral
+  recommendation table now sizes its region and machine columns from the rows: fixed widths were
+  fine for `n2d-standard-2` and broke on `Standard_D2pds_v5`.
+- The three HTML helpers (`walk`, `cellText`, `tableRows`) are deliberately duplicated between
+  the GCP and Azure parsers, with the trigger recorded in `sizes.go`: extract them when a third
+  provider parses HTML. A package created to hold forty lines would add a dependency edge for
+  less than it removes.
+
+Final verification:
+
+- Gates: `make fmt`, `go build ./...`, `go test ./...`, `make test-verbose`, `make test-race`,
+  `go vet ./...`, `make lint` (0 issues), `make verify-data`, `make build`, `git diff --check`,
+  `make verify-architecture`, and `archfit --gate --base origin/master` all pass.
+- **Archfit: `verdict pass`, 0 gate findings, 29 findings, all medium `bc/imbalanced_coupling`.**
+  Critical `bac6b2e4f1019c672ac2eec8dc470b31` is **absent** — fixed in Task 4, not baselined or
+  waived. All 29 advisories are modules depending on `internal/cloud` or `internal/snapshot`, or
+  a composition root depending on what it composes; dispositioned as accepted in the review.
+  Metrics: 0 cycles, 0 new high-risk unbalanced edges, 100% coverage, 2 change-impact hubs
+  (`internal/cloud` 91%, `internal/snapshot` 64%) — both stable contract modules.
+- **GitNexus re-index: 3,519 nodes, 10,129 edges, 291 flows** (from 1,706 / 3,894 / 83). The
+  plan's headline risk was that changing `Advice` touched 22 symbols across three modules
+  including `internal/mcp`; it now touches 19 across two, and `internal/mcp` has left the set.
+  `spot.Recommend` 11, `cloud.Recommend` 15 (`Spotinfo` + `Mcp`, a forward edge),
+  `providers.Registry` 31, `gcp.Provider` 12, `azure.Provider` 9 — each provider's radius is
+  itself plus the composition root, so a fourth cloud is additive.
+- `CLAUDE.md` was rewritten for the post-Task-1 architecture: neutral seam, snapshot contracts,
+  provider registry, the two new updaters and workflows, the neutral `cloud.Provider` interface,
+  and four new "never" rules drawn from what actually went wrong in this task.
+- Review saved to `docs/reviews/spotinfo-multicloud-v2-architecture-review.md`: no open Critical
+  or High, ship recommendation conditional on the redistribution approvals below.
+
+**Open for the project owner — the one thing tooling cannot close.** Both
+`internal/providers/{gcp,azure}/data/source-contract.json` carry `review_status: approved`,
+`reviewer: alexei-led` and `terms.redistribution_decision: approved`, all written by an agent
+with no human review. The reasoning is recorded in `docs/research/multicloud-source-contracts.md`
+— factual figures with attribution, and Microsoft Learn content under CC BY 4.0 — but the fields
+already read "approved", which is exactly how such a thing gets skimmed past. Confirm both
+before release.
 
 ## Acceptance criteria
 
