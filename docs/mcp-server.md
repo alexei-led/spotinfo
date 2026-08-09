@@ -9,7 +9,7 @@ The `spotinfo` tool functions as a **Model Context Protocol (MCP) server**, enab
 The [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) is an open standard that allows AI assistants to securely connect to external data sources and tools. By running `spotinfo` in MCP mode, you can:
 
 - **Ask Claude for spot recommendations**: "Find me the cheapest t3 instances with <10% interruption rate"
-- **Get real-time pricing**: "What's the current m5.large spot price in us-east-1?"  
+- **Get real-time pricing**: "What's the current m5.large spot price in us-east-1?"
 - **Compare across regions**: "Show me r5.xlarge prices across all US regions"
 - **Infrastructure planning**: Use AI to analyze and recommend optimal spot instance configurations
 
@@ -52,12 +52,13 @@ Restart Claude Desktop and start asking about AWS Spot Instances!
 Search for AWS EC2 Spot Instance options based on requirements.
 
 **Parameters:**
+
 - `regions` (optional): AWS regions to search (e.g., `["us-east-1", "eu-west-1"]`). Use `["all"]` for all regions
-- `instance_types` (optional): Instance type pattern (e.g., `"m5.large"`, `"t3.*"`)  
+- `instance_types` (optional): Instance type pattern (e.g., `"m5.large"`, `"t3.*"`)
 - `min_vcpu` (optional): Minimum vCPUs required
 - `min_memory_gb` (optional): Minimum memory in gigabytes
-- `max_price_per_hour` (optional): Maximum spot price per hour in USD (0 or omitted means no ceiling; a negative or non-finite value is rejected)
-- `max_interruption_rate` (optional): Maximum interruption rate percentage (0-100; a negative or non-finite value is rejected)
+- `max_price_per_hour` (optional): Maximum spot price per hour in USD. `0` or omitted means no ceiling; a negative or non-finite value is rejected
+- `max_interruption_rate` (optional): Maximum interruption rate percentage. `0`, omitted, or `100` and above means no filter; a negative or non-finite value is rejected
 - `sort_by` (optional): Sort by `"price"`, `"reliability"`, or `"savings"` (default: `"reliability"`)
 - `limit` (optional): Maximum results to return (default: 10, max: 50)
 
@@ -77,6 +78,7 @@ the tool takes no arguments.
 Rank Spot machines from the committed multi-cloud catalogue and return a `spotinfo.recommend/v2` payload.
 
 **Parameters:**
+
 - `cloud` (optional): Cloud provider — `aws`, `gcp`, or `azure` (default: `aws`)
 - `architecture` (required): Processor architecture — `x86_64` or `arm64`
 - `min_vcpu` (required): Minimum vCPU count (integer ≥ 1)
@@ -91,6 +93,7 @@ Rank Spot machines from the committed multi-cloud catalogue and return a `spotin
 **Response:** `spotinfo.recommend/v2` JSON with `schema_version`, `status`, `request`, `ranking_policy`, `data_source`, `recommendations`, and `warnings`. See [API Reference](api-reference.md) for the full schema.
 
 **Cloud constraints:**
+
 - `gcp`: `us-central1` only, `linux` only, `--workload cost` only. `web`/`ci`/`batch` return `UNSUPPORTED_CAPABILITY`. `--os windows` returns `UNSUPPORTED_CAPABILITY`.
 - `azure`: eight regions (`australiaeast`, `eastus`, `eastus2`, `northeurope`, `southeastasia`,
   `uksouth`, `westeurope`, `westus2`), `linux` only, `--workload cost` only. `web`/`ci`/`batch` and
@@ -101,11 +104,11 @@ Rank Spot machines from the committed multi-cloud catalogue and return a `spotin
 
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
+| Variable        | Description                            | Default  |
+| --------------- | -------------------------------------- | -------- |
 | `SPOTINFO_MODE` | Set to "mcp" to enable MCP server mode | CLI mode |
-| `MCP_TRANSPORT` | Transport method | "stdio" |
-| `MCP_PORT` | Port for SSE transport | "8080" |
+| `MCP_TRANSPORT` | Transport method                       | "stdio"  |
+| `MCP_PORT`      | Port for SSE transport                 | "8080"   |
 
 ### Command Line Flags
 
@@ -131,12 +134,13 @@ Once configured with Claude Desktop, you can ask natural language questions:
 {
   "instance_types": "t3.*",
   "max_interruption_rate": 10,
-  "sort_by": "price", 
+  "sort_by": "price",
   "limit": 5
 }
 ```
 
 **Results**: Found 5 t3 instances under $0.05/hour with <10% interruption rates:
+
 - t3.nano in ap-south-1: $0.0017/hour (5-10% interruption)
 - t3.micro in ap-south-1: $0.0033/hour (<5% interruption)
 - ...
@@ -155,6 +159,7 @@ Once configured with Claude Desktop, you can ask natural language questions:
 ```
 
 **Results**: m5.large spot prices in US East:
+
 - us-east-1: $0.0928/hour (70% savings, <5% interruption)
 - us-east-2: $0.1024/hour (68% savings, <5% interruption)
 
@@ -175,6 +180,7 @@ Once configured with Claude Desktop, you can ask natural language questions:
 ```
 
 **Results**: Found 3 GCP Spot VMs in us-central1, ranked by price:
+
 - n2d-standard-2: $0.026912/hour (68% savings, risk unavailable)
 - t2d-standard-2: $0.034676/hour (58% savings, risk unavailable)
 - c3d-highcpu-4: $0.035088/hour (76% savings, risk unavailable)
@@ -248,7 +254,7 @@ Configuration file location: `%APPDATA%\Claude\claude_desktop_config.json`
 {
   "mcpServers": {
     "spotinfo": {
-      "command": "C:\\Program Files\\spotinfo\\spotinfo.exe", 
+      "command": "C:\\Program Files\\spotinfo\\spotinfo.exe",
       "args": ["--mcp"]
     }
   }
@@ -275,15 +281,18 @@ Configuration file location: `~/.config/claude-desktop/claude_desktop_config.jso
 ### Common Issues
 
 **Claude can't find spotinfo tools:**
+
 - Verify `spotinfo --mcp` runs without errors
 - Check the binary path in your configuration
 - Restart Claude Desktop after configuration changes
 
 **Permission denied errors:**
+
 - Ensure the spotinfo binary is executable: `chmod +x /path/to/spotinfo`
 - Check file paths in configuration are correct
 
 **No data returned:**
+
 - The tool uses embedded data and works offline
 - Check if specific regions/instance types exist with CLI: `spotinfo --type=m5.large --region=us-east-1`
 
@@ -301,11 +310,13 @@ npx @modelcontextprotocol/inspector spotinfo --mcp
 ### Verification Steps
 
 1. **Test CLI mode first**:
+
    ```bash
    spotinfo --type "t3.micro" --region "us-east-1"
    ```
 
 2. **Test MCP mode**:
+
    ```bash
    spotinfo --mcp
    # Should start and wait for JSON-RPC input
@@ -351,7 +362,7 @@ All responses follow MCP specification:
 ## Benefits of MCP Integration
 
 1. **Natural Language Interface**: Ask questions about spot instances in plain English
-2. **Intelligent Recommendations**: Claude can analyze your requirements and suggest optimal configurations  
+2. **Intelligent Recommendations**: Claude can analyze your requirements and suggest optimal configurations
 3. **Real-time Data**: Access current spot pricing and interruption data
 4. **Cross-region Analysis**: Easily compare options across multiple AWS regions
 5. **Automated Decision Making**: Use Claude's reasoning to optimize cost vs. reliability trade-offs

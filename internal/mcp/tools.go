@@ -216,11 +216,12 @@ type params struct { //nolint:govet
 // refused here, before acquisition. Zero stays the v1 "no ceiling" value.
 func (p *params) validate() error {
 	if math.IsNaN(p.maxPrice) || math.IsInf(p.maxPrice, 0) || p.maxPrice < 0 {
-		return fmt.Errorf("%w: %s must be a positive USD instance-hour price",
-			cloud.ErrInvalidArgument, argMaxPricePerHour)
+		return fmt.Errorf("%w: %s must be a finite, non-negative USD instance-hour price"+
+			" (zero requests no ceiling)", cloud.ErrInvalidArgument, argMaxPricePerHour)
 	}
 	if math.IsNaN(p.maxInterruption) || math.IsInf(p.maxInterruption, 0) || p.maxInterruption < 0 {
-		return fmt.Errorf("%w: %s must be a percentage between 0 and %d",
+		return fmt.Errorf("%w: %s must be a finite, non-negative percentage"+
+			" (zero or %d and above requests no filter)",
 			cloud.ErrInvalidArgument, argMaxInterruptionRate, maxInterruption)
 	}
 
