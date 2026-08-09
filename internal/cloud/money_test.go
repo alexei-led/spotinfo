@@ -84,6 +84,41 @@ func TestMoneyFromFloat(t *testing.T) {
 	}
 }
 
+func TestMoneyCeilingFromFloat(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name      string
+		input     float64
+		wantNanos int64
+		wantErr   error
+	}{
+		{name: "price within the scale is exact", input: 0.04, wantNanos: 40_000_000},
+		{name: "exactly at the scale is exact", input: 0.000000001, wantNanos: 1},
+		// A monthly budget divided by 720 hours — the shape a caller computing a
+		// ceiling actually produces. It must filter, not be discarded.
+		{name: "monthly budget per hour truncates", input: 30.0 / 720.0, wantNanos: 41_666_666},
+		{name: "truncation never rounds up", input: 0.0399999999999, wantNanos: 39_999_999},
+		{name: "negative is not a ceiling", input: -0.01, wantErr: ErrInvalidArgument},
+		{name: "NaN is not a ceiling", input: math.NaN(), wantErr: ErrInvalidArgument},
+		{name: "infinity is not a ceiling", input: math.Inf(1), wantErr: ErrInvalidArgument},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			money, err := MoneyCeilingFromFloat(test.input)
+			if test.wantErr != nil {
+				require.ErrorIs(t, err, test.wantErr)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, test.wantNanos, money.Nanos())
+		})
+	}
+}
+
 func TestMoneyRendersCanonicalDecimalString(t *testing.T) {
 	t.Parallel()
 

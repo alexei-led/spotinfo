@@ -305,6 +305,79 @@ func TestRecommendErrorContract(t *testing.T) {
 			},
 			wantCloud: stringPtr("gcp"),
 		},
+		// The MCP server does not enforce the advertised input schema, so every
+		// mistyped argument arrives at the handler. None of them may be coerced
+		// into a filter, a default, or a ceiling the caller never sent.
+		{
+			name: "machine wrapped in an array", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{
+				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
+				"machine": []any{"n2-standard-2"},
+			},
+			wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "unreadable top", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{
+				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8, "top": "xyz",
+			},
+			wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "explicit zero top", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{
+				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8, "top": 0,
+			},
+			wantCloud: stringPtr("gcp"),
+		},
+		{
+			// A quoted number is accepted, so the non-finite spellings ParseFloat
+			// also accepts must be refused by the bounds rather than becoming a
+			// comparison every machine passes.
+			name: "quoted non-finite minimum memory", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{
+				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": "NaN",
+			},
+			wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "quoted non-finite price ceiling", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{
+				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
+				"max_price_per_hour": "+Inf",
+			},
+			wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "fractional top", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{
+				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8, "top": 1.5,
+			},
+			wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "boolean minimum vcpu", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{
+				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": true, "min_memory_gib": 8,
+			},
+			wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "boolean price ceiling", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{
+				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
+				"max_price_per_hour": true,
+			},
+			wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "regions given as an object", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{
+				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
+				"regions": map[string]any{"name": "us-central1"},
+			},
+			wantCloud: stringPtr("gcp"),
+		},
 		{
 			name: "unregistered cloud", registry: riskFree, wantCode: cloud.CodeDataUnavailable,
 			args:      map[string]any{"cloud": "azure", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8},

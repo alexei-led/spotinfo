@@ -201,7 +201,9 @@ type params struct { //nolint:govet
 
 // query builds the neutral acquisition request. A zero maximum price is the v1
 // "no ceiling" value, not a ceiling of nothing; an unparsable price is dropped
-// rather than turned into a filter the caller did not ask for.
+// rather than turned into a filter the caller did not ask for. A price finer
+// than the fixed-point scale is a ceiling, not an unparsable value: it is
+// truncated to the scale, which filters exactly as v1's float comparison did.
 func (p *params) query() *cloud.Query {
 	regions := make([]cloud.Region, 0, len(p.regions))
 	for _, region := range p.regions {
@@ -223,7 +225,7 @@ func (p *params) query() *cloud.Query {
 		MinVCPU:      p.minVCPU,
 	}
 	if p.maxPrice > 0 {
-		if ceiling, err := cloud.MoneyFromFloat(p.maxPrice); err == nil {
+		if ceiling, err := cloud.MoneyCeilingFromFloat(p.maxPrice); err == nil {
 			query.MaxPrice = &ceiling
 		}
 	}

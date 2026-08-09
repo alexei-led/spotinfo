@@ -115,6 +115,11 @@ func TestAnUnreadableCellFailsTheParse(t *testing.T) {
 	for name, cells := range map[string]string{
 		"vcpu is not a number": `<td>c4-standard-2</td><td>two</td><td>7 GiB</td><td>$0.058121 / 1 hour</td>`,
 		"vcpu is zero":         `<td>c4-standard-2</td><td>0</td><td>7 GiB</td><td>$0.058121 / 1 hour</td>`,
+		// ParseFloat accepts both of these, and neither is negative. Without an
+		// explicit finiteness check they reach the whole-core test and leave the
+		// catalogue silently, as if the machine shared a core.
+		"vcpu is NaN":          `<td>c4-standard-2</td><td>NaN</td><td>7 GiB</td><td>$0.058121 / 1 hour</td>`,
+		"vcpu is infinite":     `<td>c4-standard-2</td><td>+Inf</td><td>7 GiB</td><td>$0.058121 / 1 hour</td>`,
 		"memory has no unit":   `<td>c4-standard-2</td><td>2</td><td>lots</td><td>$0.058121 / 1 hour</td>`,
 		"memory is zero":       `<td>c4-standard-2</td><td>2</td><td>0 GiB</td><td>$0.058121 / 1 hour</td>`,
 		"price is monthly":     `<td>c4-standard-2</td><td>2</td><td>7 GiB</td><td>$42.43 / 1 month</td>`,

@@ -96,12 +96,19 @@ func TestEmbeddedSnapshotManifests(t *testing.T) {
 
 			if regenerate {
 				manifest = refreshed(manifest, payload)
-				require.NoError(t, snapshot.WriteManifest(filepath.Join("data", embedded.manifest), manifest))
 			}
 
 			require.NoError(t, manifest.VerifyPayload(payload),
 				"%s and its data file were not updated together; refresh with UPDATE_GOLDEN=1", embedded.manifest)
 			require.NoError(t, snapshot.ValidateCoverage(embedded.coverage(t), manifest.MinRecords))
+
+			// Written last, and only once the refreshed manifest describes a
+			// payload that still meets its reviewed floor. Writing first would
+			// leave a short feed hashed under its own manifest — the two agreeing
+			// about data no reviewer accepted.
+			if regenerate {
+				require.NoError(t, snapshot.WriteManifest(filepath.Join("data", embedded.manifest), manifest))
+			}
 		})
 	}
 }

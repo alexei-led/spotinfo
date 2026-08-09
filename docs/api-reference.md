@@ -623,7 +623,7 @@ An error result has `isError=true` and a single text content item containing:
 
 | Code | Meaning |
 | --- | --- |
-| `INVALID_ARGUMENT` | A value outside the documented vocabulary or bounds |
+| `INVALID_ARGUMENT` | A value outside the documented vocabulary or bounds, or an argument of the wrong JSON type |
 | `UNSUPPORTED_CAPABILITY` | A valid request the selected cloud cannot answer |
 | `DATA_UNAVAILABLE` | A recognised cloud whose snapshot is missing or unusable |
 | `NO_CANDIDATES` | A served request with no matching machine |

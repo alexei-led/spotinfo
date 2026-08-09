@@ -79,6 +79,29 @@ func MoneyFromFloat(value float64) (Money, error) {
 	return money, nil
 }
 
+// MoneyCeilingFromFloat converts a float64 price ceiling supplied by a caller
+// that only speaks floats. Unlike MoneyFromFloat it never fails on precision:
+// the fraction is truncated to the fixed-point scale, which is exact for a
+// comparison because every amount it is compared against is itself a Money and
+// so carries at most MoneyScale digits. A ceiling of 0.041666666666666664 —
+// what a caller gets from dividing a monthly budget by 720 — therefore filters
+// instead of being dropped, and truncation can only tighten it, never widen it.
+//
+// Negative and out-of-range amounts still fail: those are not ceilings.
+func MoneyCeilingFromFloat(value float64) (Money, error) {
+	text := strconv.FormatFloat(value, 'f', -1, 64)
+	if whole, fraction, hasFraction := strings.Cut(text, "."); hasFraction && len(fraction) > MoneyScale {
+		text = whole + "." + fraction[:MoneyScale]
+	}
+
+	money, err := ParseMoney(text)
+	if err != nil {
+		return Money{}, fmt.Errorf("convert %v: %w", value, err)
+	}
+
+	return money, nil
+}
+
 // Nanos returns the amount in nano units — the exact stored value.
 func (m Money) Nanos() int64 { return m.nanos }
 

@@ -184,6 +184,38 @@ func TestToolParametersReachTheProviderQuery(t *testing.T) {
 	}, query.Placement)
 }
 
+// A price ceiling finer than the fixed-point scale still filters. A caller
+// computing a budget — a monthly figure divided by 720 hours — sends one of
+// these routinely, and dropping it would hand back machines above the ceiling
+// with no error and no warning.
+func TestFinerThanScalePriceCeilingStillFilters(t *testing.T) {
+	t.Parallel()
+
+	for name, test := range map[string]struct {
+		price float64
+		want  string
+	}{
+		"within the scale":       {price: 0.04, want: "0.040000000"},
+		"exactly at the scale":   {price: 0.040000001, want: "0.040000001"},
+		"one digit past":         {price: 0.0400000001, want: "0.040000000"},
+		"monthly budget an hour": {price: 30.0 / 720.0, want: "0.041666666"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			provider, registry := awsStub()
+
+			_, err := NewFindSpotInstancesTool(registry, testLogger()).Handle(t.Context(),
+				createTestCallToolRequest(map[string]any{"max_price_per_hour": test.price}))
+			require.NoError(t, err)
+
+			query := provider.lastQuery()
+			require.NotNil(t, query.MaxPrice, "the caller's ceiling must reach the provider")
+			assert.Equal(t, test.want, query.MaxPrice.String())
+		})
+	}
+}
+
 // A server can be built with no registry — NewServer accepts Providers: nil and
 // still registers every tool. The v1 tools must report that as a failed result,
 // not dereference it: a panic inside a handler takes the stdio or SSE process

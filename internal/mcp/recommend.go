@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/spf13/cast"
@@ -160,74 +161,205 @@ func (t *RecommendTool) recommend(ctx context.Context, request *cloud.RecommendR
 // every documented default. It rejects values outside the neutral vocabulary;
 // bounds and combinations are the request's own job to validate.
 func parseRecommendRequest(args map[string]any) (*cloud.RecommendRequest, error) {
-	provider, err := cloud.ParseProviderID(getStringWithDefault(args, argCloud, string(cloud.ProviderAWS)))
+	cloudName, err := stringArg(args, argCloud, string(cloud.ProviderAWS))
 	if err != nil {
 		return nil, err
 	}
 
-	architecture, err := cloud.ParseArchitecture(cast.ToString(args[argArchitecture]))
+	provider, err := cloud.ParseProviderID(cloudName)
 	if err != nil {
 		return nil, err
 	}
 
-	instanceOS, err := cloud.ParseOperatingSystem(getStringWithDefault(args, argOS, string(cloud.OSLinux)))
+	architectureName, err := stringArg(args, argArchitecture, "")
 	if err != nil {
 		return nil, err
 	}
 
-	workload, err := cloud.ParseWorkload(getStringWithDefault(args, argWorkload, string(cloud.WorkloadCost)))
+	architecture, err := cloud.ParseArchitecture(architectureName)
 	if err != nil {
 		return nil, err
 	}
 
-	maxPrice, err := optionalPrice(args[argMaxPricePerHour])
+	osName, err := stringArg(args, argOS, string(cloud.OSLinux))
 	if err != nil {
 		return nil, err
 	}
 
-	top := cast.ToInt(args[argTop])
-	if top == 0 {
-		top = cloud.DefaultTop
+	instanceOS, err := cloud.ParseOperatingSystem(osName)
+	if err != nil {
+		return nil, err
 	}
 
-	return &cloud.RecommendRequest{
-		MaxPrice:     maxPrice,
+	workloadName, err := stringArg(args, argWorkload, string(cloud.WorkloadCost))
+	if err != nil {
+		return nil, err
+	}
+
+	workload, err := cloud.ParseWorkload(workloadName)
+	if err != nil {
+		return nil, err
+	}
+
+	machine, err := stringArg(args, argMachine, "")
+	if err != nil {
+		return nil, err
+	}
+
+	regions, err := requestedRegions(args)
+	if err != nil {
+		return nil, err
+	}
+
+	return recommendConstraints(args, &cloud.RecommendRequest{
 		Cloud:        provider,
-		Machine:      cast.ToString(args[argMachine]),
+		Machine:      machine,
 		Architecture: architecture,
 		OS:           instanceOS,
 		Workload:     workload,
-		Regions:      requestedRegions(args),
-		MinMemoryGiB: cast.ToFloat64(args[argMinMemoryGiB]),
-		MinVCPU:      cast.ToInt(args[argMinVCPU]),
-		Top:          top,
-	}, nil
+		Regions:      regions,
+	})
+}
+
+// recommendConstraints fills in the numeric bounds. They are read after the
+// vocabulary so an argument of the wrong type is reported before a value that
+// is merely out of range.
+func recommendConstraints(args map[string]any, request *cloud.RecommendRequest) (*cloud.RecommendRequest, error) {
+	maxPrice, err := optionalPrice(args, argMaxPricePerHour)
+	if err != nil {
+		return nil, err
+	}
+
+	minMemoryGiB, _, err := numberArg(args, argMinMemoryGiB)
+	if err != nil {
+		return nil, err
+	}
+
+	minVCPU, err := intArg(args, argMinVCPU, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	top, err := intArg(args, argTop, cloud.DefaultTop)
+	if err != nil {
+		return nil, err
+	}
+
+	request.MaxPrice = maxPrice
+	request.MinMemoryGiB = minMemoryGiB
+	request.MinVCPU = minVCPU
+	request.Top = top
+
+	return request, nil
 }
 
 // requestedRegions defaults to every region the provider publishes, matching
-// the documented input contract.
-func requestedRegions(args map[string]any) []cloud.Region {
-	names := getStringSliceWithDefault(args, argRegions, []string{allRegions})
+// the documented input contract. Every element must be a region name: a nested
+// array or object cannot be one, and silently searching everywhere instead
+// would answer a narrower question than the caller asked.
+func requestedRegions(args map[string]any) ([]cloud.Region, error) {
+	value, present := args[argRegions]
+	if !present || value == nil {
+		return []cloud.Region{allRegions}, nil
+	}
+
+	names, err := cast.ToStringSliceE(value)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s must be an array of region names", cloud.ErrInvalidArgument, argRegions)
+	}
+	if len(names) == 0 {
+		return []cloud.Region{allRegions}, nil
+	}
 
 	regions := make([]cloud.Region, 0, len(names))
 	for _, name := range names {
 		regions = append(regions, cloud.Region(name))
 	}
 
-	return regions
+	return regions, nil
+}
+
+// stringArg reads a string argument. The MCP server does not check a request
+// against the advertised schema, so a caller that wraps a value in an array or
+// sends a number reaches the handler; coercing that to "" would answer a
+// question the caller did not ask — silently, and with status ok.
+func stringArg(args map[string]any, key, defaultValue string) (string, error) {
+	value, present := args[key]
+	if !present || value == nil {
+		return defaultValue, nil
+	}
+
+	text, isString := value.(string)
+	if !isString {
+		return "", fmt.Errorf("%w: %s must be a string", cloud.ErrInvalidArgument, key)
+	}
+	if text == "" {
+		return defaultValue, nil
+	}
+
+	return text, nil
+}
+
+// numberArg reads a numeric argument, reporting whether it was present. A
+// number quoted as a string is accepted because callers routinely send one;
+// everything else is refused rather than coerced. cast would turn true into 1
+// and a misspelled number into the zero that means "argument omitted", so the
+// caller would be answered against a default it never asked for.
+func numberArg(args map[string]any, key string) (float64, bool, error) {
+	value, present := args[key]
+	if !present || value == nil {
+		return 0, false, nil
+	}
+
+	switch number := value.(type) {
+	case float64:
+		return number, true, nil
+	case int:
+		return float64(number), true, nil
+	case json.Number:
+		if amount, err := number.Float64(); err == nil {
+			return amount, true, nil
+		}
+	case string:
+		if amount, err := strconv.ParseFloat(number, 64); err == nil {
+			return amount, true, nil
+		}
+	}
+
+	return 0, false, fmt.Errorf("%w: %s must be a number", cloud.ErrInvalidArgument, key)
+}
+
+// intArg reads a whole-number argument. An absent argument takes the documented
+// default; a present one must be an integer, so an unusable value is reported
+// rather than replaced by that default.
+func intArg(args map[string]any, key string, defaultValue int) (int, error) {
+	number, present, err := numberArg(args, key)
+	if err != nil {
+		return 0, err
+	}
+	if !present {
+		return defaultValue, nil
+	}
+
+	whole := int(number)
+	if float64(whole) != number {
+		return 0, fmt.Errorf("%w: %s must be a whole number", cloud.ErrInvalidArgument, key)
+	}
+
+	return whole, nil
 }
 
 // optionalPrice converts a price ceiling. An absent argument means no ceiling;
 // a present one must be a representable positive amount.
-func optionalPrice(value any) (*cloud.Money, error) {
-	if value == nil {
+func optionalPrice(args map[string]any, key string) (*cloud.Money, error) {
+	amount, present, err := numberArg(args, key)
+	if err != nil {
+		return nil, err
+	}
+	if !present {
 		return nil, nil //nolint:nilnil // absence is the mapping for "no ceiling"
 	}
 
-	amount, err := cast.ToFloat64E(value)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %s must be a number", cloud.ErrInvalidArgument, argMaxPricePerHour)
-	}
 	if amount <= 0 {
 		return nil, fmt.Errorf("%w: %s must be positive", cloud.ErrInvalidArgument, argMaxPricePerHour)
 	}

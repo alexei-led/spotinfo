@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -218,8 +219,12 @@ func machineRows(rows [][]string) ([]MachineRow, error) {
 // expressed as the whole-core count every neutral consumer compares against;
 // those are left out rather than rounded to a core the machine does not have.
 func machineRow(cells []string) (MachineRow, bool, error) {
+	// ParseFloat accepts "NaN" and "Inf" without error, and `cores <= 0` catches
+	// neither: every comparison against NaN is false, and Inf is positive. Both
+	// would then miss the whole-core test below and be dropped from the
+	// catalogue as if Google had published a shared-core machine.
 	cores, err := strconv.ParseFloat(cells[1], 64)
-	if err != nil || cores <= 0 {
+	if err != nil || math.IsNaN(cores) || math.IsInf(cores, 0) || cores <= 0 {
 		return MachineRow{}, false, fmt.Errorf("%w: %s has unreadable vCPU count %q",
 			ErrSourceContract, cells[0], cells[1])
 	}
