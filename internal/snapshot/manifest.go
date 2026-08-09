@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"path/filepath"
 	"slices"
@@ -153,6 +154,13 @@ func ParseManifest(data []byte) (*Manifest, error) {
 	if err := decoder.Decode(&manifest); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidManifest, err)
 	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("%w: trailing JSON value", ErrInvalidManifest)
+		}
+		return nil, fmt.Errorf("%w: %w", ErrInvalidManifest, err)
+	}
 
 	if err := manifest.Validate(); err != nil {
 		return nil, err
@@ -211,25 +219,17 @@ func (m *Manifest) VerifyPayload(payload []byte) error {
 
 // SourceRefs converts manifest provenance into neutral source references, so a
 // provider result can report where its answer came from without inventing one.
-//
-// A reviewed catalogue built by reading a documentation page has no upstream
-// hash — nobody fetched and hashed the HTML. Those refs carry the payload hash
-// instead, so every published reference identifies bytes this repository can
-// verify rather than being empty. For a raw feed the two hashes are equal by
-// construction, so the fallback changes nothing there.
+// A reviewed catalogue source may have no byte-level hash when it was read from
+// human documentation; that absence stays explicit. The payload hash remains on
+// the manifest for gate verification and is not misreported as a source hash.
 func (m *Manifest) SourceRefs() []cloud.SourceRef {
 	refs := make([]cloud.SourceRef, 0, len(m.Sources))
 	for i := range m.Sources {
-		contentSHA256 := m.Sources[i].SHA256
-		if contentSHA256 == "" {
-			contentSHA256 = m.Payload.SHA256
-		}
-
 		refs = append(refs, cloud.SourceRef{
 			FetchedAt:     m.Sources[i].FetchedAt,
 			ObservedAt:    m.Sources[i].ObservedAt,
 			URL:           m.Sources[i].URL,
-			ContentSHA256: contentSHA256,
+			ContentSHA256: m.Sources[i].SHA256,
 			ParserVersion: m.ParserVersion,
 			SchemaVersion: m.DataSchemaVersion,
 		})

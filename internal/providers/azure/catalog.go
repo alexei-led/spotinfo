@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
 
@@ -234,6 +235,13 @@ func DecodeCatalog(data []byte) (*Catalog, error) {
 	if err := decoder.Decode(&catalog); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrCatalog, err)
 	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("%w: trailing JSON value", ErrCatalog)
+		}
+		return nil, fmt.Errorf("%w: %w", ErrCatalog, err)
+	}
 
 	return &catalog, nil
 }
@@ -280,6 +288,8 @@ func (c *Catalog) verifyMachines(contract *snapshot.SourceContract) (map[cloud.M
 	}
 
 	known := make(map[cloud.MachineID]struct{}, len(c.Machines))
+	seriesSeen := make(map[string]struct{})
+	architecturesSeen := make(map[cloud.Architecture]struct{})
 
 	for i := range c.Machines {
 		machine := &c.Machines[i]
@@ -287,6 +297,8 @@ func (c *Catalog) verifyMachines(contract *snapshot.SourceContract) (map[cloud.M
 			return nil, fmt.Errorf("%w: %s appears twice", ErrCatalog, machine.ID)
 		}
 		known[machine.ID] = struct{}{}
+		seriesSeen[machine.Series] = struct{}{}
+		architecturesSeen[machine.Architecture] = struct{}{}
 
 		if !sizeName.MatchString(string(machine.ID)) {
 			return nil, fmt.Errorf("%w: %q is not an azure vm size identifier", ErrCatalog, machine.ID)
@@ -302,6 +314,16 @@ func (c *Catalog) verifyMachines(contract *snapshot.SourceContract) (map[cloud.M
 			return nil, fmt.Errorf("%w: %s has no usable specification", ErrCatalog, machine.ID)
 		}
 	}
+	for _, series := range contract.Support.MachineSeries {
+		if _, ok := seriesSeen[series]; !ok {
+			return nil, fmt.Errorf("%w: catalogue has no machine in approved series %q", ErrCatalog, series)
+		}
+	}
+	for _, architecture := range contract.Support.Architectures {
+		if _, ok := architecturesSeen[architecture]; !ok {
+			return nil, fmt.Errorf("%w: catalogue has no machine for approved architecture %q", ErrCatalog, architecture)
+		}
+	}
 
 	return known, nil
 }
@@ -310,9 +332,9 @@ func (c *Catalog) verifyMachines(contract *snapshot.SourceContract) (map[cloud.M
 // count would let one region return three sizes and be absorbed by seven healthy
 // ones — the failure this gate exists to catch.
 func (c *Catalog) verifyRegions(contract *snapshot.SourceContract, known map[cloud.MachineID]struct{}) error {
-	if len(c.Regions) < contract.Thresholds.MinRegions {
-		return fmt.Errorf("%w: catalogue covers %d regions, contract requires at least %d",
-			ErrCatalog, len(c.Regions), contract.Thresholds.MinRegions)
+	if len(c.Regions) != len(contract.Support.Regions) {
+		return fmt.Errorf("%w: catalogue covers %d regions, contract requires exactly %d",
+			ErrCatalog, len(c.Regions), len(contract.Support.Regions))
 	}
 
 	seen := make(map[cloud.Region]struct{}, len(c.Regions))
@@ -335,6 +357,11 @@ func (c *Catalog) verifyRegions(contract *snapshot.SourceContract, known map[clo
 
 		if err := verifyPrices(region, known, contract.Thresholds.MaxFractionalDigits, referenced); err != nil {
 			return err
+		}
+	}
+	for _, region := range contract.Support.Regions {
+		if _, ok := seen[region]; !ok {
+			return fmt.Errorf("%w: approved region %q is missing from catalogue", ErrCatalog, region)
 		}
 	}
 

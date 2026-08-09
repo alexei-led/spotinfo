@@ -44,7 +44,7 @@
               "url": {"type": "string", "format": "uri"},
               "fetched_at": {"type": "string", "format": "date-time"},
               "observed_at": {"type": ["string", "null"], "format": "date-time"},
-              "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "content_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
               "parser_version": {"type": "string", "minLength": 1},
               "schema_version": {"type": "string", "minLength": 1}
             }

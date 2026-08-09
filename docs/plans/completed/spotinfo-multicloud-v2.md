@@ -649,11 +649,9 @@ Task 4 results:
   a value outside the enum. An unmapped kind fails closed as `INTERNAL`.
 - `data_source.sources` requires at least one complete entry, so the AWS provider
   now reads `spot.EmbeddedSourceRefs()` in `New` and a build that cannot describe
-  its provenance is disabled by the registry. The architecture manifest has no
-  upstream hash — nobody fetched and hashed the AWS documentation page — so
-  `Manifest.SourceRefs()` falls back to the payload hash there. Every published
-  reference then identifies bytes this repository can verify; for a raw feed the
-  two hashes are equal by construction, so nothing else changed. A live answer
+  its provenance is disabled by the registry. A documentation source may have no stable upstream hash, so
+  `Manifest.SourceRefs()` preserves that absence. The derived payload hash is
+  used only for manifest verification, never as upstream provenance. A live answer
   still reports the committed manifests: they are the provenance of the data the
   parser was written against.
 - CLI schema routing: AWS under `web`, `ci` or `batch` keeps `spotinfo.recommend/v1`

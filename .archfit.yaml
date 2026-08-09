@@ -184,3 +184,35 @@ rules:
   - id: no-layer-back-edges
     type: forbidden_layer_direction
     gate: fail
+  # Each provider adapter owns one cloud. Sibling imports would bypass the
+  # neutral seam and make one provider's source/parser changes affect another.
+  - id: providers_gcp_no_aws
+    type: forbidden_dependency
+    from: internal/providers/gcp/**
+    to: internal/providers/aws
+    gate: fail
+  - id: providers_gcp_no_azure
+    type: forbidden_dependency
+    from: internal/providers/gcp/**
+    to: internal/providers/azure
+    gate: fail
+  - id: providers_aws_no_gcp
+    type: forbidden_dependency
+    from: internal/providers/aws/**
+    to: internal/providers/gcp
+    gate: fail
+  - id: providers_aws_no_azure
+    type: forbidden_dependency
+    from: internal/providers/aws/**
+    to: internal/providers/azure
+    gate: fail
+  - id: providers_azure_no_aws
+    type: forbidden_dependency
+    from: internal/providers/azure/**
+    to: internal/providers/aws
+    gate: fail
+  - id: providers_azure_no_gcp
+    type: forbidden_dependency
+    from: internal/providers/azure/**
+    to: internal/providers/gcp
+    gate: fail

@@ -58,6 +58,7 @@ func TestParseManifestAcceptsTheRecordedFixture(t *testing.T) {
 	assert.Equal(t, manifest.ParserVersion, refs[0].ParserVersion)
 	assert.Equal(t, manifest.DataSchemaVersion, refs[0].SchemaVersion)
 	assert.Equal(t, manifest.Sources[0].SHA256, refs[0].ContentSHA256)
+	assert.Equal(t, manifest.Sources[1].SHA256, refs[1].ContentSHA256)
 	assert.Nil(t, refs[0].ObservedAt)
 }
 
@@ -73,6 +74,16 @@ func TestParseManifestRejectsTheRecordedInvalidFixture(t *testing.T) {
 	_, err = ParseManifest(raw)
 	require.ErrorIs(t, err, ErrInvalidManifest)
 	assert.Contains(t, err.Error(), "parsed-catalog")
+}
+
+func TestParseManifestRejectsTrailingJSON(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(filepath.Join("testdata", "manifest-valid.json"))
+	require.NoError(t, err)
+
+	_, err = ParseManifest(append(raw, []byte("{}")...))
+	require.ErrorIs(t, err, ErrInvalidManifest)
 }
 
 func TestParseManifestFailsClosed(t *testing.T) {
@@ -224,13 +235,14 @@ func TestParseManifestAcceptsRawSourceOnlyWhenHashesAgree(t *testing.T) {
 
 // A reviewed catalogue built by hand from documentation has no byte-level source
 // to hash, so an empty source hash is allowed for a parsed catalogue.
-func TestParseManifestAllowsAnUnhashedReviewedSource(t *testing.T) {
+func TestParseManifestPreservesAnUnhashedReviewedSource(t *testing.T) {
 	t.Parallel()
 
 	manifest := validManifest(t)
 	manifest.Sources[0].SHA256 = ""
 
 	require.NoError(t, reparse(t, manifest))
+	require.Empty(t, manifest.SourceRefs()[0].ContentSHA256)
 }
 
 func TestVerifyPayloadDetectsAnUnpairedUpdate(t *testing.T) {

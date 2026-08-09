@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -234,6 +235,43 @@ func TestParseSourceContractRejectsRenamedKeys(t *testing.T) {
 
 	_, err = ParseSourceContract(renamed)
 	require.ErrorIs(t, err, ErrInvalidSourceContract)
+}
+
+func TestParseSourceContractRejectsTrailingJSON(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(filepath.Join("testdata", "source-contract-approved.json"))
+	require.NoError(t, err)
+
+	_, err = ParseSourceContract(append(raw, []byte("{}")...))
+	require.ErrorIs(t, err, ErrInvalidSourceContract)
+}
+
+func TestVerifySnapshotRejectsUnapprovedOrIncompleteSources(t *testing.T) {
+	t.Parallel()
+
+	contract := approvedContract(t)
+	manifest := validManifest(t)
+	manifest.ParserVersion = contract.ParserVersion
+	manifest.MinRecords = Coverage{Regions: contract.Thresholds.MinRegions, Machines: contract.Thresholds.MinMachines, Prices: 1}
+
+	tests := []struct {
+		name   string
+		mutate func(manifest *Manifest)
+	}{
+		{name: "unapproved source", mutate: func(m *Manifest) { m.Sources[0].URL = "https://example.invalid/not-approved" }},
+		{name: "missing approved source", mutate: func(m *Manifest) { m.Sources = m.Sources[:1] }},
+		{name: "duplicate source", mutate: func(m *Manifest) { m.Sources[1].URL = m.Sources[0].URL }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			broken := *manifest
+			broken.Sources = slices.Clone(manifest.Sources)
+			tc.mutate(&broken)
+			require.ErrorIs(t, contract.VerifySnapshot(&broken, contract.Thresholds.MaxCompressedBytes), ErrContractMismatch)
+		})
+	}
 }
 
 func TestVerifySnapshotEnforcesTheContract(t *testing.T) {

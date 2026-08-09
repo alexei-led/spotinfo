@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -127,6 +129,9 @@ func ParseSourceContract(data []byte) (*SourceContract, error) {
 	if err := decoder.Decode(&contract); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidSourceContract, err)
 	}
+	if err := requireJSONEOF(decoder); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidSourceContract, err)
+	}
 
 	if err := contract.validate(); err != nil {
 		return nil, err
@@ -136,8 +141,9 @@ func ParseSourceContract(data []byte) (*SourceContract, error) {
 }
 
 // VerifySnapshot reports whether a committed snapshot is consistent with the
-// contract that approved its sources: same provider, same parser, coverage at or
-// above the contracted floor, and within the contracted size limit.
+// contract that approved its sources: same provider, same parser, approved
+// source set, coverage at or above the contracted floor, and within the size
+// limit.
 func (c *SourceContract) VerifySnapshot(manifest *Manifest, payloadBytes int) error {
 	if manifest.Provider != c.Provider {
 		return fmt.Errorf("%w: contract covers %q, manifest describes %q",
@@ -147,6 +153,10 @@ func (c *SourceContract) VerifySnapshot(manifest *Manifest, payloadBytes int) er
 	if manifest.ParserVersion != c.ParserVersion {
 		return fmt.Errorf("%w: contract approves parser %q, manifest declares %q",
 			ErrContractMismatch, c.ParserVersion, manifest.ParserVersion)
+	}
+
+	if err := c.verifySources(manifest.Sources); err != nil {
+		return err
 	}
 
 	if manifest.MinRecords.Regions < c.Thresholds.MinRegions ||
@@ -159,6 +169,75 @@ func (c *SourceContract) VerifySnapshot(manifest *Manifest, payloadBytes int) er
 	if payloadBytes > c.Thresholds.MaxCompressedBytes {
 		return fmt.Errorf("%w: payload is %d bytes, contract allows %d",
 			ErrContractMismatch, payloadBytes, c.Thresholds.MaxCompressedBytes)
+	}
+
+	return nil
+}
+
+// verifySources binds every manifest source to an approved contract source and
+// rejects missing, extra, or duplicate provenance entries. Contract API URLs
+// may carry provider-specific query parameters in the manifest; their scheme,
+// host, and path must still match exactly.
+func (c *SourceContract) verifySources(sources []Source) error {
+	if len(sources) == 0 {
+		return fmt.Errorf("%w: snapshot has no sources", ErrContractMismatch)
+	}
+
+	matched := make([]bool, len(c.Sources))
+	seenURLs := make(map[string]struct{}, len(sources))
+	for i := range sources {
+		if _, duplicate := seenURLs[sources[i].URL]; duplicate {
+			return fmt.Errorf("%w: manifest source %q is duplicated",
+				ErrContractMismatch, sources[i].URL)
+		}
+		seenURLs[sources[i].URL] = struct{}{}
+
+		matches := -1
+		for j := range c.Sources {
+			if sourceURLMatches(c.Sources[j].URL, sources[i].URL) {
+				matches = j
+				break
+			}
+		}
+		if matches == -1 {
+			return fmt.Errorf("%w: manifest source %q is not approved",
+				ErrContractMismatch, sources[i].URL)
+		}
+		matched[matches] = true
+	}
+
+	for i, source := range c.Sources {
+		if !matched[i] {
+			return fmt.Errorf("%w: approved source %q is missing from manifest",
+				ErrContractMismatch, source.URL)
+		}
+	}
+
+	return nil
+}
+
+func sourceURLMatches(approved, observed string) bool {
+	approvedURL, approvedErr := url.Parse(approved)
+	observedURL, observedErr := url.Parse(observed)
+	if approvedErr != nil || observedErr != nil ||
+		approvedURL.Scheme != observedURL.Scheme ||
+		approvedURL.Host != observedURL.Host ||
+		approvedURL.Path != observedURL.Path {
+		return false
+	}
+
+	// A contract with an explicit query approves that exact URL. A queryless
+	// API contract approves the provider's documented query variants.
+	return approvedURL.RawQuery == "" || approvedURL.RawQuery == observedURL.RawQuery
+}
+
+func requireJSONEOF(decoder *json.Decoder) error {
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errors.New("trailing JSON value")
+		}
+		return err
 	}
 
 	return nil

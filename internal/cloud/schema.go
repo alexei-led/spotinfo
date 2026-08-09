@@ -57,7 +57,7 @@ type SourceDTO struct { //nolint:govet // field order follows the published sche
 	URL           string  `json:"url"`
 	FetchedAt     string  `json:"fetched_at"`
 	ObservedAt    *string `json:"observed_at"`
-	ContentSHA256 string  `json:"content_sha256"`
+	ContentSHA256 *string `json:"content_sha256"`
 	ParserVersion string  `json:"parser_version"`
 	SchemaVersion string  `json:"schema_version"`
 }
@@ -278,15 +278,20 @@ func sourceDTOs(result *Result) ([]SourceDTO, error) {
 
 	sources := make([]SourceDTO, 0, len(result.Sources))
 	for _, source := range result.Sources {
-		if source.URL == "" || source.ContentSHA256 == "" || source.ParserVersion == "" ||
+		if source.URL == "" || source.ParserVersion == "" ||
 			source.SchemaVersion == "" || source.FetchedAt.IsZero() {
 			return nil, fmt.Errorf("%w: provider %q reported an incomplete data source", ErrDataUnavailable, result.Provider)
 		}
 
+		var contentSHA256 *string
+		if source.ContentSHA256 != "" {
+			value := source.ContentSHA256
+			contentSHA256 = &value
+		}
 		published := SourceDTO{
 			URL:           source.URL,
 			FetchedAt:     *timestamp(source.FetchedAt),
-			ContentSHA256: source.ContentSHA256,
+			ContentSHA256: contentSHA256,
 			ParserVersion: source.ParserVersion,
 			SchemaVersion: source.SchemaVersion,
 		}

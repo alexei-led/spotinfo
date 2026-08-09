@@ -454,6 +454,9 @@ candidates, and ranks the survivors. Every failure happens before acquisition ex
 acquisition error and an empty candidate set. No error result carries partial
 recommendations.
 
+A source's `content_sha256` is null when the reviewed document was not fetched as
+stable bytes. The field is never filled with the derived snapshot hash.
+
 Normative machine-readable contracts:
 
 - `docs/plans/contracts/recommend-spot-instances-v2-input.schema.json`

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -47,6 +48,9 @@ func contractAdvices() []spot.Advice {
 // column exists only in the human formats, so pinning JSON alone would let it
 // be renamed or dropped without a single test failing.
 func TestAWSRootOutputMatchesRecordedV1Contract(t *testing.T) {
+	text.DisableColors()
+	t.Cleanup(text.EnableColors)
+
 	for format, golden := range map[string]string{
 		"json":   "aws-root-v1.json",
 		"table":  "aws-root-v1.table.txt",

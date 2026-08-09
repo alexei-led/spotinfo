@@ -186,7 +186,6 @@ func TestIncompleteProvenanceFailsClosed(t *testing.T) {
 	}{
 		{name: "no sources", sources: nil},
 		{name: "missing url", sources: []SourceRef{withoutURL(complete)}},
-		{name: "missing hash", sources: []SourceRef{withoutHash(complete)}},
 		{name: "missing fetch time", sources: []SourceRef{withoutFetchTime(complete)}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -200,8 +199,18 @@ func TestIncompleteProvenanceFailsClosed(t *testing.T) {
 }
 
 func withoutURL(source SourceRef) SourceRef       { source.URL = ""; return source }
-func withoutHash(source SourceRef) SourceRef      { source.ContentSHA256 = ""; return source }
 func withoutFetchTime(source SourceRef) SourceRef { source.FetchedAt = time.Time{}; return source }
+
+func TestSourceDTOAllowsAnUnhashedReviewedDocument(t *testing.T) {
+	t.Parallel()
+
+	source := testSources()[0]
+	source.ContentSHA256 = ""
+	result, err := sourceDTOs(&Result{Provider: ProviderGCP, Sources: []SourceRef{source}})
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	assert.Nil(t, result[0].ContentSHA256)
+}
 
 // The error payload names the cloud the caller asked for, or null when none
 // could be parsed.

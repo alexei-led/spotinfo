@@ -271,6 +271,9 @@ func Recommend(ctx context.Context, provider Provider, request *RecommendRequest
 	if err != nil {
 		return nil, err
 	}
+	if validationErr := validateResultProvider(provider.ID(), &result); validationErr != nil {
+		return nil, validationErr
+	}
 
 	ranked, err := rank(request, result.Candidates)
 	if err != nil {
@@ -278,6 +281,19 @@ func Recommend(ctx context.Context, provider Provider, request *RecommendRequest
 	}
 
 	return newRecommendReport(request, &result, ranked)
+}
+
+func validateResultProvider(providerID ProviderID, result *Result) error {
+	if result.Provider != providerID {
+		return fmt.Errorf("provider result names %q, but provider is %q", result.Provider, providerID)
+	}
+	for i := range result.Candidates {
+		if result.Candidates[i].Provider != providerID {
+			return fmt.Errorf("candidate %d names %q, but provider is %q", i, result.Candidates[i].Provider, providerID)
+		}
+	}
+
+	return nil
 }
 
 // scored pairs a candidate with the right-sizing excess the ranking policy

@@ -161,7 +161,9 @@ func assertCommittedProvenance(t *testing.T, sources []cloud.SourceRef) {
 	for _, source := range sources {
 		assert.True(t, strings.HasPrefix(source.URL, "https://"), "source url %q", source.URL)
 		assert.False(t, source.FetchedAt.IsZero(), "source %q has no fetch time", source.URL)
-		assert.Regexp(t, "^[0-9a-f]{64}$", source.ContentSHA256, "source %q", source.URL)
+		if source.ContentSHA256 != "" {
+			assert.Regexp(t, "^[0-9a-f]{64}$", source.ContentSHA256, "source %q", source.URL)
+		}
 		assert.NotEmpty(t, source.ParserVersion, "source %q", source.URL)
 		assert.NotEmpty(t, source.SchemaVersion, "source %q", source.URL)
 	}

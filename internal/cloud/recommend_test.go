@@ -15,12 +15,13 @@ import (
 // applies no filter, which is what proves the ranker re-applies every
 // constraint rather than trusting the provider.
 type fakeProvider struct {
-	err          error
-	id           ProviderID
-	capabilities Capabilities
-	sources      []SourceRef
-	candidates   []Candidate
-	queries      []Query
+	err            error
+	id             ProviderID
+	capabilities   Capabilities
+	resultProvider ProviderID
+	sources        []SourceRef
+	candidates     []Candidate
+	queries        []Query
 }
 
 func (p *fakeProvider) ID() ProviderID             { return p.id }
@@ -32,12 +33,35 @@ func (p *fakeProvider) Query(_ context.Context, query *Query) (Result, error) {
 		return Result{}, p.err
 	}
 
+	resultProvider := p.resultProvider
+	if resultProvider == "" {
+		resultProvider = p.id
+	}
+
 	return Result{
-		Provider:   p.id,
+		Provider:   resultProvider,
 		Mode:       DataModeEmbeddedSnapshot,
 		Sources:    p.sources,
 		Candidates: p.candidates,
 	}, nil
+}
+
+func TestRecommendRejectsProviderIdentityMismatch(t *testing.T) {
+	t.Parallel()
+
+	candidate := fixture{Region: "us-east-1", Machine: "m5.large", Price: "0.020", VCPU: 2, MemoryGiB: 4}.build()
+	provider := riskFreeProvider(candidate)
+	provider.resultProvider = ProviderAWS
+	_, err := Recommend(t.Context(), provider, gcpCostRequest())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "provider result names")
+
+	candidate = fixture{Region: "us-east-1", Machine: "m5.large", Price: "0.020", VCPU: 2, MemoryGiB: 4}.build()
+	provider = riskFreeProvider(candidate)
+	provider.candidates[0].Provider = ProviderAWS
+	_, err = Recommend(t.Context(), provider, gcpCostRequest())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "candidate 0 names")
 }
 
 func riskyProvider(candidates ...Candidate) *fakeProvider {
@@ -56,6 +80,10 @@ func riskyProvider(candidates ...Candidate) *fakeProvider {
 }
 
 func riskFreeProvider(candidates ...Candidate) *fakeProvider {
+	for i := range candidates {
+		candidates[i].Provider = ProviderGCP
+	}
+
 	return &fakeProvider{
 		id: ProviderGCP,
 		capabilities: Capabilities{

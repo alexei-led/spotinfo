@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
 
@@ -88,6 +89,10 @@ func BuildCatalog(region cloud.Region, spotRows, onDemandRows []MachineRow) (*Ca
 
 			continue
 		}
+		if row.VCPU != paired.VCPU || row.MemoryGiB != paired.MemoryGiB {
+			return nil, nil, fmt.Errorf("%w: %s has spot specification %d vCPU/%.3f GiB but on-demand specification %d vCPU/%.3f GiB",
+				ErrSourceContract, id, row.VCPU, row.MemoryGiB, paired.VCPU, paired.MemoryGiB)
+		}
 
 		architecture, classified := ArchitectureOf(id)
 		if !classified {
@@ -145,6 +150,13 @@ func DecodeCatalog(data []byte) (*Catalog, error) {
 	if err := decoder.Decode(&catalog); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrCatalog, err)
 	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("%w: trailing JSON value", ErrCatalog)
+		}
+		return nil, fmt.Errorf("%w: %w", ErrCatalog, err)
+	}
 
 	return &catalog, nil
 }
@@ -169,8 +181,9 @@ func (c *Catalog) Verify(contract *snapshot.SourceContract) error {
 	if c.SchemaVersion != CatalogSchemaVersion {
 		return fmt.Errorf("%w: schema_version must be %q, got %q", ErrCatalog, CatalogSchemaVersion, c.SchemaVersion)
 	}
-	if !slices.Contains(contract.Support.Regions, c.Region) {
-		return fmt.Errorf("%w: region %q is not in the approved support matrix", ErrCatalog, c.Region)
+	if len(contract.Support.Regions) != 1 || c.Region != contract.Support.Regions[0] {
+		return fmt.Errorf("%w: catalogue region %q does not exactly cover the approved region set %v",
+			ErrCatalog, c.Region, contract.Support.Regions)
 	}
 	if !slices.Contains(contract.Support.OperatingSystems, c.OS) {
 		return fmt.Errorf("%w: operating system %q is not in the approved support matrix", ErrCatalog, c.OS)
@@ -184,15 +197,29 @@ func (c *Catalog) Verify(contract *snapshot.SourceContract) error {
 	}
 
 	seen := make(map[cloud.MachineID]struct{}, len(c.Machines))
+	seriesSeen := make(map[string]struct{})
+	architecturesSeen := make(map[cloud.Architecture]struct{})
 	for i := range c.Machines {
 		machine := &c.Machines[i]
 		if _, duplicate := seen[machine.ID]; duplicate {
 			return fmt.Errorf("%w: %s appears twice", ErrCatalog, machine.ID)
 		}
 		seen[machine.ID] = struct{}{}
+		seriesSeen[SeriesOf(machine.ID)] = struct{}{}
+		architecturesSeen[machine.Architecture] = struct{}{}
 
 		if err := machine.verify(contract); err != nil {
 			return err
+		}
+	}
+	for _, series := range contract.Support.MachineSeries {
+		if _, ok := seriesSeen[series]; !ok {
+			return fmt.Errorf("%w: catalogue has no machine in approved series %q", ErrCatalog, series)
+		}
+	}
+	for _, architecture := range contract.Support.Architectures {
+		if _, ok := architecturesSeen[architecture]; !ok {
+			return fmt.Errorf("%w: catalogue has no machine for approved architecture %q", ErrCatalog, architecture)
 		}
 	}
 

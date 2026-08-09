@@ -185,6 +185,9 @@ func TestCatalogRoundTripsThroughItsCommittedForm(t *testing.T) {
 
 	_, err = DecodeCatalog([]byte(`{"schema_version":"spotinfo.azure-catalog/v1","surprise":1}`))
 	require.ErrorIs(t, err, ErrCatalog, "an unknown key must fail rather than decode as a zero value")
+
+	_, err = DecodeCatalog(append(encoded, []byte(`{}`)...))
+	require.ErrorIs(t, err, ErrCatalog, "trailing JSON must fail closed")
 }
 
 func TestVerifyAcceptsAnInContractCatalogue(t *testing.T) {

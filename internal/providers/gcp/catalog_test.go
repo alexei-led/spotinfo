@@ -110,6 +110,15 @@ func TestBuildCatalogRejectsTwoDifferentSpecificationsForOneMachine(t *testing.T
 	require.ErrorIs(t, err, ErrSourceContract)
 }
 
+func TestBuildCatalogRejectsSpotAndOnDemandSpecificationMismatch(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := BuildCatalog(contractedRegion,
+		[]MachineRow{row(t, "c4-standard-2", "0.058121", 2, 7)},
+		[]MachineRow{row(t, "c4-standard-2", "0.117660", 4, 15)})
+	require.ErrorIs(t, err, ErrSourceContract)
+}
+
 func TestBuildCatalogAcceptsAnExactRepeat(t *testing.T) {
 	t.Parallel()
 
@@ -148,6 +157,16 @@ func TestDecodeCatalogRejectsAnUnknownField(t *testing.T) {
 	t.Parallel()
 
 	_, err := DecodeCatalog([]byte(`{"schema_version":"spotinfo.gcp-catalog/v1","surprise":1}`))
+	require.ErrorIs(t, err, ErrCatalog)
+}
+
+func TestDecodeCatalogRejectsTrailingJSON(t *testing.T) {
+	t.Parallel()
+
+	catalog, err := buildTestCatalog(t).Encode()
+	require.NoError(t, err)
+
+	_, err = DecodeCatalog(append(catalog, []byte(`{}`)...))
 	require.ErrorIs(t, err, ErrCatalog)
 }
 

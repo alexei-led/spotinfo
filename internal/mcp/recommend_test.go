@@ -63,6 +63,10 @@ func TestFinerThanScalePriceCeilingStillFiltersOnV2(t *testing.T) {
 }
 
 func offlineProvider(id cloud.ProviderID, candidates []cloud.Candidate) *stubProvider {
+	for i := range candidates {
+		candidates[i].Provider = id
+	}
+
 	return &stubProvider{
 		id:           id,
 		capabilities: offlineLinuxCapabilities(),
