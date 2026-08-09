@@ -31,9 +31,9 @@ func testCatalog(t *testing.T) *gcp.Catalog {
 	return catalog
 }
 
-// The gzip header carries a modification time and an OS byte by default, which
-// would give unchanged data a different hash on every run and make the manifest
-// gate fire on a no-op refresh.
+// A hash-stable payload is what keeps a no-op refresh from firing the manifest
+// gate. The gzip header is where that could break: a modification time or a
+// host-dependent OS byte would give unchanged data a new hash every run.
 func TestEncodePayloadIsReproducible(t *testing.T) {
 	t.Parallel()
 

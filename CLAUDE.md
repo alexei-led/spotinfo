@@ -318,9 +318,10 @@ func WithFoo(foo string) GetSpotSavingsOption {
   never open an AWS client.
 - **AWS v1 output is golden-pinned**: `cmd/spotinfo/testdata/aws-*-v1.*` and
   `internal/mcp/testdata/find-spot-instances-v1-*.json`. A diff there is a client-visible
-  contract break, not a test to update. `UPDATE_GOLDEN=1` rewrites a golden **and fails the
-  run** so a regeneration can never be reported as a pass; review the diff, then re-run
-  without it. The same variable drives `make refresh-manifests`.
+  contract break, not a test to update. For those two contract tests `UPDATE_GOLDEN=1`
+  rewrites the golden **and fails the run**, so a regeneration can never be reported as a
+  pass; review the diff, then re-run without it. The same variable also drives
+  `make refresh-manifests`, where rewriting is the point and the run passes normally.
 
 When adding a new feature:
 

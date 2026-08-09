@@ -55,7 +55,9 @@ const (
 	// read on every process start.
 	gzipLevel = gzip.BestCompression
 	// gzipOSUnknown is the only gzip OS byte that does not depend on the host
-	// that produced the file, which is what makes the payload reproducible.
+	// that produced the file. Go's writer already defaults to it and to a zero
+	// modification time, so setting the header changes no byte today; it is
+	// written explicitly so reproducibility does not rest on that default.
 	gzipOSUnknown = 255
 )
 
