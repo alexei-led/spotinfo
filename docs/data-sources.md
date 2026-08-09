@@ -326,6 +326,7 @@ Failures are deliberate, not transient noise. Expect to see:
 | `serviceName is "X", the contracted request returns only "Virtual Machines"` | The request filter stopped selecting what it was reviewed to select. |
 | `needs N fractional digits, contract allows 6` | A price got finer. Raise `max_fractional_digits` deliberately after review; never round. |
 | `priced in only one class` | Informational. The size is skipped rather than published with a savings figure that has no denominator. |
+| `is not a size name this parser reads` | A page listed a constrained-vCPU size such as `Standard_E32-8as_v5`. None does today. Decide explicitly whether to support the hyphenated form; the refresh fails rather than skipping the row. |
 | `belongs to unapproved series` | Microsoft added a series to a contracted page. Add it to `support.machine_series` and rerun. Architecture comes from the page, so unlike GCP there is no ordering trap here. |
 
 Apart from the last two, any of these means reviewing the sources and, if they really changed

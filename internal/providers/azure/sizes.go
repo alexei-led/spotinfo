@@ -40,6 +40,10 @@ const partProcessor = "Processor"
 // seriesSuffix is the trailing path segment every approved size page ends with.
 const seriesSuffix = "-series"
 
+// sizeNamePrefix is what makes a specification-table row a size row, whether or
+// not this parser can read the rest of the name.
+const sizeNamePrefix = "Standard_"
+
 var (
 	// sizeName is the exact shape of an Azure VM size identifier. It is the same
 	// string the Retail Prices API publishes as armSkuName, which is what lets the
@@ -201,8 +205,18 @@ func sizeRows(series string, rows [][]string) ([]SizeSpec, error) {
 	parsed := make([]SizeSpec, 0, len(rows))
 
 	for _, cells := range rows {
-		if len(cells) < specColumns || !sizeName.MatchString(cells[0]) {
+		if len(cells) < specColumns || !strings.HasPrefix(cells[0], sizeNamePrefix) {
 			continue
+		}
+
+		// A cell that starts with the size prefix is a size row, so a name this
+		// parser cannot read is a contract failure rather than a row to skip.
+		// Azure's constrained-vCPU names carry a hyphen ("Standard_E32-8as_v5");
+		// no contracted page lists one today, and if one starts to, the refresh
+		// must say so rather than quietly publishing a shorter catalogue.
+		if !sizeName.MatchString(cells[0]) {
+			return nil, fmt.Errorf("%w: %q in %s is not a size name this parser reads",
+				ErrSourceContract, cells[0], series)
 		}
 
 		vcpu, err := strconv.Atoi(cells[1])

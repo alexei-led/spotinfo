@@ -149,6 +149,7 @@ verify-data:
 	@go test ./internal/spot/ -run '$(DATA_GATE_TESTS)' -count=1
 	@go test ./internal/providers/gcp/ -count=1
 	@go test ./internal/providers/azure/ -count=1
+	@go test ./cmd/update-gcp-data/ ./cmd/update-azure-data/ -count=1
 
 # Package-boundary gate. Checks the declared layer direction and module
 # metadata in .archfit.yaml; it is not a data-correctness or test substitute.

@@ -878,6 +878,14 @@ Azure slice result (#29), and final verification:
   each provider — it is a property of the value object, not of a catalogue. And the neutral
   recommendation table now sizes its region and machine columns from the rows: fixed widths were
   fine for `n2d-standard-2` and broke on `Standard_D2pds_v5`.
+- Two gaps closed after a review pass. `sizeRows` skipped an unparseable size name with a
+  silent `continue`, so a constrained-vCPU row such as `Standard_E32-8as_v5` would have shrunk
+  the catalogue without a word — the one behaviour the rest of this design rules out. A row
+  starting with `Standard_` is now a size row, and a name the parser cannot read fails. No
+  contracted page lists one today (0 of 225 rows), and re-running the updater with the stricter
+  parser produced a byte-identical payload. `make verify-data` also now runs both updater test
+  packages, which is where the contract checks live — notably that every approved series has a
+  source page.
 - The three HTML helpers (`walk`, `cellText`, `tableRows`) are deliberately duplicated between
   the GCP and Azure parsers, with the trigger recorded in `sizes.go`: extract them when a third
   provider parses HTML. A package created to hold forty lines would add a dependency edge for
