@@ -441,6 +441,71 @@ func TestRecommendErrorContract(t *testing.T) {
 			wantCloud: stringPtr("gcp"),
 		},
 		{
+			// cast would split this on whitespace into two regions the caller
+			// never named, and one region name is not the array the contract
+			// declares.
+			name: "regions given as a bare string", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{
+				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
+				"regions": "us-central1 us-east1",
+			},
+			wantCloud: stringPtr("gcp"),
+		},
+		{
+			// cast would render this as the region "1", which no provider
+			// publishes, so the request would fail as "no candidates" instead of
+			// naming the malformed argument.
+			name: "region element that is not a string", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{
+				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
+				"regions": []any{"us-central1", 1},
+			},
+			wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "empty region name", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{
+				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
+				"regions": []any{""},
+			},
+			wantCloud: stringPtr("gcp"),
+		},
+		{
+			// The schema declares minItems 1. Widening `[]` to every region
+			// answers a broader question than the caller asked, with status ok.
+			name: "empty regions array", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{
+				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
+				"regions": []any{},
+			},
+			wantCloud: stringPtr("gcp"),
+		},
+		// An explicit "" is not one of the enum values the contract declares.
+		// Read as an omission it would answer a different question than the
+		// caller asked — as AWS, as Linux, as the cost policy — with status ok.
+		{
+			// The echoed cloud is null: "" is not a cloud, and the payload never
+			// invents one the caller did not name.
+			name: "explicit empty cloud", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{
+				"cloud": "", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
+			},
+		},
+		{
+			name: "explicit empty os", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{
+				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8, "os": "",
+			},
+			wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "explicit empty workload", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{
+				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8, "workload": "",
+			},
+			wantCloud: stringPtr("gcp"),
+		},
+		{
 			// The advertised object is closed but nothing upstream enforces it,
 			// so a misspelled ceiling must fail here. Dropped, it would return
 			// recommendations with no ceiling applied and status ok.
@@ -454,6 +519,24 @@ func TestRecommendErrorContract(t *testing.T) {
 		{
 			name: "unregistered cloud", registry: riskFree, wantCode: cloud.CodeDataUnavailable,
 			args:      map[string]any{"cloud": "azure", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8},
+			wantCloud: stringPtr("azure"),
+		},
+		{
+			// A malformed request is malformed whichever cloud it names. Resolving
+			// the provider first would answer DATA_UNAVAILABLE and hide the bound
+			// the caller actually got wrong, so the same request would change code
+			// the day that cloud's snapshot is enabled.
+			name: "invalid bound on an unregistered cloud", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args:      map[string]any{"cloud": "azure", "architecture": "x86_64", "min_vcpu": 0, "min_memory_gib": 8},
+			wantCloud: stringPtr("azure"),
+		},
+		{
+			name:     "region keyword mixed with an explicit region on an unregistered cloud",
+			registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{
+				"cloud": "azure", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
+				"regions": []any{"all", "eastus"},
+			},
 			wantCloud: stringPtr("azure"),
 		},
 		{

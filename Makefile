@@ -100,19 +100,37 @@ check-deps:
 # straight to the embedded file would clobber good data on a 403 or a dropped
 # connection. wget also exits non-zero on an incomplete transfer, which is the
 # guard against a truncated-but-non-empty download that `test -s` would pass.
+#
+# A download that arrives intact can still be malformed or short of the reviewed
+# coverage floor, and only refresh-manifests — which parses the payload and
+# checks the floor — can tell. That gate runs on the embedded file, so the swap
+# has to happen first; the reviewed payload is kept in .bak and moved back when
+# the gate fails, so a bad feed never survives as the tracked data. The manifests
+# need no backup: the gate validates every snapshot before it writes any sidecar,
+# and rewriting a sidecar byte-for-byte is a no-op, so swapping one payload
+# rewrites one manifest — atomically — and leaves the other two untouched
+# (internal/spot/manifest_test.go, internal/snapshot/write.go).
 update-data: check-deps
 	@echo "Updating spot advisor data..."
 	@wget -nv $(SPOT_ADVISOR_URL) -O $(DATA_DIR)/spot-advisor-data.json.tmp || (rm -f $(DATA_DIR)/spot-advisor-data.json.tmp; exit 1)
 	@test -s $(DATA_DIR)/spot-advisor-data.json.tmp || (rm -f $(DATA_DIR)/spot-advisor-data.json.tmp; echo "Error: empty advisor download"; exit 1)
+	@cp $(DATA_DIR)/spot-advisor-data.json $(DATA_DIR)/spot-advisor-data.json.bak
 	@mv $(DATA_DIR)/spot-advisor-data.json.tmp $(DATA_DIR)/spot-advisor-data.json
-	@$(MAKE) --no-print-directory refresh-manifests
+	@$(MAKE) --no-print-directory refresh-manifests \
+		|| (mv $(DATA_DIR)/spot-advisor-data.json.bak $(DATA_DIR)/spot-advisor-data.json; \
+		    echo "Error: the advisor download failed the manifest gate; restored the reviewed data"; exit 1)
+	@rm -f $(DATA_DIR)/spot-advisor-data.json.bak
 
 update-price: check-deps
 	@echo "Updating spot pricing data..."
 	@wget -nv $(SPOT_PRICE_URL) -O $(DATA_DIR)/spot-price-data.json.tmp || (rm -f $(DATA_DIR)/spot-price-data.json.tmp; exit 1)
 	@test -s $(DATA_DIR)/spot-price-data.json.tmp || (rm -f $(DATA_DIR)/spot-price-data.json.tmp; echo "Error: empty price download"; exit 1)
+	@cp $(DATA_DIR)/spot-price-data.json $(DATA_DIR)/spot-price-data.json.bak
 	@mv $(DATA_DIR)/spot-price-data.json.tmp $(DATA_DIR)/spot-price-data.json
-	@$(MAKE) --no-print-directory refresh-manifests
+	@$(MAKE) --no-print-directory refresh-manifests \
+		|| (mv $(DATA_DIR)/spot-price-data.json.bak $(DATA_DIR)/spot-price-data.json; \
+		    echo "Error: the price download failed the manifest gate; restored the reviewed data"; exit 1)
+	@rm -f $(DATA_DIR)/spot-price-data.json.bak
 
 # Rewrites the AWS sidecar manifests in internal/spot/data only — the payload
 # hash of each, plus the source hash and fetch time of the raw feeds. The GCP

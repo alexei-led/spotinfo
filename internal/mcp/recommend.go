@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/spf13/cast"
 
 	"spotinfo/internal/cloud"
 )
@@ -173,10 +172,19 @@ func (t *RecommendTool) Handle(ctx context.Context, req mcp.CallToolRequest) (*m
 	return mcp.NewToolResultText(string(encoded)), nil
 }
 
-// recommend resolves the requested provider and runs the neutral engine. The
-// registry lookup happens before acquisition, so a disabled cloud costs no I/O
-// and never falls back to another provider.
+// recommend validates the request, resolves the requested provider and runs the
+// neutral engine. The registry lookup happens before acquisition, so a disabled
+// cloud costs no I/O and never falls back to another provider.
 func (t *RecommendTool) recommend(ctx context.Context, request *cloud.RecommendRequest) (*cloud.RecommendReport, error) {
+	// Every bound is checked before the provider is resolved. The other way
+	// round, a malformed request aimed at a disabled cloud reports
+	// DATA_UNAVAILABLE and hides the argument the caller got wrong — and the
+	// same request would change code the day that snapshot is enabled.
+	// cloud.Recommend validates again for callers that reach it directly.
+	if err := request.Validate(); err != nil {
+		return nil, err
+	}
+
 	if t.providers == nil {
 		return nil, fmt.Errorf("%w: no provider registry is configured", cloud.ErrDataUnavailable)
 	}
@@ -315,35 +323,74 @@ func rejectUnknownArgs(args map[string]any) error {
 }
 
 // requestedRegions defaults to every region the provider publishes, matching
-// the documented input contract. Every element must be a region name: a nested
-// array or object cannot be one, and silently searching everywhere instead
-// would answer a narrower question than the caller asked.
+// the documented input contract. Only an absent argument takes that default:
+// the schema declares an array of at least one non-empty string, and folding an
+// explicit `[]` into every region would answer a broader question than the
+// caller asked.
+//
+// The shape is checked here because the host does not check it for us, and cast
+// is too permissive to do it: ToStringSlice splits a bare "us-east-1 us-west-2"
+// on whitespace into two regions the caller never named, and turns a number or
+// a boolean element into a region name.
 func requestedRegions(args map[string]any) ([]cloud.Region, error) {
 	value, present := args[argRegions]
 	if !present || value == nil {
 		return []cloud.Region{allRegions}, nil
 	}
 
-	names, err := cast.ToStringSliceE(value)
+	elements, err := regionElements(value)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s must be an array of region names", cloud.ErrInvalidArgument, argRegions)
+		return nil, err
 	}
-	if len(names) == 0 {
-		return []cloud.Region{allRegions}, nil
+	if len(elements) == 0 {
+		return nil, fmt.Errorf("%w: %s must name at least one region", cloud.ErrInvalidArgument, argRegions)
 	}
 
-	regions := make([]cloud.Region, 0, len(names))
-	for _, name := range names {
+	regions := make([]cloud.Region, 0, len(elements))
+
+	for _, element := range elements {
+		name, isString := element.(string)
+		if !isString || strings.TrimSpace(name) == "" {
+			return nil, fmt.Errorf("%w: every %s element must be a non-empty region name",
+				cloud.ErrInvalidArgument, argRegions)
+		}
+
 		regions = append(regions, cloud.Region(name))
 	}
 
 	return regions, nil
 }
 
+// regionElements accepts the two shapes the argument reaches the handler in:
+// []any from a decoded JSON request, and []string from an in-process caller.
+// Anything else is not the array the contract declares.
+func regionElements(value any) ([]any, error) {
+	switch typed := value.(type) {
+	case []any:
+		return typed, nil
+	case []string:
+		elements := make([]any, 0, len(typed))
+		for _, name := range typed {
+			elements = append(elements, name)
+		}
+
+		return elements, nil
+	default:
+		return nil, fmt.Errorf("%w: %s must be an array of region names", cloud.ErrInvalidArgument, argRegions)
+	}
+}
+
 // stringArg reads a string argument. The MCP server does not check a request
 // against the advertised schema, so a caller that wraps a value in an array or
 // sends a number reaches the handler; coercing that to "" would answer a
 // question the caller did not ask — silently, and with status ok.
+//
+// Only an absent or null argument takes the documented default. An explicit ""
+// is a value none of the enums list, so it is passed on to the vocabulary
+// parser and refused there: folding it into the default would answer
+// `cloud: ""` as AWS and `workload: ""` as cost. `machine` is the one argument
+// whose contract gives "" a meaning — no machine-name filter — and its
+// documented default is "" already.
 func stringArg(args map[string]any, key, defaultValue string) (string, error) {
 	value, present := args[key]
 	if !present || value == nil {
@@ -353,9 +400,6 @@ func stringArg(args map[string]any, key, defaultValue string) (string, error) {
 	text, isString := value.(string)
 	if !isString {
 		return "", fmt.Errorf("%w: %s must be a string", cloud.ErrInvalidArgument, key)
-	}
-	if text == "" {
-		return defaultValue, nil
 	}
 
 	return text, nil

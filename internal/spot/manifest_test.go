@@ -84,32 +84,49 @@ func TestEmbeddedSnapshotManifests(t *testing.T) {
 	t.Parallel()
 
 	regenerate := os.Getenv("UPDATE_GOLDEN") == "1"
+	snapshots := embeddedSnapshots()
+	manifests := make([]*snapshot.Manifest, len(snapshots))
 
-	for _, embedded := range embeddedSnapshots() {
-		t.Run(embedded.manifest, func(t *testing.T) {
-			t.Parallel()
+	// Two phases, because the sidecars are refreshed as a set. Writing inside
+	// each subtest lets one snapshot's manifest survive another's failure, and
+	// the Makefile restores only the payload it downloaded — leaving a manifest
+	// that hashes data no reviewer accepted. The group runs its parallel
+	// children to completion before returning, so nothing is written until every
+	// refreshed manifest describes a payload that still meets its floor.
+	//
+	// The write loop then runs file by file, which is safe because
+	// snapshot.WriteFile skips a manifest whose bytes did not change and a
+	// refresh swaps one payload: the run rewrites the one sidecar that payload
+	// changed, atomically, and never opens the other two.
+	validated := t.Run("validate", func(t *testing.T) {
+		for i, embedded := range snapshots {
+			t.Run(embedded.manifest, func(t *testing.T) {
+				t.Parallel()
 
-			payload := embedded.payload(t)
+				payload := embedded.payload(t)
 
-			manifest, err := embedded.load()
-			require.NoError(t, err)
+				manifest, err := embedded.load()
+				require.NoError(t, err)
 
-			if regenerate {
-				manifest = refreshed(manifest, payload)
-			}
+				if regenerate {
+					manifest = refreshed(manifest, payload)
+				}
 
-			require.NoError(t, manifest.VerifyPayload(payload),
-				"%s and its data file were not updated together; refresh with UPDATE_GOLDEN=1", embedded.manifest)
-			require.NoError(t, snapshot.ValidateCoverage(embedded.coverage(t), manifest.MinRecords))
+				require.NoError(t, manifest.VerifyPayload(payload),
+					"%s and its data file were not updated together; refresh with UPDATE_GOLDEN=1", embedded.manifest)
+				require.NoError(t, snapshot.ValidateCoverage(embedded.coverage(t), manifest.MinRecords))
 
-			// Written last, and only once the refreshed manifest describes a
-			// payload that still meets its reviewed floor. Writing first would
-			// leave a short feed hashed under its own manifest — the two agreeing
-			// about data no reviewer accepted.
-			if regenerate {
-				require.NoError(t, snapshot.WriteManifest(filepath.Join("data", embedded.manifest), manifest))
-			}
-		})
+				manifests[i] = manifest
+			})
+		}
+	})
+
+	if !regenerate || !validated {
+		return
+	}
+
+	for i, embedded := range snapshots {
+		require.NoError(t, snapshot.WriteManifest(filepath.Join("data", embedded.manifest), manifests[i]))
 	}
 }
 

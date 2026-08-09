@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -47,6 +48,26 @@ func TestWriteFileLeavesTheReviewedSnapshotIntactOnFailure(t *testing.T) {
 	contents, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "reviewed", string(contents))
+}
+
+// A refresh changes one snapshot at a time, and the sidecars are rewritten as a
+// set. Skipping the writes that would change nothing keeps the untouched files
+// out of the run entirely, so a failure partway through the set cannot leave one
+// of them rewritten against a payload the caller is about to roll back.
+func TestWriteFileSkipsAnIdenticalRewrite(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "manifest.json")
+	require.NoError(t, os.WriteFile(path, []byte("reviewed"), 0o644))
+
+	stale := time.Now().Add(-time.Hour).Truncate(time.Second)
+	require.NoError(t, os.Chtimes(path, stale, stale))
+
+	require.NoError(t, WriteFile(path, []byte("reviewed")))
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.True(t, info.ModTime().Equal(stale), "an identical rewrite touched the file")
 }
 
 func TestWriteFileKeepsTheExistingMode(t *testing.T) {

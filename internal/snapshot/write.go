@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,7 +17,16 @@ const defaultSnapshotMode os.FileMode = 0o644
 // partial, or interrupted update therefore leaves the previously reviewed
 // snapshot untouched — the difference between a failed update and a corrupted
 // one. Same directory, because rename is only atomic within a filesystem.
+//
+// Writing bytes the target already holds is a no-op. Snapshot files are
+// content-addressed by their manifests, so an identical rewrite changes nothing
+// a reader can observe — and a file a refresh never opens is a file no failure
+// elsewhere in that refresh can leave half-written.
 func WriteFile(path string, data []byte) error {
+	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, data) { //nolint:gosec // the caller owns the snapshot path.
+		return nil
+	}
+
 	dir := filepath.Dir(path)
 
 	temp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp")
