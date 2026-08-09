@@ -190,7 +190,9 @@ func execAWSRecommendV1(ctx *cli.Context, execCtx context.Context, provider clou
 // legacyRecommendationOptions builds and validates the v1 constraint set.
 func legacyRecommendationOptions(ctx *cli.Context, workload cloud.Workload) (*spot.RecommendationOptions, error) {
 	budget := ctx.Float64(flagBudget)
-	if ctx.IsSet(flagBudget) && budget <= 0 {
+	// NaN fails every comparison, so `budget <= 0` alone would let it through as
+	// a set-but-unenforceable ceiling.
+	if ctx.IsSet(flagBudget) && (math.IsNaN(budget) || budget <= 0) {
 		return nil, fmt.Errorf("%w: budget must be a positive USD instance-hour price", spot.ErrInvalidRecommendationInput)
 	}
 	if ctx.IsSet(flagTop) && ctx.Int(flagTop) <= 0 {

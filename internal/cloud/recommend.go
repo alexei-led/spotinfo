@@ -283,13 +283,12 @@ func Recommend(ctx context.Context, provider Provider, request *RecommendRequest
 // scored pairs a candidate with the right-sizing excess the ranking policy
 // orders by, so the comparator recomputes nothing.
 type scored struct {
-	candidate     *Candidate
-	excessMemory  float64
-	priceNanos    int64
-	excessVCPU    int
-	budgeted      bool
-	patterned     bool
-	riskConstrain bool
+	candidate    *Candidate
+	excessMemory float64
+	priceNanos   int64
+	excessVCPU   int
+	budgeted     bool
+	patterned    bool
 }
 
 // rank filters candidates against every constraint and orders the survivors by
@@ -312,13 +311,12 @@ func rank(request *RecommendRequest, candidates []Candidate) ([]scored, error) {
 		}
 
 		kept = append(kept, scored{
-			candidate:     candidate,
-			excessMemory:  candidate.Machine.MemoryGiB - request.MinMemoryGiB,
-			priceNanos:    candidate.Spot.Amount.Nanos(),
-			excessVCPU:    candidate.Machine.VCPU - request.MinVCPU,
-			budgeted:      request.MaxPrice != nil,
-			patterned:     pattern != nil,
-			riskConstrain: request.Workload.RequiresRisk(),
+			candidate:    candidate,
+			excessMemory: candidate.Machine.MemoryGiB - request.MinMemoryGiB,
+			priceNanos:   candidate.Spot.Amount.Nanos(),
+			excessVCPU:   candidate.Machine.VCPU - request.MinVCPU,
+			budgeted:     request.MaxPrice != nil,
+			patterned:    pattern != nil,
 		})
 	}
 

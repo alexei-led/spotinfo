@@ -3,6 +3,7 @@ package azure
 import (
 	"fmt"
 	"io"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -233,8 +234,12 @@ func sizeRows(series string, rows [][]string) ([]SizeSpec, error) {
 				ErrSourceContract, cells[0], series, cells[1])
 		}
 
+		// ParseFloat accepts "NaN" and "Inf" without error, and `memoryGiB <= 0`
+		// catches neither: every comparison against NaN is false, and Inf is
+		// positive. Both would reach the encoder and fail the refresh there,
+		// naming the JSON value instead of the page cell that produced it.
 		memoryGiB, err := strconv.ParseFloat(cells[2], 64)
-		if err != nil || memoryGiB <= 0 {
+		if err != nil || math.IsNaN(memoryGiB) || math.IsInf(memoryGiB, 0) || memoryGiB <= 0 {
 			return nil, fmt.Errorf("%w: %s in %s has unreadable memory %q",
 				ErrSourceContract, cells[0], series, cells[2])
 		}

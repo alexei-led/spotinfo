@@ -212,8 +212,16 @@ func machineRows(rows [][]string) ([]MachineRow, error) {
 	parsed := make([]MachineRow, 0, len(rows))
 
 	for _, cells := range rows {
-		if len(cells) <= priceColumn || !machineIDPattern.MatchString(cells[0]) {
+		if len(cells) == 0 || !machineIDPattern.MatchString(cells[0]) {
 			continue
+		}
+
+		// The identifier decides that this is a machine row, so a short row is a
+		// page that dropped or reordered a contracted column — not a row to skip,
+		// which would quietly publish a catalogue missing those machines.
+		if len(cells) <= priceColumn {
+			return nil, fmt.Errorf("%w: %s has %d columns, not the %d this parser reads",
+				ErrSourceContract, cells[0], len(cells), priceColumn+1)
 		}
 
 		row, whole, err := machineRow(cells)

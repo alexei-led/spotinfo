@@ -135,6 +135,33 @@ func TestAnUnreadableCellFailsTheParse(t *testing.T) {
 	}
 }
 
+// A machine row that lost a contracted column is a page that changed shape, not
+// a row to skip: skipping it publishes a catalogue quietly missing those
+// machines, and the coverage floor is a floor, not a census.
+func TestAMachineRowMissingAColumnFails(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseSpotPage(
+		strings.NewReader(spotPage(`<td>c4-standard-2</td><td>2</td><td>7 GiB</td>`)), contractedRegion)
+
+	require.ErrorIs(t, err, ErrSourceContract)
+	assert.Contains(t, err.Error(), "c4-standard-2")
+}
+
+// A row that is not a machine row at all — a footnote or a sub-heading — is
+// still skipped however short it is, or every page with prose in its table
+// would fail.
+func TestAShortNonMachineRowIsStillSkipped(t *testing.T) {
+	t.Parallel()
+
+	page := spotPage(`<td>Sizes below are preview</td></tr><tr>` + readableCells)
+
+	rows, err := ParseSpotPage(strings.NewReader(page), contractedRegion)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, cloud.MachineID("c4-standard-2"), rows[0].ID)
+}
+
 func TestTheSamePageShapeParsesWhenEveryCellIsReadable(t *testing.T) {
 	t.Parallel()
 
