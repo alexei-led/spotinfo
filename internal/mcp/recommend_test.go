@@ -197,6 +197,22 @@ func TestRegisteredInputSchemaAgreesWithTheNormativeContract(t *testing.T) {
 	assert.Len(t, advertisedProperties, len(contractProperties), "the advertised schema must not add inputs")
 	assert.Equal(t, contract["additionalProperties"], advertised["additionalProperties"],
 		"the advertised schema must close the object exactly as the contract does")
+
+	// The advertised closed object is only a promise to the client — the host
+	// never checks it. rejectUnknownArgs is what keeps it, so its allow-list
+	// must be the contract's property set exactly: a name missing from it
+	// refuses a documented argument, and a name it adds reopens the object.
+	accepted := make([]string, 0, len(recommendArgs))
+	for name := range recommendArgs {
+		accepted = append(accepted, name)
+	}
+
+	declared := make([]string, 0, len(contractProperties))
+	for name := range contractProperties {
+		declared = append(declared, name)
+	}
+
+	assert.ElementsMatch(t, declared, accepted, "the handler must accept exactly the contract's arguments")
 }
 
 // A successful answer validates against the published success schema, for every
@@ -425,6 +441,17 @@ func TestRecommendErrorContract(t *testing.T) {
 			wantCloud: stringPtr("gcp"),
 		},
 		{
+			// The advertised object is closed but nothing upstream enforces it,
+			// so a misspelled ceiling must fail here. Dropped, it would return
+			// recommendations with no ceiling applied and status ok.
+			name: "undeclared argument", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{
+				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
+				"budget": 0.05,
+			},
+			wantCloud: stringPtr("gcp"),
+		},
+		{
 			name: "unregistered cloud", registry: riskFree, wantCode: cloud.CodeDataUnavailable,
 			args:      map[string]any{"cloud": "azure", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8},
 			wantCloud: stringPtr("azure"),
@@ -464,6 +491,23 @@ func TestRecommendErrorContract(t *testing.T) {
 			assert.NotContains(t, string(payloadOf(t, result)), "recommendations")
 		})
 	}
+}
+
+// The rejection names every undeclared argument, in a stable order. The code
+// alone cannot tell a caller which key was misspelled, and a sentinel-only
+// assertion would pass on any other INVALID_ARGUMENT branch.
+func TestRecommendNamesEveryUndeclaredArgument(t *testing.T) {
+	provider := offlineProvider(cloud.ProviderGCP, gcpCandidates())
+
+	result := callRecommend(t, newStubRegistry(provider), map[string]any{
+		"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
+		"budget": 0.05, "arch": "arm64",
+	})
+
+	report := decodeError(t, result)
+	assert.Equal(t, cloud.CodeInvalidArgument, report.Code)
+	assert.Contains(t, report.Message, "unknown argument: arch, budget")
+	assert.Equal(t, 0, provider.callCount(), "an undeclared argument costs no acquisition")
 }
 
 // Input is validated before any provider is queried, so an invalid request

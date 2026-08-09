@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/spf13/cast"
@@ -27,6 +29,25 @@ const (
 )
 
 const recommendToolName = "recommend_spot_instances"
+
+// recommendArgs is the closed set of arguments the v2 input contract declares.
+// mcp-go checks a request against the advertised schema only under
+// server.WithInputSchemaValidation, which this server cannot adopt: the v1
+// find_spot_instances handler clamps the limit and score bounds its own schema
+// declares, so switching validation on would turn every clamp into an error and
+// break a golden-pinned surface. This tool therefore enforces its own object.
+var recommendArgs = map[string]struct{}{
+	argCloud:           {},
+	argRegions:         {},
+	argMachine:         {},
+	argArchitecture:    {},
+	argOS:              {},
+	argMinVCPU:         {},
+	argMinMemoryGiB:    {},
+	argMaxPricePerHour: {},
+	argWorkload:        {},
+	argTop:             {},
+}
 
 // exclusiveMinimum declares the contract's exclusive lower bound, which mcp-go
 // has no helper for. `minimum: 0` is not the same promise: it advertises zero as
@@ -84,9 +105,9 @@ func (s *Server) registerRecommendTool() {
 			mcp.Min(1),
 			mcp.Max(cloud.MaxTop),
 			mcp.DefaultNumber(cloud.DefaultTop)),
-		// The contract declares a closed object. Without this a misspelled
-		// argument — `budget` for `max_price_per_hour` — is silently dropped and
-		// the answer ignores a ceiling the caller believes it set.
+		// The contract declares a closed object. This advertises it to the
+		// client; rejectUnknownArgs is what enforces it, because the host does
+		// not validate a request against the schema for us.
 		mcp.WithSchemaAdditionalProperties(false),
 	)
 
@@ -172,6 +193,10 @@ func (t *RecommendTool) recommend(ctx context.Context, request *cloud.RecommendR
 // every documented default. It rejects values outside the neutral vocabulary;
 // bounds and combinations are the request's own job to validate.
 func parseRecommendRequest(args map[string]any) (*cloud.RecommendRequest, error) {
+	if err := rejectUnknownArgs(args); err != nil {
+		return nil, err
+	}
+
 	cloudName, err := stringArg(args, argCloud, string(cloud.ProviderAWS))
 	if err != nil {
 		return nil, err
@@ -262,6 +287,31 @@ func recommendConstraints(args map[string]any, request *cloud.RecommendRequest) 
 	request.Top = top
 
 	return request, nil
+}
+
+// rejectUnknownArgs fails a request carrying an argument the contract does not
+// declare. Dropping one silently answers a different question than the caller
+// asked: `budget` in place of `max_price_per_hour` returns recommendations with
+// no ceiling applied and status ok, and only a client that diffs the echoed
+// request against what it sent would ever notice.
+func rejectUnknownArgs(args map[string]any) error {
+	unknown := make([]string, 0, len(args))
+
+	for key := range args {
+		if _, declared := recommendArgs[key]; !declared {
+			unknown = append(unknown, key)
+		}
+	}
+
+	if len(unknown) == 0 {
+		return nil
+	}
+
+	// Map iteration order is random; a caller comparing two failures needs the
+	// same message for the same request.
+	slices.Sort(unknown)
+
+	return fmt.Errorf("%w: unknown argument: %s", cloud.ErrInvalidArgument, strings.Join(unknown, ", "))
 }
 
 // requestedRegions defaults to every region the provider publishes, matching

@@ -42,6 +42,11 @@ jobs:
     - name: Run tests with coverage
       run: go test -cover -v ./...
       
+    # Separate from the coverage run: -race and -cover instrument the same
+    # binary differently, and the race detector is a gate in its own right.
+    - name: Run tests with the race detector
+      run: make test-race
+
     - name: Run golangci-lint
       run: make lint
 
