@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v2"
 
+	"spotinfo/internal/cloud"
 	"spotinfo/internal/spot"
 )
 
@@ -453,6 +454,51 @@ func TestExecMainCmd_FilteringOptions(t *testing.T) {
 
 			tt.validate(t, advices)
 			mockClient.AssertExpectations(t)
+		})
+	}
+}
+
+// strconv.ParseFloat accepts "NaN" and "Inf" without an error, and the `> 0`
+// test that decides whether to append the filter reads NaN and -Inf as unset.
+// An unusable ceiling must be rejected rather than answered with an unfiltered
+// list that looks filtered. The mock carries no expectation on the rejected
+// values, so it also pins that the guard runs before any acquisition.
+func TestExecMainCmdRejectsOnlyAnUnusablePriceCeiling(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		args    []string
+		wantErr bool
+	}{
+		{name: "not a number", args: []string{"--price", "NaN"}, wantErr: true},
+		{name: "positive infinity", args: []string{"--price", "+Inf"}, wantErr: true},
+		{name: "negative infinity", args: []string{"--price", "-Inf"}, wantErr: true},
+		{name: "explicit zero", args: []string{"--price", "0"}, wantErr: true},
+		{name: "negative", args: []string{"--price", "-0.01"}, wantErr: true},
+		{name: "positive", args: []string{"--price", "0.05"}},
+		{name: "unset", args: nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := newMockspotClient(t)
+			if !test.wantErr {
+				client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).
+					Return([]spot.Advice{}, nil).Once()
+			}
+
+			var output bytes.Buffer
+			app := newSpotinfoApp(
+				func(ctx *cli.Context) error {
+					return execMainCmd(ctx, context.Background(), awsOnlyRegistry(), client, &output)
+				},
+				func(*cli.Context) error { return nil },
+			)
+
+			err := app.Run(append([]string{appName, "--region", "us-east-1"}, test.args...))
+			if test.wantErr {
+				require.ErrorIs(t, err, cloud.ErrInvalidArgument)
+
+				return
+			}
+			require.NoError(t, err)
 		})
 	}
 }

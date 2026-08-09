@@ -68,26 +68,34 @@ func advisorCoverage(data *advisorData) snapshot.Coverage {
 
 // priceCoverage counts only usable prices. The feed publishes "N/A*" and 0 for
 // machines it does not price, and counting those would let a feed that lost
-// every real price still clear its floor.
+// every real price still clear its floor. Every dimension is counted distinct,
+// matching snapshot.ValidatePrices: the feed already repeats 118 region/size
+// pairs, and counting raw cells would let one region's rows repeated enough
+// times clear a floor meant to describe the whole matrix.
 func priceCoverage(data *rawPriceData) snapshot.Coverage {
+	type priceKey struct{ region, machine, os string }
+
+	regions := make(map[string]struct{})
 	machines := make(map[string]struct{})
-	priced := 0
+	priced := make(map[priceKey]struct{})
 
 	for _, region := range data.Config.Regions {
+		regions[region.Region] = struct{}{}
+
 		for _, instanceType := range region.InstanceTypes {
 			for _, size := range instanceType.Sizes {
 				machines[size.Size] = struct{}{}
 
 				for _, column := range size.ValueColumns {
 					if price, ok := parsePrice(column.Prices.USD); ok && price > 0 {
-						priced++
+						priced[priceKey{region: region.Region, machine: size.Size, os: column.Name}] = struct{}{}
 					}
 				}
 			}
 		}
 	}
 
-	return snapshot.Coverage{Regions: len(data.Config.Regions), Machines: len(machines), Prices: priced}
+	return snapshot.Coverage{Regions: len(regions), Machines: len(machines), Prices: len(priced)}
 }
 
 // validateAdvisorCoverage rejects an advisor payload that parsed but lost

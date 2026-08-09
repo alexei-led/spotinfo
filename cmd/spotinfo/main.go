@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"os/signal"
 	"runtime"
@@ -341,6 +342,15 @@ func execMainCmd(ctx *cli.Context, execCtx context.Context, registry providerReg
 	minScore := ctx.Int(flagMinScore)
 	azLevel := ctx.Bool(flagAZ)
 	scoreTimeout := ctx.Int(flagScoreTimeout)
+
+	// ParseFloat accepts NaN and ±Inf, and neither is caught by the `> 0` test
+	// below that decides whether to append the filter: NaN fails every
+	// comparison and -Inf is not positive, so both drop the ceiling and answer
+	// an unfiltered query as if it were filtered. +Inf would be stored raw and
+	// compared against in the client, making the filter a silent no-op.
+	if ctx.IsSet(flagPrice) && (math.IsNaN(maxPrice) || math.IsInf(maxPrice, 0) || maxPrice <= 0) {
+		return fmt.Errorf("%w: price must be a positive USD instance-hour price", cloud.ErrInvalidArgument)
+	}
 
 	var sortByType spot.SortBy
 
