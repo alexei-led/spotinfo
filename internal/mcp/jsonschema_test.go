@@ -19,9 +19,13 @@ import (
 // uniqueItems, minimum, maximum and exclusiveMinimum.
 //
 // Ceiling: it is not a general validator, and it ignores "format" and "default".
-// It exists so the published contracts are enforced against real payloads
-// without adding a schema library to a binary that ships with none. Reach for a
-// real validator if the contracts start using $ref, allOf, or conditionals.
+// Upgrade trigger: the first contract that uses $ref, allOf, or a conditional.
+// At that point promote github.com/santhosh-tekuri/jsonschema/v6 — already in
+// the module graph through mcp-go — from indirect to direct and delete this.
+//
+// TestValidatorRejectsEachWayAPayloadCanViolateAContract is what keeps it
+// honest: a validator that silently accepts everything would make every
+// contract test below vacuous.
 
 func loadContractSchema(t *testing.T, name string) map[string]any {
 	t.Helper()
@@ -222,4 +226,62 @@ func validateNumber(schema map[string]any, value float64, path string) error {
 	}
 
 	return nil
+}
+
+// The validator above is the only thing standing between the published
+// contracts and a payload that violates them, and every other test using it
+// feeds it a payload expected to pass. If a keyword check silently stopped
+// firing, those tests would stay green while the shipped payload broke. This
+// one breaks a known-good payload one way at a time and requires a rejection.
+func TestValidatorRejectsEachWayAPayloadCanViolateAContract(t *testing.T) {
+	t.Parallel()
+
+	schema := loadContractSchema(t, "recommend-spot-instances-v2-success.schema.json")
+
+	valid, err := os.ReadFile(filepath.Join("testdata", "recommend-spot-instances-v2-success.json"))
+	require.NoError(t, err)
+
+	var reference map[string]any
+	require.NoError(t, json.Unmarshal(valid, &reference))
+	require.NoError(t, validateAgainst(schema, reference, "$"), "the reference payload must be valid")
+
+	firstRecommendation := func(document map[string]any) map[string]any {
+		recommendations, ok := document["recommendations"].([]any)
+		require.True(t, ok)
+		require.NotEmpty(t, recommendations)
+		first, ok := recommendations[0].(map[string]any)
+		require.True(t, ok)
+
+		return first
+	}
+
+	for name, corrupt := range map[string]func(map[string]any){
+		"missing required key":     func(d map[string]any) { delete(d, "schema_version") },
+		"unknown top-level key":    func(d map[string]any) { d["surprise"] = true },
+		"wrong type":               func(d map[string]any) { d["warnings"] = "none" },
+		"value outside an enum":    func(d map[string]any) { d["status"] = "partial" },
+		"const contradicted":       func(d map[string]any) { d["schema_version"] = "spotinfo.recommend/v3" },
+		"nested unknown key":       func(d map[string]any) { firstRecommendation(d)["surprise"] = true },
+		"nested missing key":       func(d map[string]any) { delete(firstRecommendation(d), "spot_usd_per_hour") },
+		"nested value below a min": func(d map[string]any) { firstRecommendation(d)["rank"] = 0.0 },
+		"pattern violated": func(d map[string]any) {
+			source, ok := d["data_source"].(map[string]any)
+			require.True(t, ok)
+			sources, ok := source["sources"].([]any)
+			require.True(t, ok)
+			first, ok := sources[0].(map[string]any)
+			require.True(t, ok)
+			first["content_sha256"] = "NOT-A-SHA256"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var document map[string]any
+			require.NoError(t, json.Unmarshal(valid, &document))
+			corrupt(document)
+
+			require.Error(t, validateAgainst(schema, document, "$"))
+		})
+	}
 }

@@ -1,7 +1,10 @@
 package gcp
 
 import (
+	"cmp"
 	"context"
+	"regexp"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -106,30 +109,182 @@ func TestQueryPublishesBothPricesAndAnExplicitlyUnavailableRisk(t *testing.T) {
 	}
 }
 
+// TestQueryAppliesEveryNeutralFilter derives every filter value from the loaded
+// snapshot. The catalogue is refreshed weekly by PR, so a hardcoded machine name
+// or price ceiling eventually fails on a price rise rather than on a defect.
+// Each case compares the filtered answer against the subset computed here, so a
+// filter that stops being applied returns extra candidates and fails.
 func TestQueryAppliesEveryNeutralFilter(t *testing.T) {
 	t.Parallel()
 
-	ceiling, err := cloud.ParseMoney("0.05")
-	require.NoError(t, err)
+	provider := newTestProvider(t)
+	all := queryCandidates(t, provider, &cloud.Query{OS: cloud.OSLinux})
+	require.NotEmpty(t, all)
 
-	result, err := newTestProvider(t).Query(context.Background(), &cloud.Query{
-		OS:             cloud.OSLinux,
-		Architecture:   cloud.ArchitectureARM64,
-		MachinePattern: `^c4a-`,
-		MaxPrice:       &ceiling,
-		MinVCPU:        2,
-		MinMemoryGiB:   4,
-	})
-	require.NoError(t, err)
-	require.NotEmpty(t, result.Candidates)
+	architecture := all[0].Machine.Architecture
+	series := SeriesOf(all[len(all)/2].Machine.ID)
+	ceiling := lowerMedianPrice(all)
+	minVCPU := upperMedian(valuesOf(all, func(c *cloud.Candidate) int { return c.Machine.VCPU }))
+	minMemory := upperMedian(valuesOf(all, func(c *cloud.Candidate) float64 { return c.Machine.MemoryGiB }))
 
-	for _, candidate := range result.Candidates {
-		assert.Equal(t, cloud.ArchitectureARM64, candidate.Machine.Architecture)
-		assert.Regexp(t, `^c4a-`, string(candidate.Machine.ID))
-		assert.GreaterOrEqual(t, candidate.Machine.VCPU, 2)
-		assert.GreaterOrEqual(t, candidate.Machine.MemoryGiB, 4.0)
-		assert.LessOrEqual(t, candidate.Spot.Amount.Nanos(), ceiling.Nanos())
+	for name, tc := range map[string]struct {
+		query *cloud.Query
+		keep  func(*cloud.Candidate) bool
+	}{
+		"architecture": {
+			query: &cloud.Query{OS: cloud.OSLinux, Architecture: architecture},
+			keep:  func(c *cloud.Candidate) bool { return c.Machine.Architecture == architecture },
+		},
+		"machine pattern": {
+			query: &cloud.Query{OS: cloud.OSLinux, MachinePattern: `^` + regexp.QuoteMeta(series) + `-`},
+			keep:  func(c *cloud.Candidate) bool { return SeriesOf(c.Machine.ID) == series },
+		},
+		"budget": {
+			query: &cloud.Query{OS: cloud.OSLinux, MaxPrice: &ceiling},
+			keep:  func(c *cloud.Candidate) bool { return c.Spot.Amount.Nanos() <= ceiling.Nanos() },
+		},
+		"minimum vcpu": {
+			query: &cloud.Query{OS: cloud.OSLinux, MinVCPU: minVCPU},
+			keep:  func(c *cloud.Candidate) bool { return c.Machine.VCPU >= minVCPU },
+		},
+		"minimum memory": {
+			query: &cloud.Query{OS: cloud.OSLinux, MinMemoryGiB: minMemory},
+			keep:  func(c *cloud.Candidate) bool { return c.Machine.MemoryGiB >= minMemory },
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			want := keptCandidates(all, tc.keep)
+			require.NotEmpty(t, want)
+			require.Less(t, len(want), len(all), "a filter that excludes nothing proves nothing")
+
+			assert.Equal(t, machineIDs(want), machineIDs(queryCandidates(t, provider, tc.query)))
+		})
 	}
+}
+
+// TestQuerySortsDescendingForEveryKeyItServes proves the descending branch
+// reverses the comparator instead of being dropped: an ascending answer would
+// leave the last candidate on top.
+func TestQuerySortsDescendingForEveryKeyItServes(t *testing.T) {
+	t.Parallel()
+
+	provider := newTestProvider(t)
+
+	for key, before := range map[cloud.SortKey]func(left, right *cloud.Candidate) bool{
+		cloud.SortByPrice: func(left, right *cloud.Candidate) bool {
+			return left.Spot.Amount.Nanos() < right.Spot.Amount.Nanos()
+		},
+		cloud.SortBySavings: func(left, right *cloud.Candidate) bool { return savingsOf(left) < savingsOf(right) },
+		cloud.SortByMachine: func(left, right *cloud.Candidate) bool { return left.Machine.ID < right.Machine.ID },
+	} {
+		t.Run(string(key), func(t *testing.T) {
+			t.Parallel()
+
+			ascending := queryCandidates(t, provider, &cloud.Query{OS: cloud.OSLinux, Sort: cloud.SortOrder{Key: key}})
+			descending := queryCandidates(t, provider, &cloud.Query{
+				OS:   cloud.OSLinux,
+				Sort: cloud.SortOrder{Key: key, Descending: true},
+			})
+
+			require.Len(t, descending, len(ascending))
+			require.True(t, before(&ascending[0], &ascending[len(ascending)-1]),
+				"the snapshot must hold two different values or the direction proves nothing")
+
+			for i := 1; i < len(ascending); i++ {
+				assert.False(t, before(&ascending[i], &ascending[i-1]), "ascending fell at %d", i)
+				assert.False(t, before(&descending[i-1], &descending[i]), "descending rose at %d", i)
+			}
+		})
+	}
+}
+
+// The snapshot covers one region, so a descending region sort has nothing to
+// reverse. What it must still do is answer with the same candidates rather than
+// drop or duplicate any.
+func TestADescendingRegionSortLeavesASingleRegionSnapshotIntact(t *testing.T) {
+	t.Parallel()
+
+	provider := newTestProvider(t)
+
+	ascending := queryCandidates(t, provider, &cloud.Query{
+		OS: cloud.OSLinux, Sort: cloud.SortOrder{Key: cloud.SortByRegion},
+	})
+	descending := queryCandidates(t, provider, &cloud.Query{
+		OS: cloud.OSLinux, Sort: cloud.SortOrder{Key: cloud.SortByRegion, Descending: true},
+	})
+
+	require.NotEmpty(t, ascending)
+	assert.Equal(t, ascending, descending)
+}
+
+func queryCandidates(t *testing.T, provider *Provider, query *cloud.Query) []cloud.Candidate {
+	t.Helper()
+
+	result, err := provider.Query(context.Background(), query)
+	require.NoError(t, err)
+
+	return result.Candidates
+}
+
+func keptCandidates(candidates []cloud.Candidate, keep func(*cloud.Candidate) bool) []cloud.Candidate {
+	kept := make([]cloud.Candidate, 0, len(candidates))
+	for i := range candidates {
+		if keep(&candidates[i]) {
+			kept = append(kept, candidates[i])
+		}
+	}
+
+	return kept
+}
+
+func machineIDs(candidates []cloud.Candidate) []cloud.MachineID {
+	ids := make([]cloud.MachineID, 0, len(candidates))
+	for i := range candidates {
+		ids = append(ids, candidates[i].Machine.ID)
+	}
+
+	return ids
+}
+
+func savingsOf(candidate *cloud.Candidate) int {
+	if candidate.SavingsPercent == nil {
+		return 0
+	}
+
+	return *candidate.SavingsPercent
+}
+
+func valuesOf[T cmp.Ordered](candidates []cloud.Candidate, of func(*cloud.Candidate) T) []T {
+	values := make([]T, 0, len(candidates))
+	for i := range candidates {
+		values = append(values, of(&candidates[i]))
+	}
+
+	return values
+}
+
+// upperMedian is the filter value for a floor: at least one snapshot value sits
+// below it and at least one meets it, whatever the refresh does to the numbers.
+func upperMedian[T cmp.Ordered](values []T) T {
+	slices.Sort(values)
+	distinct := slices.Compact(values)
+
+	return distinct[len(distinct)/2]
+}
+
+// lowerMedianPrice is the mirror image for a ceiling: at least one price is at
+// or below it and at least one is above.
+func lowerMedianPrice(candidates []cloud.Candidate) cloud.Money {
+	prices := make([]cloud.Money, 0, len(candidates))
+	for i := range candidates {
+		prices = append(prices, candidates[i].Spot.Amount)
+	}
+	slices.SortFunc(prices, func(left, right cloud.Money) int { return cmp.Compare(left.Nanos(), right.Nanos()) })
+	distinct := slices.Compact(prices)
+
+	return distinct[(len(distinct)-1)/2]
 }
 
 func TestQueryReturnsNothingForARegionTheSnapshotDoesNotCover(t *testing.T) {

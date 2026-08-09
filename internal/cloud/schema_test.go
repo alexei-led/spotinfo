@@ -107,6 +107,41 @@ func TestRiskDTOPublishesAbsenceAsNull(t *testing.T) {
 	}`, string(encoded))
 }
 
+// This is the last gate before a payload reaches a client, and the one place a
+// cloud's silence could still be published as a number. An observation carrying
+// a stale figure under a non-available status must publish the status alone.
+func TestRiskDTOPublishesNoFigureWhenRiskIsNotAvailable(t *testing.T) {
+	t.Parallel()
+
+	observedAt := time.Date(2026, time.August, 1, 10, 30, 0, 0, time.UTC)
+	low, high := 0.0, 5.0
+
+	published, err := riskDTO(&RiskObservation{
+		ObservedAt: &observedAt,
+		MinPercent: &low,
+		MaxPercent: &high,
+		Window:     &HistoryWindow{Days: 30},
+		Status:     RiskStatusUnavailable,
+		Kind:       RiskKindInterruptionFrequencyRange,
+		Label:      "<5%",
+		SourceURL:  "https://example.invalid/advisor.json",
+	})
+	require.NoError(t, err)
+
+	encoded, err := json.Marshal(published)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{
+		"status": "unavailable",
+		"kind": null,
+		"label": null,
+		"min_percent": null,
+		"max_percent": null,
+		"window_days": null,
+		"source_url": null,
+		"observed_at": null
+	}`, string(encoded))
+}
+
 func TestRiskDTOPublishesEveryAvailableField(t *testing.T) {
 	t.Parallel()
 

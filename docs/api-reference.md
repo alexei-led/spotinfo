@@ -269,13 +269,13 @@ This tool searches the embedded AWS Spot Instance data and returns matching inst
         },
         "data_source": {
           "type": "string",
-          "description": "Source of the data",
-          "enum": ["embedded"]
+          "description": "Where the answer came from: the embedded snapshot, or a live AWS API call",
+          "enum": ["embedded", "aws"]
         },
         "data_freshness": {
           "type": "string",
-          "description": "Freshness indicator for the data",
-          "enum": ["current"]
+          "description": "Freshness the source can honestly claim, derived from it rather than asserted",
+          "enum": ["embedded-snapshot", "live"]
         }
       },
       "required": [
@@ -359,7 +359,7 @@ This tool searches the embedded AWS Spot Instance data and returns matching inst
     "regions_searched": ["us-east-1"],
     "query_time_ms": 45,
     "data_source": "embedded",
-    "data_freshness": "current"
+    "data_freshness": "embedded-snapshot"
   }
 }
 ```
@@ -499,9 +499,10 @@ them.
   region of the selected cloud. (The CLI differs: its `--region` default is the AWS region
   name `us-east-1`, which on a non-AWS cloud is treated as unset and expands to `all`.)
 - `cost` ranks by price alone and makes **no** interruption claim. `web`, `ci` and `batch`
-  cap interruption frequency at 5%, 16% and 22% respectively and require a cloud that
-  publishes risk; asking for one on a cloud that does not returns
-  `UNSUPPORTED_CAPABILITY` before acquisition.
+  admit only a risk bucket whose **maximum** is at most 5%, 16% and 22% respectively. On
+  AWS the reachable Advisor buckets make those effective ceilings 5%, 15% and 20%. All
+  three require a cloud that publishes risk; asking for one on a cloud that does not
+  returns `UNSUPPORTED_CAPABILITY` before acquisition.
 
 **GCP capability constraints:**
 - Region: `us-central1` only. Any other explicit region returns `NO_CANDIDATES`.
@@ -678,7 +679,7 @@ When no instances match the search criteria, the tool returns a successful respo
     "regions_searched": ["us-east-1"],
     "query_time_ms": 12,
     "data_source": "embedded",
-    "data_freshness": "current"
+    "data_freshness": "embedded-snapshot"
   }
 }
 ```

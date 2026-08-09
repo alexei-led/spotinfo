@@ -5,8 +5,11 @@
 //
 // It reads no credentials and writes nothing until every source has been
 // fetched, parsed, joined, and validated against the contract and the previous
-// coverage floor. A failed run therefore leaves the reviewed snapshot exactly as
-// it was.
+// coverage floor, so a failure before that point leaves the reviewed snapshot
+// exactly as it was. The payload and the manifest are then two separate atomic
+// renames: a failure between them leaves the new payload under the old
+// manifest, which fails closed at load and in `make verify-data` rather than
+// being served.
 package main
 
 import (
@@ -17,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -116,8 +120,13 @@ func run(ctx context.Context, dataDir string) error {
 		return err
 	}
 
+	floor, err := coverageFloor(dataDir, contract)
+	if err != nil {
+		return err
+	}
+
 	sources := append(priceSources, specSources...) //nolint:gocritic // a new slice is intended.
-	manifest := newManifest(contract, catalog, payload, sources, coverageFloor(dataDir, contract))
+	manifest := newManifest(contract, catalog, payload, sources, floor)
 
 	if err := verify(contract, catalog, manifest, payload); err != nil {
 		return err
@@ -454,20 +463,30 @@ func newManifest(contract *snapshot.SourceContract, catalog *azure.Catalog, payl
 
 // coverageFloor keeps the reviewed floor of an existing manifest. Deriving it
 // from the data that just arrived would ratchet the gate into always passing;
-// the first run seeds it from the contracted minimum instead.
-func coverageFloor(dataDir string, contract *snapshot.SourceContract) snapshot.Coverage {
+// only a genuinely absent manifest — the first run — seeds it from the
+// contracted minimum. An unreadable or unparseable manifest is an error: a
+// reviewer's raised floor must never be replaced by the contract minimum
+// because the file it lives in broke.
+func coverageFloor(dataDir string, contract *snapshot.SourceContract) (snapshot.Coverage, error) {
 	data, err := os.ReadFile(filepath.Join(dataDir, manifestFile)) //nolint:gosec // the path is an operator-supplied data directory.
-	if err == nil {
-		if previous, parseErr := snapshot.ParseManifest(data); parseErr == nil {
-			return previous.MinRecords
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return snapshot.Coverage{}, fmt.Errorf("read azure manifest for its reviewed coverage floor: %w", err)
 		}
+
+		return snapshot.Coverage{
+			Regions:  contract.Thresholds.MinRegions,
+			Machines: contract.Thresholds.MinMachines,
+			Prices:   contract.Thresholds.MinRegions * contract.Thresholds.MinMachines * pricesPerMachine,
+		}, nil
 	}
 
-	return snapshot.Coverage{
-		Regions:  contract.Thresholds.MinRegions,
-		Machines: contract.Thresholds.MinMachines,
-		Prices:   contract.Thresholds.MinRegions * contract.Thresholds.MinMachines * pricesPerMachine,
+	previous, err := snapshot.ParseManifest(data)
+	if err != nil {
+		return snapshot.Coverage{}, fmt.Errorf("parse azure manifest for its reviewed coverage floor: %w", err)
 	}
+
+	return previous.MinRecords, nil
 }
 
 func verify(contract *snapshot.SourceContract, catalog *azure.Catalog,

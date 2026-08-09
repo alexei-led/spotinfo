@@ -3,6 +3,7 @@ package gcp
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -102,6 +103,57 @@ func TestParseRejectsAPageThatNoLongerMatchesItsContract(t *testing.T) {
 			require.ErrorIs(t, err, ErrSourceContract)
 		})
 	}
+}
+
+// TestAnUnreadableCellFailsTheParse pins the fail-closed half of the row rule.
+// A row that is not a machine is skipped, but a row that is one and cannot be
+// read must stop the refresh: widening the parser to accept it would publish a
+// specification or a price the source never stated.
+func TestAnUnreadableCellFailsTheParse(t *testing.T) {
+	t.Parallel()
+
+	for name, cells := range map[string]string{
+		"vcpu is not a number": `<td>c4-standard-2</td><td>two</td><td>7 GiB</td><td>$0.058121 / 1 hour</td>`,
+		"vcpu is zero":         `<td>c4-standard-2</td><td>0</td><td>7 GiB</td><td>$0.058121 / 1 hour</td>`,
+		"memory has no unit":   `<td>c4-standard-2</td><td>2</td><td>lots</td><td>$0.058121 / 1 hour</td>`,
+		"memory is zero":       `<td>c4-standard-2</td><td>2</td><td>0 GiB</td><td>$0.058121 / 1 hour</td>`,
+		"price is monthly":     `<td>c4-standard-2</td><td>2</td><td>7 GiB</td><td>$42.43 / 1 month</td>`,
+		"price is too precise": `<td>c4-standard-2</td><td>2</td><td>7 GiB</td><td>$0.0581210001 / 1 hour</td>`,
+		"price is zero":        `<td>c4-standard-2</td><td>2</td><td>7 GiB</td><td>$0 / 1 hour</td>`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := ParseSpotPage(strings.NewReader(spotPage(cells)), contractedRegion)
+			require.ErrorIs(t, err, ErrSourceContract)
+		})
+	}
+}
+
+func TestTheSamePageShapeParsesWhenEveryCellIsReadable(t *testing.T) {
+	t.Parallel()
+
+	rows, err := ParseSpotPage(strings.NewReader(spotPage(readableCells)), contractedRegion)
+	require.NoError(t, err)
+
+	require.Len(t, rows, 1)
+	assert.Equal(t, MachineRow{ID: "c4-standard-2", VCPU: 2, MemoryGiB: 7, Price: rows[0].Price}, rows[0])
+	assert.Equal(t, "0.058121000", rows[0].Price.String())
+}
+
+// readableCells is the row every case above mutates one cell of.
+const readableCells = `<td>c4-standard-2</td><td>2</td><td>7 GiB</td><td>$0.058121 / 1 hour</td>`
+
+// spotPage renders a minimal Spot page in the shape the contracted source
+// publishes. The region selector precedes the table because that is what
+// attributes the table to a region.
+func spotPage(cells string) string {
+	return `<!doctype html><html><body>
+<div role="option" aria-selected="true" data-value="Iowa (us-central1)"></div>
+<table><thead><tr><th>` + headerMachineType + `</th><th>` + headerVCPU + `</th>` +
+		`<th>` + headerMemory + `</th><th>` + headerSpotPrice + `</th></tr></thead>
+<tbody><tr>` + cells + `</tr></tbody></table>
+</body></html>`
 }
 
 func TestParseRejectsARegionThePageDidNotRender(t *testing.T) {

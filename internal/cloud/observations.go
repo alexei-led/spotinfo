@@ -36,8 +36,8 @@ type Location struct {
 // read, when, and with which parser. Nothing synthesises these fields — an
 // unknown provenance stays empty rather than being invented.
 //
-// Ceiling: providers leave Result.Sources empty until manifest-backed snapshots
-// exist (#36); that task is what fills every field here from the sidecar manifest.
+// Every provider fills these from its sidecar manifest, and sourceDTOs refuses
+// to publish a v2 answer whose Result.Sources is empty or partial.
 type SourceRef struct {
 	FetchedAt     time.Time
 	ObservedAt    *time.Time

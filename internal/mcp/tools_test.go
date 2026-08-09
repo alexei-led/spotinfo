@@ -184,6 +184,50 @@ func TestToolParametersReachTheProviderQuery(t *testing.T) {
 	}, query.Placement)
 }
 
+// A server can be built with no registry — NewServer accepts Providers: nil and
+// still registers every tool. The v1 tools must report that as a failed result,
+// not dereference it: a panic inside a handler takes the stdio or SSE process
+// down for every connected client.
+func TestV1ToolsFailClosedWithoutARegistry(t *testing.T) {
+	t.Parallel()
+
+	for name, handle := range map[string]func(context.Context) (*mcp.CallToolResult, error){
+		"find_spot_instances": func(ctx context.Context) (*mcp.CallToolResult, error) {
+			return NewFindSpotInstancesTool(nil, testLogger()).Handle(ctx, createTestCallToolRequest(map[string]any{}))
+		},
+		"list_spot_regions": func(ctx context.Context) (*mcp.CallToolResult, error) {
+			return NewListSpotRegionsTool(nil, testLogger()).Handle(ctx, createTestCallToolRequest(map[string]any{}))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := handle(t.Context())
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.True(t, result.IsError, "a missing registry must be reported, not ignored")
+		})
+	}
+}
+
+// The capability gate runs before acquisition, so a provider that cannot answer
+// the request costs no I/O. Asserting the error alone would not prove that —
+// the stub records every call, so a zero call count is the proof.
+func TestV1ToolsRejectAnUnsupportedCapabilityBeforeAcquisition(t *testing.T) {
+	t.Parallel()
+
+	// The v1 query needs risk for its interruption column; an offline provider
+	// publishing none is the shape GCP and Azure have.
+	provider := &stubProvider{id: cloud.ProviderAWS, capabilities: offlineLinuxCapabilities()}
+	registry := newStubRegistry(provider)
+
+	result, err := NewFindSpotInstancesTool(registry, testLogger()).
+		Handle(t.Context(), createTestCallToolRequest(map[string]any{}))
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Zero(t, provider.callCount(), "the capability check must run before acquisition")
+}
+
 // A zero max_price_per_hour is the v1 "no ceiling" value, not a ceiling of zero.
 func TestZeroMaxPriceRequestsNoCeiling(t *testing.T) {
 	provider, registry := awsStub()

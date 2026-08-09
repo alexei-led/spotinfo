@@ -164,10 +164,17 @@ func RetailRequestURL(base string, region cloud.Region) (string, error) {
 	query.Set("api-version", RetailAPIVersion)
 	query.Set("currencyCode", string(cloud.CurrencyUSD))
 	query.Set("$filter", fmt.Sprintf("serviceName eq '%s' and armRegionName eq '%s' and priceType eq '%s'",
-		serviceVirtualMachines, region, priceTypeConsumption))
+		serviceVirtualMachines, odataLiteral(string(region)), priceTypeConsumption))
 	parsed.RawQuery = query.Encode()
 
 	return parsed.String(), nil
+}
+
+// odataLiteral escapes a value for an OData string literal. url.Values.Encode
+// protects the HTTP layer but not the filter grammar, so a region carrying a
+// quote would silently change which meters the sweep selects instead of failing.
+func odataLiteral(value string) string {
+	return strings.ReplaceAll(value, "'", "''")
 }
 
 // DecodeRetailPage reads one API response page.
@@ -378,9 +385,9 @@ func sortedKeys[V any](indexed map[priceKey]V) []priceKey {
 	return keys
 }
 
-// DecodePages reads a sequence of committed API pages, which is what the fixture
-// tests and the updater's pagination both produce.
-func DecodePages(pages [][]byte) ([]RetailItem, error) {
+// decodePages reads a sequence of committed API pages, the shape the fixture
+// tests use. The updater paginates itself and calls DecodeRetailPage per page.
+func decodePages(pages [][]byte) ([]RetailItem, error) {
 	var items []RetailItem
 
 	for _, data := range pages {

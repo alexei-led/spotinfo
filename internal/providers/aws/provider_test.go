@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -376,3 +377,172 @@ func TestSavingsOutsideTheValidRangeIsNotPublished(t *testing.T) {
 }
 
 func intPtr(value int) *int { return &value }
+
+// appliedOptions applies mapped legacy options to a fresh legacy config and
+// reads the result back by field name.
+//
+// getSpotSavingsConfig is unexported, so reflection is the only way to assert
+// the mapping from outside internal/spot — and it is worth asserting: every
+// find_spot_instances call now reaches the legacy client through legacyOptions,
+// where a dropped placement flag or a swapped sort key changes the answer
+// without failing anything.
+func appliedOptions(t *testing.T, opts []spot.GetSpotSavingsOption) map[string]any {
+	t.Helper()
+
+	require.NotEmpty(t, opts)
+
+	config := reflect.New(reflect.TypeOf(opts[0]).In(0).Elem())
+	for _, opt := range opts {
+		reflect.ValueOf(opt).Call([]reflect.Value{config})
+	}
+
+	fields := config.Elem()
+	applied := make(map[string]any, fields.NumField())
+	for i := range fields.NumField() {
+		field := fields.Field(i)
+		switch field.Kind() { //nolint:exhaustive // the config carries only these kinds.
+		case reflect.String:
+			applied[fields.Type().Field(i).Name] = field.String()
+		case reflect.Bool:
+			applied[fields.Type().Field(i).Name] = field.Bool()
+		case reflect.Int, reflect.Int64:
+			applied[fields.Type().Field(i).Name] = field.Int()
+		case reflect.Float64:
+			applied[fields.Type().Field(i).Name] = field.Float()
+		case reflect.Slice:
+			values := make([]string, 0, field.Len())
+			for j := range field.Len() {
+				values = append(values, field.Index(j).String())
+			}
+			applied[fields.Type().Field(i).Name] = values
+		default:
+			t.Fatalf("unhandled legacy config field kind %s", field.Kind())
+		}
+	}
+
+	return applied
+}
+
+// Every neutral sort key must reach the legacy client as its own ordering. A
+// swapped entry returns the whole answer in the wrong order and nothing else
+// notices; an unset key must keep the legacy default so existing AWS callers
+// see the order they always have.
+func TestNeutralSortKeysMapOntoTheLegacyOrdering(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		key  cloud.SortKey
+		want spot.SortBy
+	}{
+		{key: "", want: spot.SortByRange},
+		{key: cloud.SortByPrice, want: spot.SortByPrice},
+		{key: cloud.SortBySavings, want: spot.SortBySavings},
+		{key: cloud.SortByMachine, want: spot.SortByInstance},
+		{key: cloud.SortByRegion, want: spot.SortByRegion},
+		{key: cloud.SortByPlacementScore, want: spot.SortByScore},
+		{key: cloud.SortByRisk, want: spot.SortByRange},
+		{key: "not-a-sort-key", want: spot.SortByRange},
+	} {
+		t.Run(string(test.key), func(t *testing.T) {
+			t.Parallel()
+
+			query := linuxQuery()
+			query.Sort = cloud.SortOrder{Key: test.key, Descending: true}
+
+			applied := appliedOptions(t, legacyOptions(query))
+			assert.Equal(t, int64(test.want), applied["sortBy"])
+			assert.Equal(t, true, applied["sortDesc"])
+		})
+	}
+}
+
+// Placement is requested as one unit: enabling scores carries the zone choice
+// and the timeout, while a minimum score filters whatever scores arrived. A
+// disabled request must ask for no score work at all.
+func TestPlacementFlagsReachTheLegacyClientTogether(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name      string
+		placement cloud.PlacementRequest
+		want      map[string]any
+	}{
+		{
+			name:      "disabled",
+			placement: cloud.PlacementRequest{},
+			want: map[string]any{
+				"withScores": false, "singleAvailabilityZone": false,
+				"scoreTimeout": int64(0), "minScore": int64(0),
+			},
+		},
+		{
+			name:      "enabled in a single zone with a timeout",
+			placement: cloud.PlacementRequest{Enabled: true, SingleZone: true, Timeout: 3 * time.Second},
+			want: map[string]any{
+				"withScores": true, "singleAvailabilityZone": true,
+				"scoreTimeout": int64(3 * time.Second), "minScore": int64(0),
+			},
+		},
+		{
+			name:      "enabled across zones with no timeout",
+			placement: cloud.PlacementRequest{Enabled: true},
+			want: map[string]any{
+				"withScores": true, "singleAvailabilityZone": false,
+				"scoreTimeout": int64(0), "minScore": int64(0),
+			},
+		},
+		{
+			name:      "minimum score without enrichment",
+			placement: cloud.PlacementRequest{MinScore: 7},
+			want: map[string]any{
+				"withScores": false, "singleAvailabilityZone": false,
+				"scoreTimeout": int64(0), "minScore": int64(7),
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			query := linuxQuery()
+			query.Placement = test.placement
+
+			applied := appliedOptions(t, legacyOptions(query))
+			for field, want := range test.want {
+				assert.Equal(t, want, applied[field], field)
+			}
+		})
+	}
+}
+
+// The resource and price filters are a coarse pre-filter, but they must still
+// arrive: an omitted one makes the legacy client return everything and leaves
+// accepts() to carry a load it was never measured against. A zero value asks
+// for no filter at all, which is what the legacy client treats as unset.
+func TestResourceFiltersReachTheLegacyClientOnlyWhenRequested(t *testing.T) {
+	t.Parallel()
+
+	ceiling, err := cloud.MoneyFromFloat(0.25)
+	require.NoError(t, err)
+
+	query := linuxQuery()
+	query.MachinePattern = "^m6i"
+	query.MinVCPU = 4
+	query.MinMemoryGiB = 15.5
+	query.MaxPrice = &ceiling
+
+	applied := appliedOptions(t, legacyOptions(query))
+	assert.Equal(t, "^m6i", applied["pattern"])
+	assert.Equal(t, int64(4), applied["cpu"])
+	// Whole GiB: the legacy client compares integers, so 15.5 must floor rather
+	// than round up and exclude a machine that satisfies the neutral minimum.
+	assert.Equal(t, int64(15), applied["memory"])
+	assert.InDelta(t, 0.25, applied["maxPrice"], 1e-9)
+	assert.Equal(t, []string{"us-east-1"}, applied["regions"])
+	assert.Equal(t, string(cloud.OSLinux), applied["instanceOS"])
+
+	unfiltered := appliedOptions(t, legacyOptions(linuxQuery()))
+	assert.Equal(t, "", unfiltered["pattern"])
+	assert.Equal(t, int64(0), unfiltered["cpu"])
+	assert.Equal(t, int64(0), unfiltered["memory"])
+	assert.InDelta(t, 0.0, unfiltered["maxPrice"], 1e-9)
+}

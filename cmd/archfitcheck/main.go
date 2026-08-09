@@ -26,18 +26,17 @@ const (
 	severityCritical = "critical"
 	severityHigh     = "high"
 
-	// The archfit statuses that close a finding. Task 4's critical finding must
-	// never reach statusWaived or statusBaselined.
-	statusFixed     = "fixed"
-	statusResolved  = "resolved"
-	statusWaived    = "waived"
-	statusBaselined = "baselined"
+	// The archfit statuses that close a finding.
+	statusFixed    = "fixed"
+	statusResolved = "resolved"
 )
 
-// resolvedStatuses are the finding statuses this gate treats as closed. Every
-// other status — including one archfit adds later — counts as open, so a new
-// status cannot silently hide a critical finding.
-var resolvedStatuses = []string{statusFixed, statusResolved, statusWaived, statusBaselined}
+// resolvedStatuses are the finding statuses this gate treats as closed: a
+// finding is closed by being fixed, not by being annotated. Every other status
+// — waived, baselined, and any archfit adds later — counts as open, so editing
+// one status cannot turn the architecture gate green on a critical finding.
+// That bypass is exactly what this command exists to close for `archfit --gate`.
+var resolvedStatuses = []string{statusFixed, statusResolved}
 
 // report is the slice of the archfit report this gate reads. Unknown fields are
 // ignored: the gate must keep working across archfit releases that add them.

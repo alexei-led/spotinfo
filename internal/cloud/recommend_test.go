@@ -358,6 +358,11 @@ func TestRankerReappliesEveryConstraint(t *testing.T) {
 			mutate:  func(r *RecommendRequest) { r.Machine = "^keep\\." },
 			dropped: fixture{Region: "us-east-1", Machine: "drop.me", Price: "0.001", VCPU: 2, MemoryGiB: 4},
 		},
+		{
+			name:    "region",
+			mutate:  func(r *RecommendRequest) { r.Regions = []Region{"us-east-1"} },
+			dropped: fixture{Region: "eu-west-1", Machine: "drop.me", Price: "0.001", VCPU: 2, MemoryGiB: 4},
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -370,6 +375,96 @@ func TestRankerReappliesEveryConstraint(t *testing.T) {
 			assert.Equal(t, []string{"keep.me"}, machines(report))
 		})
 	}
+}
+
+// "all" means every region the provider publishes, which is what a non-AWS
+// recommend request sends by default. The re-check must not turn that into a
+// filter that matches nothing.
+func TestRegionAllKeepsEveryRegion(t *testing.T) {
+	t.Parallel()
+
+	report, err := Recommend(t.Context(), riskyProvider(candidatesOf(
+		fixture{Region: "us-east-1", Machine: "east", Price: "0.030", VCPU: 2, MemoryGiB: 4},
+		fixture{Region: "eu-west-1", Machine: "west", Price: "0.020", VCPU: 2, MemoryGiB: 4},
+	)...), baseRequest())
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"east", "west"}, machines(report))
+}
+
+func TestAcceptsRegion(t *testing.T) {
+	t.Parallel()
+
+	for name, test := range map[string]struct {
+		requested []Region
+		want      bool
+	}{
+		"named":                {requested: []Region{"us-east-1"}, want: true},
+		"one of several named": {requested: []Region{"eu-west-1", "us-east-1"}, want: true},
+		"not named":            {requested: []Region{"eu-west-1"}, want: false},
+		"all":                  {requested: []Region{RegionAll}, want: true},
+		// Validate rejects an empty list before ranking; the helper still treats
+		// it as "no filter" so it cannot silently drop everything on its own.
+		"empty": {requested: nil, want: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, test.want, acceptsRegion("us-east-1", test.requested))
+		})
+	}
+}
+
+// The workload ceilings are AWS Spot Advisor bucket boundaries. A provider
+// publishing some other measurement is not comparable against them, so a
+// risk-capped policy must drop it rather than rank a preemption rate as if it
+// were an interruption frequency. The cost policy caps nothing and keeps it.
+func TestAcceptsRiskRequiresAComparableKind(t *testing.T) {
+	t.Parallel()
+
+	withKind := func(kind RiskKind) *Candidate {
+		low, high := 0.0, 1.0
+		candidate := fixture{Region: "us-east-1", Machine: "m", Price: "0.010", VCPU: 2, MemoryGiB: 4}.build()
+		candidate.Risk = RiskObservation{
+			MinPercent: &low, MaxPercent: &high, Status: RiskStatusAvailable,
+			Kind: kind, Label: "1%", Window: &HistoryWindow{Days: 30},
+		}
+
+		return &candidate
+	}
+
+	for _, workload := range []Workload{WorkloadWeb, WorkloadCI, WorkloadBatch} {
+		t.Run(string(workload), func(t *testing.T) {
+			t.Parallel()
+
+			ceiling := workload.maxInterruptionPercent()
+			assert.True(t, acceptsRisk(withKind(RiskKindInterruptionFrequencyRange), workload, ceiling))
+			assert.False(t, acceptsRisk(withKind("preemption_rate"), workload, ceiling),
+				"a preemption rate is not an AWS interruption bucket")
+			assert.False(t, acceptsRisk(withKind(""), workload, ceiling))
+		})
+	}
+
+	assert.True(t, acceptsRisk(withKind("preemption_rate"), WorkloadCost, 0),
+		"the cost policy caps nothing, so no kind is compared")
+}
+
+// A risk-capped request over a provider whose only risk figure is of an
+// incomparable kind has no answer, and must say so rather than rank it.
+func TestRiskCappedWorkloadDropsAnIncomparableRiskKind(t *testing.T) {
+	t.Parallel()
+
+	low, high := 0.0, 1.0
+	incomparable := fixture{Region: "us-east-1", Machine: "other-kind", Price: "0.010", VCPU: 2, MemoryGiB: 4}.build()
+	incomparable.Risk = RiskObservation{
+		MinPercent: &low, MaxPercent: &high, Status: RiskStatusAvailable,
+		Kind: "preemption_rate", Label: "1%", Window: &HistoryWindow{Days: 30},
+	}
+
+	request := baseRequest()
+	request.Workload = WorkloadWeb
+
+	_, err := Recommend(t.Context(), riskyProvider(incomparable), request)
+	require.ErrorIs(t, err, ErrNoCandidates)
 }
 
 // A machine sitting exactly on both minimums qualifies: the bounds are

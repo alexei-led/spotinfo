@@ -7,6 +7,7 @@
   },
   "description": "Recommend Spot machines from committed multi-cloud price data. Returns a spotinfo.recommend/v2 payload with explicit risk availability per cloud.",
   "inputSchema": {
+    "additionalProperties": false,
     "properties": {
       "architecture": {
         "description": "Required processor architecture",
@@ -42,7 +43,7 @@
       "min_vcpu": {
         "description": "Required minimum vCPU cores",
         "minimum": 1,
-        "type": "number"
+        "type": "integer"
       },
       "os": {
         "default": "linux",
@@ -68,7 +69,7 @@
         "description": "Maximum recommendations to return",
         "maximum": 50,
         "minimum": 1,
-        "type": "number"
+        "type": "integer"
       },
       "workload": {
         "default": "cost",

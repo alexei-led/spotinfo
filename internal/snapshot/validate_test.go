@@ -43,6 +43,18 @@ func record(t *testing.T, region cloud.Region, machine cloud.MachineID, amount s
 	}
 }
 
+func withClass(priced PriceRecord, class cloud.PriceClass) PriceRecord {
+	priced.Class = class
+
+	return priced
+}
+
+func withOS(priced PriceRecord, instanceOS cloud.OperatingSystem) PriceRecord {
+	priced.OS = instanceOS
+
+	return priced
+}
+
 func TestValidatePricesAcceptsDistinctPricedRecords(t *testing.T) {
 	t.Parallel()
 
@@ -105,6 +117,24 @@ func TestValidatePricesFailsClosed(t *testing.T) {
 				record(t, "us-central1", "n2-standard-2", "0.0299"),
 			},
 			wantErr: ErrDuplicateRecord,
+		},
+		{
+			name: "unset price class",
+			// The class is part of a price's identity. A parser that leaves it at
+			// its zero value collapses a machine's spot and on-demand amounts into
+			// one key, which defeats the duplicate check instead of tripping it.
+			records: []PriceRecord{withClass(record(t, "us-central1", "n2-standard-2", "0.0212"), "")},
+			wantErr: ErrInvalidManifest,
+		},
+		{
+			name:    "unknown price class",
+			records: []PriceRecord{withClass(record(t, "us-central1", "n2-standard-2", "0.0212"), "preemptible")},
+			wantErr: ErrInvalidManifest,
+		},
+		{
+			name:    "unknown operating system",
+			records: []PriceRecord{withOS(record(t, "us-central1", "n2-standard-2", "0.0212"), "plan9")},
+			wantErr: ErrInvalidManifest,
 		},
 		{
 			name:    "coverage below the manifest floor",

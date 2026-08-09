@@ -34,7 +34,7 @@ func fixtureItems(t *testing.T, names ...string) []RetailItem {
 		pages = append(pages, readFixture(t, name))
 	}
 
-	items, err := DecodePages(pages)
+	items, err := decodePages(pages)
 	require.NoError(t, err)
 
 	return items
@@ -239,6 +239,18 @@ func TestRequestURLCarriesTheContractedFilter(t *testing.T) {
 	} {
 		assert.Contains(t, target, fragment)
 	}
+}
+
+// url.Values.Encode protects the HTTP layer, not the OData filter grammar. An
+// unescaped quote in a region name would end the string literal early and
+// silently select a different set of meters instead of failing.
+func TestRequestURLEscapesAQuoteInTheRegionName(t *testing.T) {
+	t.Parallel()
+
+	target, err := RetailRequestURL("https://prices.azure.com/api/retail/prices", "west'europe")
+	require.NoError(t, err)
+
+	assert.Contains(t, target, "armRegionName+eq+%27west%27%27europe%27")
 }
 
 func TestMalformedResponseIsRejected(t *testing.T) {

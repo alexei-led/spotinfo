@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"slices"
 	"sort"
 	"strings"
@@ -266,8 +267,11 @@ func neutralRecommendRequest(ctx *cli.Context, id cloud.ProviderID, workload clo
 		return nil, err
 	}
 
+	// NaN is not caught by `budget <= 0` — every comparison against it is false,
+	// so an unchecked NaN would skip both this guard and the conversion below and
+	// silently drop the caller's price ceiling.
 	budget := ctx.Float64(flagBudget)
-	if ctx.IsSet(flagBudget) && budget <= 0 {
+	if ctx.IsSet(flagBudget) && (math.IsNaN(budget) || budget <= 0) {
 		return nil, fmt.Errorf("%w: budget must be a positive USD machine-hour price", cloud.ErrInvalidArgument)
 	}
 

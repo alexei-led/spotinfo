@@ -45,14 +45,14 @@ jobs:
     - name: Run golangci-lint
       run: make lint
 
-    # Pinned: an archfit release must not change the verdict on its own.
-    # GitNexus stays a review-only tool and is deliberately not installed here.
-    - name: Install archfit
-      run: go install github.com/alexei-led/archfit/cmd/archfit@v1.6.0
-
     # Full gate: package boundaries plus finding severity. archfit's own verdict
     # stays "pass" while a Critical Balanced-Coupling advisory stands, so
     # cmd/archfitcheck fails the build on any open Critical or High finding.
+    #
+    # The target installs archfit itself at the version ARCHFIT_VERSION pins, so
+    # CI and a developer's machine gate on the same tool. A second literal here
+    # would be a pin that can drift from the one the Makefile applies.
+    # GitNexus stays a review-only tool and is deliberately not installed.
     - name: Verify architecture
       run: make verify-architecture
 

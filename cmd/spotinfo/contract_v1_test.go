@@ -43,20 +43,33 @@ func contractAdvices() []spot.Advice {
 	}
 }
 
-func TestAWSRootJSONMatchesRecordedV1Contract(t *testing.T) {
-	client := newMockspotClient(t)
-	client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return(contractAdvices(), nil).Once()
+// Every rendering is part of the contract, not just JSON. The interruption
+// column exists only in the human formats, so pinning JSON alone would let it
+// be renamed or dropped without a single test failing.
+func TestAWSRootOutputMatchesRecordedV1Contract(t *testing.T) {
+	for format, golden := range map[string]string{
+		"json":   "aws-root-v1.json",
+		"table":  "aws-root-v1.table.txt",
+		"text":   "aws-root-v1.text.txt",
+		"csv":    "aws-root-v1.csv",
+		"number": "aws-root-v1.number.txt",
+	} {
+		t.Run(format, func(t *testing.T) {
+			client := newMockspotClient(t)
+			client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return(contractAdvices(), nil).Once()
 
-	var output bytes.Buffer
-	app := newSpotinfoApp(
-		func(ctx *cli.Context) error {
-			return execMainCmd(ctx, context.Background(), awsOnlyRegistry(), client, &output)
-		},
-		func(*cli.Context) error { return nil },
-	)
+			var output bytes.Buffer
+			app := newSpotinfoApp(
+				func(ctx *cli.Context) error {
+					return execMainCmd(ctx, context.Background(), awsOnlyRegistry(), client, &output)
+				},
+				func(*cli.Context) error { return nil },
+			)
 
-	require.NoError(t, app.Run([]string{"spotinfo", "--region", "all", "--output", "json"}))
-	assertGolden(t, "aws-root-v1.json", output.Bytes())
+			require.NoError(t, app.Run([]string{"spotinfo", "--region", "all", "--output", format}))
+			assertGolden(t, golden, output.Bytes())
+		})
+	}
 }
 
 func TestAWSRecommendJSONMatchesRecordedV1Contract(t *testing.T) {
@@ -78,12 +91,17 @@ func TestAWSRecommendJSONMatchesRecordedV1Contract(t *testing.T) {
 	assertGolden(t, "aws-recommend-v1.json", output.Bytes())
 }
 
+// assertGolden compares against a recorded contract file. A regeneration always
+// fails the run: rewriting the file and then comparing it to itself would let a
+// job that happens to set UPDATE_GOLDEN report a client-visible contract change
+// as a pass.
 func assertGolden(t *testing.T, name string, actual []byte) {
 	t.Helper()
 
 	path := filepath.Join("testdata", name)
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
 		require.NoError(t, os.WriteFile(path, actual, 0o600))
+		t.Fatalf("%s regenerated; review the diff and re-run without UPDATE_GOLDEN", name)
 	}
 
 	expected, err := os.ReadFile(path)

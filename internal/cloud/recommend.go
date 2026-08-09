@@ -49,6 +49,12 @@ const (
 	rationaleWorkloadCapMetFormat = "WORKLOAD_%s_CAP_MET"
 )
 
+// interruptionCappableKinds are the risk kinds the workload ceilings above are
+// expressed in. Only a kind listed here may be compared against them; every
+// other measurement is treated as unrankable under a risk-capped policy, the
+// same as no measurement at all.
+var interruptionCappableKinds = []RiskKind{RiskKindInterruptionFrequencyRange}
+
 // rankingPolicy is the ordered, canonical v2 ranking criteria. There is no
 // interruption term: the cost policy is risk-free, and the risk-aware policies
 // express risk as a filter rather than as a ranking factor, so one ordering
@@ -345,19 +351,41 @@ func accepts(candidate *Candidate, request *RecommendRequest, pattern *regexp.Re
 		return false
 	case pattern != nil && !pattern.MatchString(string(candidate.Machine.ID)):
 		return false
+	case !acceptsRegion(candidate.Location.Region, request.Regions):
+		return false
 	}
 
 	return acceptsRisk(candidate, request.Workload, maxInterruption)
 }
 
+// acceptsRegion re-applies the region filter. An empty list and RegionAll both
+// mean "no filter"; anything else must name the candidate's own region, so a
+// provider that mishandles RegionAll cannot return a region nobody asked for.
+func acceptsRegion(region Region, requested []Region) bool {
+	if len(requested) == 0 || slices.Contains(requested, RegionAll) {
+		return true
+	}
+
+	return slices.Contains(requested, region)
+}
+
 // acceptsRisk applies the workload's interruption ceiling. A risk-aware policy
 // drops a candidate whose risk is unknown: ranking it would present an
 // unmeasured machine as if it had cleared the cap.
+//
+// The kind is checked too, not just the status. The ceilings are AWS Spot
+// Advisor bucket boundaries, so a provider publishing some other measurement —
+// a GCP preemption rate, an Azure eviction rate — would be filtered against
+// thresholds that mean nothing for it. Comparability is declared here, once,
+// rather than assumed of every kind that happens to carry a percentage.
 func acceptsRisk(candidate *Candidate, workload Workload, maxInterruption float64) bool {
 	if !workload.RequiresRisk() {
 		return true
 	}
 	if candidate.Risk.Status != RiskStatusAvailable || candidate.Risk.MaxPercent == nil {
+		return false
+	}
+	if !slices.Contains(interruptionCappableKinds, candidate.Risk.Kind) {
 		return false
 	}
 

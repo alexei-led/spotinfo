@@ -7,7 +7,11 @@ import (
 	"maps"
 	"slices"
 	"sync"
+	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"spotinfo/internal/cloud"
 	awsprovider "spotinfo/internal/providers/aws"
@@ -64,6 +68,9 @@ func (p *stubProvider) callCount() int {
 
 // awsCapabilities mirrors the production AWS adapter, so a tool gated against
 // this stub is gated against what the binary actually declares.
+// TestStubAWSCapabilitiesMatchTheAdapter keeps the copy honest — without it the
+// adapter could drop a capability and every tool test here would keep passing
+// while the binary started refusing the request.
 func awsCapabilities() cloud.Capabilities {
 	return cloud.Capabilities{
 		OperatingSystems: []cloud.OperatingSystem{cloud.OSLinux, cloud.OSWindows},
@@ -305,3 +312,29 @@ func newEmbeddedRegistry() *stubRegistry {
 
 // errAcquisition is the acquisition failure used where the message does not matter.
 var errAcquisition = errors.New("acquisition failed")
+
+// Every capability gate in this package is asserted against awsCapabilities().
+// If the real adapter and this fixture drift, those gates prove nothing about
+// the binary — a capability dropped upstream would start returning
+// UNSUPPORTED_CAPABILITY to callers while every test here stayed green.
+func TestStubAWSCapabilitiesMatchTheAdapter(t *testing.T) {
+	t.Parallel()
+
+	provider, err := awsprovider.New(&noopSavingsClient{}, noopArchitectures{})
+	require.NoError(t, err)
+
+	assert.Equal(t, provider.Capabilities(), awsCapabilities())
+}
+
+// noopSavingsClient and noopArchitectures build the real AWS adapter without
+// touching AWS or the embedded snapshot; only its declared capabilities matter.
+type noopSavingsClient struct{}
+
+func (*noopSavingsClient) GetSpotSavings(context.Context, ...spot.GetSpotSavingsOption) ([]spot.Advice, error) {
+	return nil, nil
+}
+func (*noopSavingsClient) DataSource() string { return spot.DataSourceEmbedded }
+
+type noopArchitectures struct{}
+
+func (noopArchitectures) ArchitectureForInstance(string) (spot.Architecture, bool) { return "", false }

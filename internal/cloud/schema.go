@@ -226,7 +226,16 @@ func recommendationDTO(candidate *scored, workload Workload, rank int) (Recommen
 
 // riskDTO publishes a risk observation. An unmapped kind fails closed: emitting
 // a domain constant would publish a value outside the frozen enum.
+//
+// A status other than available publishes the status alone. This is the one
+// place the payload could contradict the rule that a cloud's silence must never
+// render as a number, so a stale percentage left on an unavailable observation
+// is dropped here rather than shipped to a consumer that would rank it.
 func riskDTO(risk *RiskObservation) (RiskDTO, error) {
+	if risk.Status != RiskStatusAvailable {
+		return RiskDTO{Status: risk.Status}, nil
+	}
+
 	published := RiskDTO{
 		Status:     risk.Status,
 		MinPercent: risk.MinPercent,

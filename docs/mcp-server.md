@@ -202,7 +202,7 @@ Once configured with Claude Desktop, you can ask natural language questions:
 > Azure eviction rates require a subscription, so all candidates show `risk: unavailable`
 > and only the `cost` workload applies.
 
-### Example 4: Infrastructure Planning
+### Example 5: Infrastructure Planning
 
 **Human**: I need instances with at least 16 vCPUs and 64GB RAM for machine learning workloads. What are my most reliable options under $1/hour?
 

@@ -1,6 +1,9 @@
 package azure
 
 import (
+	"cmp"
+	"regexp"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -176,27 +179,40 @@ func TestQueryFiltersTheCommittedCatalogue(t *testing.T) {
 	t.Run("machine pattern", func(t *testing.T) {
 		t.Parallel()
 
+		// The size comes from the snapshot: the catalogue is refreshed weekly by
+		// PR, and a hardcoded name fails the day Azure stops selling it. Every
+		// catalogued machine is priced somewhere, so the answer cannot be empty.
+		machine := provider.catalog.Machines[0].ID
+
 		result, err := provider.Query(ctx, &cloud.Query{
-			OS: cloud.OSLinux, MachinePattern: "^Standard_D2s_v5$", Regions: []cloud.Region{cloud.RegionAll},
+			OS:             cloud.OSLinux,
+			MachinePattern: "^" + regexp.QuoteMeta(string(machine)) + "$",
+			Regions:        []cloud.Region{cloud.RegionAll},
 		})
 		require.NoError(t, err)
 		require.NotEmpty(t, result.Candidates)
 
 		for i := range result.Candidates {
-			assert.Equal(t, cloud.MachineID("Standard_D2s_v5"), result.Candidates[i].Machine.ID)
+			assert.Equal(t, machine, result.Candidates[i].Machine.ID)
 		}
 	})
 
 	t.Run("budget", func(t *testing.T) {
 		t.Parallel()
 
-		ceiling, err := cloud.ParseMoney("0.02")
+		// The ceiling is the snapshot's own median spot price, so candidates sit
+		// on both sides of it whatever the weekly refresh does to the numbers.
+		unfiltered, err := provider.Query(ctx, &cloud.Query{OS: cloud.OSLinux, Regions: []cloud.Region{cloud.RegionAll}})
 		require.NoError(t, err)
+		ceiling := lowerMedianSpotPrice(unfiltered.Candidates)
 
 		result, err := provider.Query(ctx, &cloud.Query{
 			OS: cloud.OSLinux, MaxPrice: &ceiling, Regions: []cloud.Region{cloud.RegionAll},
 		})
 		require.NoError(t, err)
+		require.NotEmpty(t, result.Candidates)
+		require.Less(t, len(result.Candidates), len(unfiltered.Candidates),
+			"a ceiling that excludes nothing proves nothing")
 
 		for i := range result.Candidates {
 			assert.LessOrEqual(t, result.Candidates[i].Spot.Amount.Nanos(), ceiling.Nanos())
@@ -247,8 +263,54 @@ func TestQuerySortsByTheRequestedKey(t *testing.T) {
 	}
 }
 
+// TestQuerySortsDescendingForEveryKeyItServes proves the descending branch
+// reverses the comparator instead of being dropped: an ascending answer would
+// leave the last candidate on top.
+func TestQuerySortsDescendingForEveryKeyItServes(t *testing.T) {
+	t.Parallel()
+
+	provider := newTestProvider(t)
+
+	for key, before := range map[cloud.SortKey]func(left, right *cloud.Candidate) bool{
+		cloud.SortByPrice: func(left, right *cloud.Candidate) bool {
+			return left.Spot.Amount.Nanos() < right.Spot.Amount.Nanos()
+		},
+		cloud.SortBySavings: func(left, right *cloud.Candidate) bool { return savingsOf(left) < savingsOf(right) },
+		cloud.SortByMachine: func(left, right *cloud.Candidate) bool { return left.Machine.ID < right.Machine.ID },
+		cloud.SortByRegion: func(left, right *cloud.Candidate) bool {
+			return left.Location.Region < right.Location.Region
+		},
+	} {
+		t.Run(string(key), func(t *testing.T) {
+			t.Parallel()
+
+			ascending := queryCandidates(t, provider, &cloud.Query{
+				OS:      cloud.OSLinux,
+				Regions: []cloud.Region{cloud.RegionAll},
+				Sort:    cloud.SortOrder{Key: key},
+			})
+			descending := queryCandidates(t, provider, &cloud.Query{
+				OS:      cloud.OSLinux,
+				Regions: []cloud.Region{cloud.RegionAll},
+				Sort:    cloud.SortOrder{Key: key, Descending: true},
+			})
+
+			require.Len(t, descending, len(ascending))
+			require.True(t, before(&ascending[0], &ascending[len(ascending)-1]),
+				"the snapshot must hold two different values or the direction proves nothing")
+
+			for i := 1; i < len(ascending); i++ {
+				assert.False(t, before(&ascending[i], &ascending[i-1]), "ascending fell at %d", i)
+				assert.False(t, before(&descending[i-1], &descending[i]), "descending rose at %d", i)
+			}
+		})
+	}
+}
+
 // TestSavingsAreDerivedFromThePairedListPrice checks the one number this
-// provider computes rather than reads.
+// provider computes rather than reads. The count is asserted because a
+// regression to an always-nil savings figure would otherwise skip every
+// assertion below and pass.
 func TestSavingsAreDerivedFromThePairedListPrice(t *testing.T) {
 	t.Parallel()
 
@@ -256,15 +318,51 @@ func TestSavingsAreDerivedFromThePairedListPrice(t *testing.T) {
 		OS: cloud.OSLinux, Regions: []cloud.Region{cloud.RegionAll},
 	})
 	require.NoError(t, err)
+	require.NotEmpty(t, result.Candidates)
+
+	derived := 0
 
 	for i := range result.Candidates {
 		candidate := &result.Candidates[i]
 		if candidate.SavingsPercent == nil {
 			continue
 		}
+		derived++
 
 		assert.Positive(t, *candidate.SavingsPercent)
 		assert.LessOrEqual(t, *candidate.SavingsPercent, 100)
 		assert.Less(t, candidate.Spot.Amount.Nanos(), candidate.OnDemand.Amount.Nanos())
 	}
+
+	require.NotZero(t, derived, "every catalogued price pairs spot against list, so savings must be derivable")
+}
+
+func queryCandidates(t *testing.T, provider *Provider, query *cloud.Query) []cloud.Candidate {
+	t.Helper()
+
+	result, err := provider.Query(t.Context(), query)
+	require.NoError(t, err)
+
+	return result.Candidates
+}
+
+func savingsOf(candidate *cloud.Candidate) int {
+	if candidate.SavingsPercent == nil {
+		return 0
+	}
+
+	return *candidate.SavingsPercent
+}
+
+// lowerMedianSpotPrice is a ceiling the snapshot itself supplies: at least one
+// price is at or below it and at least one is above.
+func lowerMedianSpotPrice(candidates []cloud.Candidate) cloud.Money {
+	prices := make([]cloud.Money, 0, len(candidates))
+	for i := range candidates {
+		prices = append(prices, candidates[i].Spot.Amount)
+	}
+	slices.SortFunc(prices, func(left, right cloud.Money) int { return cmp.Compare(left.Nanos(), right.Nanos()) })
+	distinct := slices.Compact(prices)
+
+	return distinct[(len(distinct)-1)/2]
 }

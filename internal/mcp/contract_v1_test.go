@@ -89,12 +89,17 @@ func normalizeV1Response(t *testing.T, payload string) map[string]any {
 	return response
 }
 
+// assertGolden compares against a recorded contract file. A regeneration always
+// fails the run: rewriting the file and then comparing it to itself would let a
+// job that happens to set UPDATE_GOLDEN report a client-visible contract change
+// as a pass.
 func assertGolden(t *testing.T, name string, actual []byte) {
 	t.Helper()
 
 	path := filepath.Join("testdata", name)
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
 		require.NoError(t, os.WriteFile(path, actual, 0o600))
+		t.Fatalf("%s regenerated; review the diff and re-run without UPDATE_GOLDEN", name)
 	}
 
 	expected, err := os.ReadFile(path)

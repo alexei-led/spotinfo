@@ -53,7 +53,7 @@ func (s *Server) registerRecommendTool() {
 			mcp.Description("Machine operating system"),
 			mcp.Enum(string(cloud.OSLinux), string(cloud.OSWindows)),
 			mcp.DefaultString(string(cloud.OSLinux))),
-		mcp.WithNumber(argMinVCPU,
+		mcp.WithInteger(argMinVCPU,
 			mcp.Description("Required minimum vCPU cores"),
 			mcp.Min(1),
 			mcp.Required()),
@@ -67,11 +67,15 @@ func (s *Server) registerRecommendTool() {
 				"'web', 'ci' and 'batch' cap interruption frequency and need a provider that publishes risk"),
 			mcp.Enum(string(cloud.WorkloadCost), string(cloud.WorkloadWeb), string(cloud.WorkloadCI), string(cloud.WorkloadBatch)),
 			mcp.DefaultString(string(cloud.WorkloadCost))),
-		mcp.WithNumber(argTop,
+		mcp.WithInteger(argTop,
 			mcp.Description("Maximum recommendations to return"),
 			mcp.Min(1),
 			mcp.Max(cloud.MaxTop),
 			mcp.DefaultNumber(cloud.DefaultTop)),
+		// The contract declares a closed object. Without this a misspelled
+		// argument — `budget` for `max_price_per_hour` — is silently dropped and
+		// the answer ignores a ceiling the caller believes it set.
+		mcp.WithSchemaAdditionalProperties(false),
 	)
 
 	s.mcpServer.AddTool(tool, NewRecommendTool(s.providers, s.logger).Handle)
@@ -252,8 +256,13 @@ func rawCloud(args map[string]any) string {
 	return name
 }
 
-// recommendError renders a failure as the published error payload. The message
-// is the error's own text, which carries no provider or source internals.
+// recommendError renders a failure as the published error payload.
+//
+// The message is the error's own text. Most are domain errors written for a
+// caller, but an acquisition failure wraps whatever the provider returned — for
+// AWS that can be SDK text carrying an operation name, endpoint and request ID.
+// That matches what find_spot_instances has always returned, and the detail is
+// what makes a failure actionable; the stable machine-readable part is the code.
 func recommendError(code cloud.ErrorCode, err error, cloudValue string) *mcp.CallToolResult {
 	report := cloud.NewErrorReport(code, err.Error(), cloudValue)
 

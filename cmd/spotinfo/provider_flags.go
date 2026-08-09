@@ -120,10 +120,15 @@ func recommendCapabilityRequest(ctx *cli.Context) cloud.CapabilityRequest {
 	}
 }
 
-// resolveAWSProvider is the provider gate for a command that still acquires
-// candidates through the legacy AWS client. Selecting any other provider fails
-// here rather than being answered with AWS data. Neutral acquisition replaces
-// the second check.
+// resolveAWSProvider is the provider gate for the root query command, which
+// still acquires candidates through the legacy AWS client. Selecting any other
+// provider fails here rather than being answered with AWS data.
+//
+// The identifier check is unreachable today — the root command requires the
+// risk capability and only AWS declares it, so another cloud is already
+// rejected by resolveProvider. It stays because it is the guard that survives
+// that coincidence: the day a provider publishes risk, the capability gate
+// would let it through to an acquisition path that only speaks AWS.
 func resolveAWSProvider(ctx *cli.Context, registry providerRegistry, request cloud.CapabilityRequest) error {
 	provider, err := resolveProvider(ctx, registry, request)
 	if err != nil {

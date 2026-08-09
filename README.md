@@ -2,9 +2,11 @@
 
 # spotinfo
 
-**Command-line tool for AWS EC2 Spot Instance exploration with placement score analysis**
+**Command-line tool for Spot instance exploration across AWS, GCP and Azure, with AWS placement score analysis**
 
 `spotinfo` is a powerful CLI tool and [Model Context Protocol (MCP) server](#mcp-integration) that provides comprehensive AWS EC2 Spot Instance information, including real-time placement scores, pricing data, and interruption rates. Perfect for DevOps engineers optimizing cloud infrastructure costs.
+
+AWS is the full surface. GCP and Azure are served offline from committed price snapshots and are reachable through `spotinfo recommend --cloud <id>`; neither publishes interruption risk, so both answer only the risk-free `cost` workload.
 
 ## Key Features
 
@@ -22,7 +24,7 @@
 
 ### 💡 **Single-Instance Recommendations**
 - `recommend` requires an `x86_64` or `arm64` architecture plus positive vCPU and memory minima
-- Workload interruption caps are conservative and explicit: web `<5%`, CI `<=15%`, batch `<=20%`; `cost` ranks by price only and works on every cloud
+- Workload caps apply to a risk bucket's maximum: web ≤5%, CI ≤16%, batch ≤22%. On AWS the reachable Advisor buckets make those effective ceilings `<5%`, `<=15%` and `<=20%`; `cost` ranks by price only and works on every cloud
 - The default concise table includes deterministic rationale codes; `--output json` emits a versioned request-and-results wrapper
 - Ranking uses price, interruption, and right-sizing excess; savings is displayed but never used to rank
 - Repeated recommendation regions are deduplicated; `all` cannot be mixed with explicit regions
@@ -106,7 +108,9 @@ spotinfo recommend --cloud azure --architecture arm64 --cpu 2 --memory 8 --top 3
 
 ## MCP Integration
 
-`spotinfo` functions as a **[Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server**, enabling AI assistants to directly query AWS Spot Instance data through natural language.
+`spotinfo` functions as a **[Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server**, enabling AI assistants to directly query Spot instance data through natural language.
+
+Three tools are served: `find_spot_instances` and `list_spot_regions` are AWS-only and byte-compatible with previous releases, while `recommend_spot_instances` answers for AWS, GCP and Azure and emits the `spotinfo.recommend/v2` payload.
 
 ### Quick Setup with Claude Desktop
 
@@ -121,7 +125,7 @@ spotinfo recommend --cloud azure --architecture arm64 --cpu 2 --memory 8 --top 3
 }
 ```
 
-**Ask Claude**: *"Find cheapest t3 instances with placement score >7"* or *"Compare m5.large prices across US regions"*
+**Ask Claude**: *"Find cheapest t3 instances with placement score >7"*, *"Compare m5.large prices across US regions"*, or *"Cheapest arm64 Azure Spot VMs with 4 vCPUs and 16 GiB"*
 
 🤖 **Full setup guide**: [MCP Server Documentation](docs/mcp-server.md)
 

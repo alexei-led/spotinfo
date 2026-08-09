@@ -140,35 +140,82 @@ func TestDecodeCatalogRejectsAnUnknownField(t *testing.T) {
 func TestVerifyRejectsACatalogueOutsideItsContract(t *testing.T) {
 	t.Parallel()
 
-	for name, corrupt := range map[string]func(*Catalog){
-		"wrong schema version": func(c *Catalog) { c.SchemaVersion = "spotinfo.gcp-catalog/v0" },
-		"unapproved region":    func(c *Catalog) { c.Region = "europe-west1" },
-		"unapproved os":        func(c *Catalog) { c.OS = cloud.OSWindows },
-		"wrong currency":       func(c *Catalog) { c.Currency = "EUR" },
-		"empty":                func(c *Catalog) { c.Machines = nil },
-		"unapproved series": func(c *Catalog) {
-			c.Machines[0].ID = "z3-standard-2"
+	// Every Verify failure wraps ErrCatalog, so the sentinel alone cannot tell
+	// one check from another: a case that trips an earlier check than the one it
+	// names still passes. Each case therefore also pins the message.
+	for name, test := range map[string]struct {
+		corrupt func(*Catalog)
+		message string
+	}{
+		"wrong schema version": {
+			corrupt: func(c *Catalog) { c.SchemaVersion = "spotinfo.gcp-catalog/v0" },
+			message: "schema",
 		},
-		"architecture contradicts the series": func(c *Catalog) {
-			c.Machines[0].Architecture = cloud.ArchitectureARM64
+		"unapproved region": {
+			corrupt: func(c *Catalog) { c.Region = "europe-west1" },
+			message: "europe-west1",
 		},
-		"spot at or above list price": func(c *Catalog) {
-			c.Machines[0].Spot = c.Machines[0].OnDemand
+		"unapproved os": {
+			corrupt: func(c *Catalog) { c.OS = cloud.OSWindows },
+			message: "windows",
 		},
-		"more precision than the contract allows": func(c *Catalog) {
-			c.Machines[0].Spot = money(t, "0.123456789")
+		"wrong currency": {
+			corrupt: func(c *Catalog) { c.Currency = "EUR" },
+			message: "EUR",
 		},
-		"duplicate machine": func(c *Catalog) {
-			c.Machines = append(c.Machines, c.Machines[0])
+		"empty": {
+			corrupt: func(c *Catalog) { c.Machines = nil },
+			message: "machines",
 		},
-		"missing specification": func(c *Catalog) { c.Machines[0].VCPU = 0 },
+		"not a machine identifier": {
+			corrupt: func(c *Catalog) { c.Machines[0].ID = "Not A Machine" },
+			message: "is not a machine type identifier",
+		},
+		"unapproved series": {
+			corrupt: func(c *Catalog) { c.Machines[0].ID = "z3-standard-2" },
+			message: "unapproved series",
+		},
+		"architecture outside the contract": {
+			corrupt: func(c *Catalog) { c.Machines[0].Architecture = "riscv64" },
+			message: "unapproved architecture",
+		},
+		"architecture contradicts the series": {
+			corrupt: func(c *Catalog) { c.Machines[0].Architecture = cloud.ArchitectureARM64 },
+			message: "is recorded as",
+		},
+		"missing price": {
+			corrupt: func(c *Catalog) { c.Machines[0].OnDemand = cloud.Money{} },
+			message: "missing a spot or on-demand price",
+		},
+		"spot at or above list price": {
+			corrupt: func(c *Catalog) { c.Machines[0].Spot = c.Machines[0].OnDemand },
+			message: "spot against",
+		},
+		"more precision than the contract allows": {
+			// Below the machine's 0.117660 list price on purpose: a higher amount
+			// would trip the spot-at-or-above-list check first and never reach the
+			// fractional-digit gate this case exists to prove.
+			corrupt: func(c *Catalog) { c.Machines[0].Spot = money(t, "0.058121789") },
+			message: "fractional digits",
+		},
+		"duplicate machine": {
+			corrupt: func(c *Catalog) { c.Machines = append(c.Machines, c.Machines[0]) },
+			message: "twice",
+		},
+		"missing specification": {
+			corrupt: func(c *Catalog) { c.Machines[0].VCPU = 0 },
+			message: "no usable specification",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
 			catalog := buildTestCatalog(t)
-			corrupt(catalog)
-			require.ErrorIs(t, catalog.Verify(testContract()), ErrCatalog)
+			test.corrupt(catalog)
+
+			err := catalog.Verify(testContract())
+			require.ErrorIs(t, err, ErrCatalog)
+			assert.Contains(t, err.Error(), test.message)
 		})
 	}
 }

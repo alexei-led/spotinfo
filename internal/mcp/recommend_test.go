@@ -107,7 +107,10 @@ func TestRecommendInputSchemaMatchesTheRecordedContract(t *testing.T) {
 }
 
 // The registered schema must agree with the normative input contract on the
-// fields a client depends on: required inputs, enums and defaults.
+// fields a client depends on: required inputs, declared types, enums, defaults
+// and whether unknown arguments are accepted. Type matters as much as the enum:
+// a contract integer advertised as a number lets a host pass 2.5 where the
+// handler will truncate, and an open object silently drops a misspelled key.
 func TestRegisteredInputSchemaAgreesWithTheNormativeContract(t *testing.T) {
 	server, err := NewServer(Config{Version: "1.0.0", Logger: slog.Default(), Providers: newEmbeddedRegistry()})
 	require.NoError(t, err)
@@ -137,6 +140,7 @@ func TestRegisteredInputSchemaAgreesWithTheNormativeContract(t *testing.T) {
 		require.True(t, present, "input %q is missing from the advertised schema", name)
 
 		expected, _ := declared.(map[string]any)
+		assert.Equal(t, expected["type"], property["type"], "input %q type", name)
 		if enum, has := expected["enum"]; has {
 			assert.ElementsMatch(t, enum, property["enum"], "input %q enum", name)
 		}
@@ -145,6 +149,8 @@ func TestRegisteredInputSchemaAgreesWithTheNormativeContract(t *testing.T) {
 		}
 	}
 	assert.Len(t, advertisedProperties, len(contractProperties), "the advertised schema must not add inputs")
+	assert.Equal(t, contract["additionalProperties"], advertised["additionalProperties"],
+		"the advertised schema must close the object exactly as the contract does")
 }
 
 // A successful answer validates against the published success schema, for every

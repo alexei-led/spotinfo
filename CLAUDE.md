@@ -54,7 +54,8 @@ Azure are served through a provider-neutral seam (`internal/cloud`) and are reac
 ### Dependencies
 
 - `make check-deps` - Verify system has required dependencies (wget)
-- `make setup-tools` - Install golangci-lint (only that; mockery is not installed)
+- `make setup-tools` - Install golangci-lint and mockery at their pinned versions. archfit
+  is not installed here; `make verify-architecture-rules` installs it on demand.
 
 ## Architecture
 
@@ -126,7 +127,9 @@ support matrix and thresholds. No provider may read a source the contract does n
 
 - Go 1.26+
 - wget (for data updates)
-- golangci-lint (installed via make setup-tools)
+- golangci-lint and mockery (installed via `make setup-tools`, pinned in the Makefile)
+- archfit (pinned by `ARCHFIT_VERSION`; installed on demand by
+  `make verify-architecture-rules`, not by `make setup-tools`)
 
 ## Output Formats
 
@@ -136,7 +139,8 @@ The CLI supports multiple output formats: number, text, json, table, csv
 
 ### GitHub Actions Workflows
 
-- **ci.yaml**: Modern CI with Go 1.26, tests, linting, matrix builds for all platforms
+- **ci.yaml**: Modern CI with Go 1.26, tests, linting, the pinned archfit architecture gate
+  (`make verify-architecture`), then matrix builds for all platforms
 - **release.yaml**: Tag-triggered releases with binary uploads using standard Go toolchain
 - **docker.yaml**: Multi-arch Docker images published to GitHub Container Registry (ghcr.io)
 - **auto-release.yaml**: Quarterly automated releases with smart change detection and semantic versioning
@@ -175,13 +179,17 @@ The embedded data files are critical — they provide offline capability:
 
 - `internal/spot/data/spot-advisor-data.json` — Interruption rates, savings % (AWS advisor feed)
 - `internal/spot/data/spot-price-data.json` — Static spot pricing (AWS pricing-page feed, plain JSON)
+- `internal/spot/data/{spot-advisor,spot-price,architecture}-manifest.json` — the sidecar
+  manifests that hash and describe those files
 
 **Update flow:**
 
 1. `make update-data` — fetches fresh `spot-advisor-data.json`
 2. `make update-price` — fetches fresh `spot-price-data.json`
 3. `make verify-data` — parse gate on the embedded files
-4. Commit both files
+4. Commit the refreshed data files **and** their manifest sidecars — both update targets
+   end by running `refresh-manifests`, and `verify-data` fails when a data file and its
+   manifest hash disagree
 
 Both targets download to a `.tmp` file and only replace the tracked file on success,
 so a failed download cannot clobber good data.
@@ -228,6 +236,13 @@ an unsupported request with `UNSUPPORTED_CAPABILITY` _before_ acquisition. Never
 answer a question it cannot: a cloud with no risk data must report
 `RiskStatusUnavailable`, never a zero or a low bucket, or a neutral consumer will rank its
 silence against another cloud's measurement.
+
+A published risk figure is not automatically comparable either. The `web`/`ci`/`batch`
+ceilings are AWS Spot Advisor bucket boundaries, so `acceptsRisk` admits only a kind listed
+in `interruptionCappableKinds` (`internal/cloud/recommend.go`). Adding a provider that
+publishes a different measurement means giving it a reviewed wire name in
+`riskKindWireNames` and deciding, deliberately, whether it belongs in that list — not
+letting a preemption rate be filtered as if it were an interruption frequency.
 
 The legacy AWS interfaces below still back `internal/spot`. Never call AWS directly in tests.
 
@@ -287,7 +302,8 @@ func WithFoo(foo string) GetSpotSavingsOption {
 ## Testing Approach
 
 - **Framework**: testify for assertions; `make test-coverage` for the coverage report
-- **Unit tests** use mock providers from `mocks_test.go` — no AWS credentials needed
+- **Unit tests** use mock providers from `mocks_test.go` (in `internal/spot` and
+  `cmd/spotinfo`) or hand-written `cloud.Provider` stubs — no AWS credentials needed
 - **Integration tests**: there are none today — every test runs without AWS credentials
   or network, so `-short` currently skips nothing. If you add one that needs real AWS,
   guard it with `if testing.Short() { t.Skip("requires AWS credentials") }` so
@@ -297,7 +313,14 @@ func WithFoo(foo string) GetSpotSavingsOption {
 - **Resilient**: assertions tolerate the embedded feeds changing under them
 - **No network in unit tests**: build clients via the embedded path and a nil live-price
   provider. A real client stalls for `livePriceTimeout` (10s) per call on unpriced
-  instances — that alone was 79s of the suite. See `newEmbeddedClient` in `internal/mcp`.
+  instances — that alone was 79s of the suite. See `newEmbeddedRegistry` and `stubProvider`
+  in `internal/mcp/helpers_test.go`; the MCP tests answer from a `cloud.Provider` stub and
+  never open an AWS client.
+- **AWS v1 output is golden-pinned**: `cmd/spotinfo/testdata/aws-*-v1.*` and
+  `internal/mcp/testdata/find-spot-instances-v1-*.json`. A diff there is a client-visible
+  contract break, not a test to update. `UPDATE_GOLDEN=1` rewrites a golden **and fails the
+  run** so a regeneration can never be reported as a pass; review the diff, then re-run
+  without it. The same variable drives `make refresh-manifests`.
 
 When adding a new feature:
 
@@ -312,6 +335,11 @@ When adding a new feature:
 - **Never** forget `Advice.LivePrice = true` when price comes from EC2 API (not static feed)
 - **Never** bypass the `maxPrice` re-filter after live price enrichment
 - `allRegionsKeyword = "all"` is the special value for `--region all`, not an actual region
+- **Never** guard a float CLI flag with `value <= 0` alone. `NaN` fails every comparison, so
+  it slips past both the rejection and the "is it set" branch and silently drops the filter
+- **Never** lower a snapshot's coverage floor on an unreadable manifest. The updaters seed
+  from the contract minimum only when the manifest is genuinely absent; anything else is an
+  error, or a reviewer's raised floor is discarded by a green PR
 - `defaultScoreTimeout` and `livePriceTimeout` are separate — don't confuse them
 - **Never** make `build` depend on `update-data`/`update-price`. It used to, which made every
   build and Docker image download fresh feeds and overwrite tracked data. Builds must be

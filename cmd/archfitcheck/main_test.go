@@ -59,9 +59,10 @@ func TestHighFindingsAlsoFail(t *testing.T) {
 	assert.Contains(t, strings.ToLower(stderr), "high")
 }
 
-// A finding archfit records as resolved or waived is closed. Every other
-// status counts as open, so a status this gate has not seen cannot hide a
-// critical finding.
+// Only a finding archfit records as fixed or resolved is closed. Annotating one
+// as waived or baselined does not close it, and neither does a status this gate
+// has not seen — otherwise a one-word edit turns the architecture gate green on
+// a critical finding.
 func TestOnlyRecordedResolutionsCloseAFinding(t *testing.T) {
 	t.Parallel()
 
@@ -73,9 +74,10 @@ func TestOnlyRecordedResolutionsCloseAFinding(t *testing.T) {
 		{status: "existing", want: exitFindingsOpen},
 		{status: "reopened", want: exitFindingsOpen},
 		{status: "something-archfit-adds-later", want: exitFindingsOpen},
+		{status: "waived", want: exitFindingsOpen},
+		{status: "baselined", want: exitFindingsOpen},
 		{status: statusFixed, want: exitOK},
-		{status: statusWaived, want: exitOK},
-		{status: statusBaselined, want: exitOK},
+		{status: statusResolved, want: exitOK},
 	} {
 		t.Run(test.status, func(t *testing.T) {
 			t.Parallel()

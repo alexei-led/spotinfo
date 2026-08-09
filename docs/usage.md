@@ -15,7 +15,7 @@ spotinfo [global options]
 ### Cloud Provider
 | Flag | Description | Example |
 |------|-------------|---------|
-| `--cloud value` | Cloud provider: `aws`, `gcp`, `azure` | `--cloud gcp` |
+| `--cloud value` | Cloud provider: `aws`, `gcp`, `azure`. The root query command is AWS-only — it renders an interruption column no other cloud publishes — so `--cloud` selects the provider for `recommend` | `spotinfo --cloud gcp recommend ...` |
 
 ### Instance Selection
 | Flag | Description | Example |
@@ -80,10 +80,10 @@ spotinfo recommend --architecture <x86_64|arm64> --cpu N --memory N [flags]
 | `--budget USD` | Positive maximum USD per candidate instance-hour | none |
 | `--os linux|windows` | Operating-system price stream | `linux` |
 | `--workload cost|web|ci|batch` | Ranking policy; `cost` ranks by price only and requires no risk data | `web` on clouds with risk data; `cost` otherwise |
-| `--top N` | Maximum candidates returned | `3` |
+| `--top N` | Maximum candidates returned; the v2 path (any non-AWS cloud, or AWS with `--workload cost`) caps it at 50 | `3` |
 | `--output table|json` | Recommendation output format | `table` |
 
-`cost` ranks purely by price with no interruption constraint and works on every cloud. `web` accepts only the Advisor `<5%` label. `ci` accepts Advisor labels through `10-15%` (at most 15%), and `batch` accepts labels through `15-20%` (at most 20%). `web`, `ci`, and `batch` require a cloud that publishes interruption or preemption risk; requesting them on GCP or Azure returns `UNSUPPORTED_CAPABILITY`. `--cpu` and `--memory` are inclusive minima, as is `--budget`; a supplied budget must be greater than zero. Prices of zero, missing prices, and non-finite prices are never candidates; existing live-price enrichment can provide a usable positive price. `--os` selects Linux or Windows pricing before ranking. Repeated `--region` values are trimmed, deduplicated, and sorted before fetching and reporting; repeated `--region all` becomes one `all`, while `all` combined with an explicit region (or an empty region value) is rejected before fetching.
+`cost` ranks purely by price with no interruption constraint and works on every cloud. The caps are applied to a risk bucket's *maximum* percentage: `web` admits a bucket whose maximum is at most 5%, `ci` at most 16%, `batch` at most 22%. On AWS the reachable Advisor buckets make those effective ceilings 5%, 15% and 20% — `web` accepts only `<5%`, `ci` accepts through `10-15%`, and `batch` accepts through `15-20%`. `web`, `ci`, and `batch` require a cloud that publishes interruption or preemption risk; requesting them on GCP or Azure returns `UNSUPPORTED_CAPABILITY`. `--cpu` and `--memory` are inclusive minima, as is `--budget`; a supplied budget must be greater than zero. Prices of zero, missing prices, and non-finite prices are never candidates; existing live-price enrichment can provide a usable positive price. `--os` selects Linux or Windows pricing before ranking. Repeated `--region` values are trimmed, deduplicated, and sorted before fetching and reporting; repeated `--region all` becomes one `all`, while `all` combined with an explicit region (or an empty region value) is rejected before fetching.
 
 The shared root `--cloud`, `--os`, `--region`, `--output`, `--cpu`, and `--memory` flags can be placed before `recommend` (for example, `spotinfo --cloud gcp --output json --cpu 2 --memory 8 recommend --architecture x86_64`). Explicit flags after `recommend` take precedence; if neither is set, the command defaults apply. `--architecture`, `--instance`, `--budget`, `--workload`, and `--top` remain command-local.
 
@@ -122,6 +122,8 @@ The following JSON example abridges each recommendation item to its identifying 
 v1 does not use placement scores, GPUs, ML, Markdown output, composite scores, or savings ranking. Architecture comes from a committed reviewed family snapshot; unknown families fail closed and no runtime AWS metadata call is made. Snapshot `provenance` must be non-empty and `reviewed_at` must be a valid `YYYY-MM-DD` date. See [Data Sources](data-sources.md) for the manual reviewed update procedure and freshness limitations.
 
 Non-AWS clouds and AWS with `--workload cost` emit `spotinfo.recommend/v2` (see [API Reference](api-reference.md)). v2 prices are decimal strings with exactly nine fractional digits. AWS with `--workload web`, `ci`, or `batch` continues to emit v1.
+
+The v2 `table` output is a different shape from the v1 table above: `RANK CLOUD REGION MACHINE ARCHITECTURE vCPU MEMORY GiB USD/HOUR RISK WHY`. There is no savings column, `CLOUD` is added, and `RISK` replaces `INTERRUPTION` — it prints the risk label when the cloud publishes one and the status (`unavailable`) when it does not, so a cost recommendation never reads as a safety claim. The v2 rationale vocabulary also differs: `ARCHITECTURE_MATCH`, `KNOWN_POSITIVE_PRICE`, `RESOURCE_MINIMUMS_MET` (one code for both minima, where v1 emits `VCPU_MINIMUM_MET` and `MEMORY_MINIMUM_MET`), then either `COST_POLICY` or `WORKLOAD_<POLICY>_CAP_MET`, plus `BUDGET_CAP_MET` and `MACHINE_PATTERN_MATCH` when those filters were applied.
 
 ## Cloud Capability Matrix
 
@@ -198,7 +200,7 @@ spotinfo --type "t3.micro" --with-score --output json
 ]
 ```
 
-> The `live_price` field appears when the price was fetched from the EC2 `DescribeSpotPriceHistory` API (for newer instance types missing from the static pricing feed). When present and `true`, the price was obtained in real-time via the AWS API. The field is omitted for static prices.
+> The `live_price` field is always present. It is `true` when the price was fetched from the EC2 `DescribeSpotPriceHistory` API (for newer instance types missing from the static pricing feed) and `false` when it came from the embedded static feed.
 
 ### CSV Format
 Data-only format without visual indicators:

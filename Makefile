@@ -114,10 +114,12 @@ update-price: check-deps
 	@mv $(DATA_DIR)/spot-price-data.json.tmp $(DATA_DIR)/spot-price-data.json
 	@$(MAKE) --no-print-directory refresh-manifests
 
-# Rewrites each sidecar manifest's payload hash, and the source hash and fetch
-# time of the raw feeds, for whatever was just downloaded. Coverage floors and
-# reviewed provenance stay hand-curated: regenerating a floor from the data that
-# just arrived would ratchet the gate into always passing.
+# Rewrites the AWS sidecar manifests in internal/spot/data only — the payload
+# hash of each, plus the source hash and fetch time of the raw feeds. The GCP
+# and Azure manifests are written by their own updaters and are not touched
+# here. Coverage floors and reviewed provenance stay hand-curated: regenerating
+# a floor from the data that just arrived would ratchet the gate into always
+# passing.
 refresh-manifests:
 	@echo "Refreshing snapshot manifests..."
 	@UPDATE_GOLDEN=1 go test ./internal/spot/ -run TestEmbeddedSnapshotManifests -count=1
@@ -155,10 +157,14 @@ verify-data:
 # metadata in .archfit.yaml; it is not a data-correctness or test substitute.
 # Balanced-Coupling advisories are warnings here, which is why it is only half
 # the gate — verify-architecture adds the severity check below.
+#
+# archfit is installed unconditionally rather than only when absent: reusing
+# whatever build happens to be on PATH is how the invocation drifted from the
+# pinned release's CLI without anything noticing.
 verify-architecture-rules:
 	@echo "Verifying architecture rules..."
-	@command -v archfit > /dev/null 2>&1 || go install github.com/alexei-led/archfit/cmd/archfit@$(ARCHFIT_VERSION)
-	@archfit --gate --config .archfit.yaml --full --format json
+	@go install github.com/alexei-led/archfit/cmd/archfit@$(ARCHFIT_VERSION)
+	@archfit check --config .archfit.yaml --format json
 
 # The full architecture gate: package boundaries, then finding severity.
 # archfit's own verdict is "pass" while a Critical Balanced-Coupling advisory
@@ -194,7 +200,7 @@ hooks:
 # inside the generated file is silently deleted by the next run.
 mocks:
 	@echo "Regenerating mocks..."
-	@command -v mockery > /dev/null 2>&1 || go install github.com/vektra/mockery/v3@$(MOCKERY_VERSION)
+	@go install github.com/vektra/mockery/v3@$(MOCKERY_VERSION)
 	@mockery
 	@go build ./... && echo "mocks regenerated and compiling"
 
@@ -234,7 +240,9 @@ help:
 	@echo "  fmt           Format Go code"
 	@echo "  update-data   Update embedded spot advisor data"
 	@echo "  update-price  Update embedded spot pricing data"
-	@echo "  refresh-manifests Rewrite snapshot manifest hashes for refreshed data"
+	@echo "  update-gcp-data   Rebuild the embedded GCP catalogue from its contracted pages"
+	@echo "  update-azure-data Rebuild the embedded Azure catalogue from its contracted sources"
+	@echo "  refresh-manifests Rewrite the AWS sidecar manifest hashes for refreshed data"
 	@echo "  verify-data   Verify embedded data, manifests and architecture coverage"
 	@echo "  verify-architecture-rules Verify package boundaries with archfit"
 	@echo "  verify-architecture Verify boundaries and fail on Critical/High findings"

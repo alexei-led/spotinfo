@@ -153,8 +153,8 @@ func mainCmd(ctx *cli.Context) error {
 
 // newProviderRegistry composes the providers this binary serves. The AWS
 // client is shared with the legacy acquisition path so a single invocation
-// opens one client. Azure is a recognised identifier with no registration yet,
-// so the registry reports it disabled rather than absent.
+// opens one client. A provider whose snapshot fails its gates is reported
+// disabled with its reason, never substituted by another cloud.
 func newProviderRegistry(client *spot.Client) (*providers.Registry, error) {
 	registry, err := providers.New(
 		providers.Registration{
