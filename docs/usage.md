@@ -34,7 +34,7 @@ spotinfo [global options]
 |------|-------------|---------|
 | `--cpu value` | Minimum vCPU cores | `--cpu 4` |
 | `--memory value` | Minimum memory in GiB | `--memory 16` |
-| `--price value` | Maximum price per hour (USD) | `--price 0.50` |
+| `--price value` | Maximum price per hour (USD, must be positive) | `--price 0.50` |
 
 ### AWS Spot Placement Scores
 | Flag | Description | Example |

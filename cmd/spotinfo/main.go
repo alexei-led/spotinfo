@@ -874,7 +874,7 @@ func newSpotinfoApp(rootAction, recommendationAction cli.ActionFunc) *cli.App {
 			},
 			&cli.Float64Flag{
 				Name:  flagPrice,
-				Usage: "filter: maximum price per hour",
+				Usage: "filter: positive maximum USD price per hour",
 			},
 			&cli.StringFlag{
 				Name:  flagSort,

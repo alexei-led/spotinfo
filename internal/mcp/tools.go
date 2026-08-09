@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"math"
 	"slices"
 	"time"
 
@@ -144,6 +145,11 @@ func (t *FindSpotInstancesTool) Handle(ctx context.Context, req mcp.CallToolRequ
 	t.logger.Debug("handling find_spot_instances request", slog.Any("arguments", req.Params.Arguments))
 
 	params := parseParameters(req.Params.Arguments)
+	if err := params.validate(); err != nil {
+		t.logger.Error("invalid find_spot_instances argument", slog.Any("error", err))
+
+		return createErrorResult(err.Error()), nil
+	}
 
 	result, err := queryAWS(ctx, t.providers, params.query())
 	if err != nil {
@@ -199,6 +205,26 @@ type params struct { //nolint:govet
 	minScore        int
 	az              bool
 	scoreTimeout    int
+}
+
+// validate rejects arguments that parsed but cannot express a filter. cast
+// routes a quoted argument through ParseFloat, which accepts "NaN" and "Inf"
+// without an error, and neither survives the guards that consume these values:
+// query() reads a non-finite or negative ceiling as "no ceiling", and
+// filterByInterruption drops every candidate against a NaN rate. Both answer a
+// request the caller cannot distinguish from a real one, so the argument is
+// refused here, before acquisition. Zero stays the v1 "no ceiling" value.
+func (p *params) validate() error {
+	if math.IsNaN(p.maxPrice) || math.IsInf(p.maxPrice, 0) || p.maxPrice < 0 {
+		return fmt.Errorf("%w: %s must be a positive USD instance-hour price",
+			cloud.ErrInvalidArgument, argMaxPricePerHour)
+	}
+	if math.IsNaN(p.maxInterruption) || math.IsInf(p.maxInterruption, 0) || p.maxInterruption < 0 {
+		return fmt.Errorf("%w: %s must be a percentage between 0 and %d",
+			cloud.ErrInvalidArgument, argMaxInterruptionRate, maxInterruption)
+	}
+
+	return nil
 }
 
 // query builds the neutral acquisition request. A zero maximum price is the v1

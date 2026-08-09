@@ -69,9 +69,9 @@ func advisorCoverage(data *advisorData) snapshot.Coverage {
 // priceCoverage counts only usable prices. The feed publishes "N/A*" and 0 for
 // machines it does not price, and counting those would let a feed that lost
 // every real price still clear its floor. Every dimension is counted distinct,
-// matching snapshot.ValidatePrices: the feed already repeats 118 region/size
-// pairs, and counting raw cells would let one region's rows repeated enough
-// times clear a floor meant to describe the whole matrix.
+// matching snapshot.ValidatePrices: the feed already repeats region/size pairs,
+// and counting raw cells would let one region's rows repeated enough times clear
+// a floor meant to describe the whole matrix.
 func priceCoverage(data *rawPriceData) snapshot.Coverage {
 	type priceKey struct{ region, machine, os string }
 

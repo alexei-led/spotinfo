@@ -212,6 +212,33 @@ func TestValidateCoverageRejectsATruncatedLiveFeed(t *testing.T) {
 	require.ErrorIs(t, validateAdvisorCoverage(thin), snapshot.ErrCoverage)
 }
 
+// A repeated row is redundancy, not coverage. Counting raw cells would let a
+// live feed that lost every region but one clear a floor meant to describe the
+// whole matrix, so every dimension is counted distinct.
+func TestPriceCoverageCountsDistinctRowsOnly(t *testing.T) {
+	t.Parallel()
+
+	region := regionConfig{
+		Region: "us-east-1",
+		InstanceTypes: []instanceTypeConfig{{
+			Type: "generalCurrentGen",
+			Sizes: []sizeConfig{{
+				Size: "m5.large",
+				ValueColumns: []valueColumnConfig{
+					{Name: "linux", Prices: priceConfig{USD: "0.0416"}},
+					{Name: "mswin", Prices: priceConfig{USD: "0.1234"}},
+				},
+			}},
+		}},
+	}
+
+	want := snapshot.Coverage{Regions: 1, Machines: 1, Prices: 2}
+	assert.Equal(t, want, priceCoverage(&rawPriceData{Config: config{Regions: []regionConfig{region}}}))
+	assert.Equal(t, want,
+		priceCoverage(&rawPriceData{Config: config{Regions: []regionConfig{region, region, region}}}),
+		"repeating a region must not pad any dimension")
+}
+
 // refreshed rewrites only what a data refresh can change: the payload hash, and
 // — for a raw feed, whose committed bytes are the source — the source hash and
 // fetch time. A reviewed catalogue keeps its human provenance, and coverage

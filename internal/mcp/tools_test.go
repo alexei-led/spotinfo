@@ -260,6 +260,59 @@ func TestV1ToolsRejectAnUnsupportedCapabilityBeforeAcquisition(t *testing.T) {
 	assert.Zero(t, provider.callCount(), "the capability check must run before acquisition")
 }
 
+// A non-finite or negative ceiling is neither a ceiling nor the v1 "no ceiling"
+// value. cast.ToFloat64 accepts "NaN" and "-Inf" from a quoted argument, and the
+// `> 0` test in query() reads both as unset, which would answer an unfiltered
+// query as if the caller's ceiling had been applied. Zero stays accepted — see
+// TestZeroMaxPriceRequestsNoCeiling.
+func TestUnusableMaxPriceIsRejectedBeforeAcquisition(t *testing.T) {
+	t.Parallel()
+
+	for name, price := range map[string]any{
+		"quoted not a number":      "NaN",
+		"quoted positive infinity": "+Inf",
+		"quoted negative infinity": "-Inf",
+		"negative":                 -0.01,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			provider, registry := awsStub()
+
+			result, err := NewFindSpotInstancesTool(registry, testLogger()).Handle(t.Context(),
+				createTestCallToolRequest(map[string]any{"max_price_per_hour": price}))
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.True(t, result.IsError, "an unusable ceiling must be reported, not silently dropped")
+			assert.Zero(t, provider.callCount(), "the argument check must run before acquisition")
+		})
+	}
+}
+
+// A non-finite max_interruption_rate drops every candidate inside the filter
+// loop, which a caller cannot tell apart from "nothing matched".
+func TestUnusableMaxInterruptionRateIsRejectedBeforeAcquisition(t *testing.T) {
+	t.Parallel()
+
+	for name, rate := range map[string]any{
+		"quoted not a number": "NaN",
+		"quoted infinity":     "-Inf",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			provider, registry := awsStub()
+
+			result, err := NewFindSpotInstancesTool(registry, testLogger()).Handle(t.Context(),
+				createTestCallToolRequest(map[string]any{"max_interruption_rate": rate}))
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.True(t, result.IsError)
+			assert.Zero(t, provider.callCount())
+		})
+	}
+}
+
 // A zero max_price_per_hour is the v1 "no ceiling" value, not a ceiling of zero.
 func TestZeroMaxPriceRequestsNoCeiling(t *testing.T) {
 	provider, registry := awsStub()

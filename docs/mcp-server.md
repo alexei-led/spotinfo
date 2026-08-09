@@ -56,8 +56,8 @@ Search for AWS EC2 Spot Instance options based on requirements.
 - `instance_types` (optional): Instance type pattern (e.g., `"m5.large"`, `"t3.*"`)  
 - `min_vcpu` (optional): Minimum vCPUs required
 - `min_memory_gb` (optional): Minimum memory in gigabytes
-- `max_price_per_hour` (optional): Maximum spot price per hour in USD
-- `max_interruption_rate` (optional): Maximum interruption rate percentage (0-100)
+- `max_price_per_hour` (optional): Maximum spot price per hour in USD (0 or omitted means no ceiling; a negative or non-finite value is rejected)
+- `max_interruption_rate` (optional): Maximum interruption rate percentage (0-100; a negative or non-finite value is rejected)
 - `sort_by` (optional): Sort by `"price"`, `"reliability"`, or `"savings"` (default: `"reliability"`)
 - `limit` (optional): Maximum results to return (default: 10, max: 50)
 
