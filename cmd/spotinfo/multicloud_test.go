@@ -140,6 +140,35 @@ func TestGCPRecommendationServesTheV2ContractOffline(t *testing.T) {
 	}
 }
 
+// A --budget computed as a monthly figure divided by 720 carries more
+// fractional digits than the fixed-point scale. It is a ceiling, not a measured
+// price, so it is truncated and still filters — the v1 recommend path already
+// accepts that same value, and rejecting it here would split the two.
+func TestRecommendationAcceptsABudgetFinerThanTheScale(t *testing.T) {
+	output, err := runMulticloudRecommend(t,
+		"--cloud", "gcp", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
+		"--budget", "0.041666666666666664", "--top", "3", "--output", "json")
+	require.NoError(t, err)
+
+	var report cloud.RecommendReport
+	require.NoError(t, json.Unmarshal([]byte(output), &report))
+
+	require.NotNil(t, report.Request.MaxPricePerHour)
+	assert.InDelta(t, 0.041666666, *report.Request.MaxPricePerHour, 1e-9,
+		"the echoed ceiling is the truncated one the query actually used")
+	require.NotEmpty(t, report.Recommendations)
+
+	ceiling, err := cloud.ParseMoney("0.041666666")
+	require.NoError(t, err)
+
+	for _, recommendation := range report.Recommendations {
+		price, parseErr := cloud.ParseMoney(recommendation.SpotUSDPerHour)
+		require.NoError(t, parseErr)
+		assert.LessOrEqual(t, price.Nanos(), ceiling.Nanos(),
+			"every recommendation must sit under the truncated ceiling")
+	}
+}
+
 func TestGCPRecommendationHonoursAnExplicitRegion(t *testing.T) {
 	_, err := runMulticloudRecommend(t,
 		"--cloud", "gcp", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
@@ -215,6 +244,15 @@ func TestAzureRecommendationNeverSubstitutesAnUncoveredRegion(t *testing.T) {
 		"--region", "francecentral", "--output", "json")
 
 	require.ErrorIs(t, err, cloud.ErrNoCandidates)
+}
+
+// An explicit --top 0 is a request for nothing, and the v1 path rejects it. The
+// neutral path must not read it as "unset" and answer with the default instead.
+func TestAnExplicitZeroTopIsRejected(t *testing.T) {
+	_, err := runMulticloudRecommend(t,
+		"--cloud", "gcp", "--architecture", "x86_64", "--cpu", "2", "--memory", "8", "--top", "0")
+
+	require.ErrorIs(t, err, cloud.ErrInvalidArgument)
 }
 
 func TestAzureRecommendationRejectsWhatItCannotAnswer(t *testing.T) {

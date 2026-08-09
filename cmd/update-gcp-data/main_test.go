@@ -2,6 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,6 +16,36 @@ import (
 	"spotinfo/internal/providers/gcp"
 	"spotinfo/internal/snapshot"
 )
+
+// A page that moves to another host is a contract change, not a fetch detail:
+// the body would be hashed into the manifest against the contracted URL, so the
+// refresh must fail and force a review instead. A redirect that stays on the
+// contracted host is a path move and is still followed.
+func TestFetchRefusesAnOffHostRedirect(t *testing.T) {
+	t.Parallel()
+
+	contracted := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/off-host":
+			http.Redirect(w, r, "http://pricing.example.invalid/pricing", http.StatusFound)
+		case "/in-host":
+			http.Redirect(w, r, "/pricing", http.StatusFound)
+		default:
+			_, _ = io.WriteString(w, "contracted body")
+		}
+	}))
+	defer contracted.Close()
+
+	client := contractedHostClient()
+
+	_, err := fetchOnce(t.Context(), client, contracted.URL+"/off-host")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not the contracted")
+
+	body, err := fetchOnce(t.Context(), client, contracted.URL+"/in-host")
+	require.NoError(t, err)
+	assert.Equal(t, "contracted body", string(body))
+}
 
 func testCatalog(t *testing.T) *gcp.Catalog {
 	t.Helper()

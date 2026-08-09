@@ -25,6 +25,20 @@ const (
 	cloudFlagUsage = "cloud provider: aws|gcp|azure (default: aws)"
 )
 
+// machineFilter resolves the machine-type filter from the nearest context that
+// set it. --machine is an alias of two different primary names — --type on the
+// root command, --instance on recommend — so `spotinfo --machine … recommend …`
+// parses cleanly into a flag recommend never reads. Reading only the local
+// --instance therefore answers without the caller's filter and reports success.
+func machineFilter(ctx *cli.Context) string {
+	resolved := flagLineageContext(ctx, flagInstance, flagType, flagMachine)
+	if value := resolved.String(flagInstance); value != "" {
+		return value
+	}
+
+	return resolved.String(flagType)
+}
+
 // providerRegistry is the slice of the compiled provider registry the CLI
 // needs, defined next to its consumer.
 type providerRegistry interface {

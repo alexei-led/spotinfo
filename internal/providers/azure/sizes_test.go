@@ -133,6 +133,21 @@ func TestASizeNameThisParserCannotReadFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "Standard_E32-8as_v5")
 }
 
+// A size row that lost a contracted column is a page that changed shape, not a
+// row to skip: skipping it publishes a catalogue quietly missing those sizes.
+func TestASizeRowMissingAColumnFails(t *testing.T) {
+	t.Parallel()
+
+	page := strings.Replace(sizePage("[x86-64]"),
+		"<tr><td>Standard_E2s_v5</td><td>2</td><td>16</td></tr>",
+		"<tr><td>Standard_E2s_v5</td><td>2</td></tr>", 1)
+
+	_, err := ParseSeriesPage(strings.NewReader(page), "esv5")
+
+	require.ErrorIs(t, err, ErrSourceContract)
+	assert.Contains(t, err.Error(), "Standard_E2s_v5")
+}
+
 // A row that is not a size row at all — a footnote or a sub-heading — is still
 // skipped, or every page with prose in its table would fail.
 func TestANonSizeRowIsStillSkipped(t *testing.T) {

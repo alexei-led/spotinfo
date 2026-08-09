@@ -378,13 +378,7 @@ This tool returns a list of all AWS regions that have spot instance data availab
 ```json
 {
   "type": "object",
-  "properties": {
-    "include_names": {
-      "type": "boolean",
-      "description": "Include human-readable region names (e.g., 'US East (N. Virginia)')",
-      "default": true
-    }
-  },
+  "properties": {},
   "additionalProperties": false
 }
 ```

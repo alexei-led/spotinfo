@@ -100,7 +100,7 @@ func run(ctx context.Context, dataDir string) error {
 	// expired halfway through the sweep with its replacement.
 	at := time.Now().UTC()
 
-	client := &http.Client{}
+	client := contractedHostClient()
 
 	series, specSources, err := fetchSeries(ctx, client, contract)
 	if err != nil {
@@ -296,9 +296,23 @@ func sweepRegion(ctx context.Context, client *http.Client, first string) ([]azur
 	return items, bodies.Bytes(), nil
 }
 
-// sameHost keeps pagination inside the contracted service. NextPageLink is
-// supplied by the response, so following it anywhere would let one compromised
-// reply redirect the refresh at another host.
+// contractedHostClient refuses a redirect that leaves the contracted host. A
+// 3xx Location is as response-supplied as NextPageLink, and Go's default policy
+// would follow it anywhere: the body of the redirect target would then be
+// hashed into the manifest against the contracted URL, so a moved source would
+// be committed as if the contract still described it. An in-host redirect is
+// still followed — those are path and locale moves, not a change of source.
+func contractedHostClient() *http.Client {
+	return &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return sameHost(via[0].URL.String(), req.URL.String())
+		},
+	}
+}
+
+// sameHost keeps a request inside the contracted service. Both a NextPageLink
+// and a redirect Location are supplied by the response, so following either
+// anywhere would let one compromised reply redirect the refresh at another host.
 func sameHost(first, next string) error {
 	left, err := url.Parse(first)
 	if err != nil {
@@ -307,12 +321,12 @@ func sameHost(first, next string) error {
 
 	right, err := url.Parse(next)
 	if err != nil {
-		return fmt.Errorf("parse next page link: %w", err)
+		return fmt.Errorf("parse follow-on url: %w", err)
 	}
 
 	if right.Scheme != left.Scheme || right.Hostname() != left.Hostname() {
-		return fmt.Errorf("next page link points at %s://%s, not the contracted %s://%s",
-			right.Scheme, right.Hostname(), left.Scheme, left.Hostname())
+		return fmt.Errorf("%s points at %s://%s, not the contracted %s://%s",
+			next, right.Scheme, right.Hostname(), left.Scheme, left.Hostname())
 	}
 
 	return nil

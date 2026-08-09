@@ -31,6 +31,37 @@ func gcpCandidates() []cloud.Candidate {
 	return candidates
 }
 
+// A ceiling finer than the fixed-point scale filters here exactly as it does in
+// find_spot_instances. A client that turns a monthly budget into an hourly one
+// sends 0.041666666666666664 routinely, and the two tools must not disagree
+// about whether that is a usable ceiling or an invalid argument.
+func TestFinerThanScalePriceCeilingStillFiltersOnV2(t *testing.T) {
+	for name, test := range map[string]struct {
+		price float64
+		want  string
+	}{
+		"within the scale":       {price: 0.04, want: "0.040000000"},
+		"exactly at the scale":   {price: 0.040000001, want: "0.040000001"},
+		"one digit past":         {price: 0.0400000001, want: "0.040000000"},
+		"monthly budget an hour": {price: 30.0 / 720.0, want: "0.041666666"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			provider := offlineProvider(cloud.ProviderGCP, gcpCandidates())
+			result := callRecommend(t, newStubRegistry(provider), map[string]any{
+				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
+				"max_price_per_hour": test.price,
+			})
+			require.False(t, result.IsError)
+
+			ceiling := provider.lastQuery().MaxPrice
+			require.NotNil(t, ceiling, "the caller's ceiling must reach the provider")
+			assert.Equal(t, test.want, ceiling.String())
+		})
+	}
+}
+
 func offlineProvider(id cloud.ProviderID, candidates []cloud.Candidate) *stubProvider {
 	return &stubProvider{
 		id:           id,
@@ -106,11 +137,19 @@ func TestRecommendInputSchemaMatchesTheRecordedContract(t *testing.T) {
 	assertGolden(t, "recommend-spot-instances-v2-input-schema.json", append(encoded, '\n'))
 }
 
+// boundKeywords are the validation keywords the contract uses to bound an
+// input. They are compared alongside type and enum because a dropped bound is
+// what lets a host forward 0 or [] as if the contract allowed it.
+var boundKeywords = []string{
+	"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+	"minItems", "uniqueItems", "minLength", "items",
+}
+
 // The registered schema must agree with the normative input contract on the
-// fields a client depends on: required inputs, declared types, enums, defaults
-// and whether unknown arguments are accepted. Type matters as much as the enum:
-// a contract integer advertised as a number lets a host pass 2.5 where the
-// handler will truncate, and an open object silently drops a misspelled key.
+// fields a client depends on: required inputs, declared types, enums, bounds,
+// defaults and whether unknown arguments are accepted. Type matters as much as
+// the enum: a contract integer advertised as a number lets a host pass 2.5 where
+// the handler will truncate, and an open object silently drops a misspelled key.
 func TestRegisteredInputSchemaAgreesWithTheNormativeContract(t *testing.T) {
 	server, err := NewServer(Config{Version: "1.0.0", Logger: slog.Default(), Providers: newEmbeddedRegistry()})
 	require.NoError(t, err)
@@ -146,6 +185,13 @@ func TestRegisteredInputSchemaAgreesWithTheNormativeContract(t *testing.T) {
 		}
 		if fallback, has := expected["default"]; has {
 			assert.EqualValues(t, fallback, property["default"], "input %q default", name)
+		}
+		for _, keyword := range boundKeywords {
+			bound, has := expected[keyword]
+			if !has {
+				continue
+			}
+			assert.EqualValues(t, bound, property[keyword], "input %q %s", name, keyword)
 		}
 	}
 	assert.Len(t, advertisedProperties, len(contractProperties), "the advertised schema must not add inputs")

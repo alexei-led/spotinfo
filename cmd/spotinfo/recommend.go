@@ -199,7 +199,7 @@ func legacyRecommendationOptions(ctx *cli.Context, workload cloud.Workload) (*sp
 
 	opts := &spot.RecommendationOptions{
 		Architecture: spot.Architecture(ctx.String(flagArchitecture)),
-		Instance:     ctx.String(flagInstance),
+		Instance:     machineFilter(ctx),
 		OS:           lineageString(ctx, flagOS),
 		CPU:          lineageInt(ctx, flagCPU, "vcpu"),
 		Memory:       lineageInt(ctx, flagMemory, "memory-gib"),
@@ -275,14 +275,17 @@ func neutralRecommendRequest(ctx *cli.Context, id cloud.ProviderID, workload clo
 		return nil, fmt.Errorf("%w: budget must be a positive USD machine-hour price", cloud.ErrInvalidArgument)
 	}
 
-	top := ctx.Int(flagTop)
-	if top == 0 {
-		top = cloud.DefaultTop
+	// IsSet, not a zero check: an explicit --top 0 must reach the request
+	// validator and be rejected, exactly as it is on the v1 path, rather than
+	// being read as "unset" and silently answered with the default.
+	top := cloud.DefaultTop
+	if ctx.IsSet(flagTop) {
+		top = ctx.Int(flagTop)
 	}
 
 	request := &cloud.RecommendRequest{
 		Cloud:        id,
-		Machine:      ctx.String(flagInstance),
+		Machine:      machineFilter(ctx),
 		Architecture: architecture,
 		OS:           instanceOS,
 		Workload:     workload,
@@ -292,7 +295,11 @@ func neutralRecommendRequest(ctx *cli.Context, id cloud.ProviderID, workload clo
 		Top:          top,
 	}
 	if budget > 0 {
-		ceiling, err := cloud.MoneyFromFloat(budget)
+		// A ceiling, not a measured price: --budget is routinely a monthly figure
+		// divided by 720, which carries more fractional digits than the scale.
+		// Truncating can only tighten it, where MoneyFromFloat would reject the
+		// request outright — and the v1 path already accepts that same value.
+		ceiling, err := cloud.MoneyCeilingFromFloat(budget)
 		if err != nil {
 			return nil, err
 		}

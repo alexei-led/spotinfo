@@ -49,9 +49,11 @@ const (
 	argScoreTimeout        = "score_timeout"
 	// allRegions is the "regions" argument value meaning every AWS region.
 	allRegions = "all"
-	// jsonSchemaType and jsonTypeString declare an array item's element type.
-	jsonSchemaType = "type"
-	jsonTypeString = "string"
+	// jsonSchemaType and jsonTypeString declare an array item's element type;
+	// jsonSchemaMinLength keeps an empty string out of such an array.
+	jsonSchemaType      = "type"
+	jsonTypeString      = "string"
+	jsonSchemaMinLength = "minLength"
 )
 
 // JSON field names of the MCP tool responses.

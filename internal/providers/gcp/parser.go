@@ -89,21 +89,36 @@ var (
 	machineIDPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$`)
 )
 
-// armSeries are the Arm-based Compute Engine machine series. The pricing tables
-// publish no architecture column, so it comes from this reviewed list — recorded
-// as a source in the committed manifest — rather than from a guess about the
-// machine name. An unlisted series is x86_64 only because every other series
-// Google publishes is; a new Arm series must be added here before its prices
-// can ship.
-var armSeries = map[string]struct{}{seriesC4A: {}, seriesN4A: {}, seriesT2A: {}}
-
-// The Arm machine series, named so the reviewed list reads as a decision rather
-// than three loose strings.
-const (
-	seriesC4A = "c4a"
-	seriesN4A = "n4a"
-	seriesT2A = "t2a"
-)
+// seriesArchitecture classifies every machine series the source contract
+// approves. The pricing tables publish no architecture column, so it comes from
+// this reviewed list — recorded as a source in the committed manifest — rather
+// than from a guess about the machine name.
+//
+// The map is total on purpose: an unclassified series has no architecture and
+// fails. Defaulting to x86_64 would let a new Arm series approved in the
+// contract ship as x86_64 and pass every other gate, recommending machines that
+// cannot run the caller's binaries.
+// TestEveryContractedSeriesIsClassified pins the two lists together.
+var seriesArchitecture = map[string]cloud.Architecture{
+	"c2":  cloud.ArchitectureX8664,
+	"c3":  cloud.ArchitectureX8664,
+	"c3d": cloud.ArchitectureX8664,
+	"c4":  cloud.ArchitectureX8664,
+	"c4a": cloud.ArchitectureARM64,
+	"c4d": cloud.ArchitectureX8664,
+	"e2":  cloud.ArchitectureX8664,
+	"m1":  cloud.ArchitectureX8664,
+	"m2":  cloud.ArchitectureX8664,
+	"m3":  cloud.ArchitectureX8664,
+	"n1":  cloud.ArchitectureX8664,
+	"n2":  cloud.ArchitectureX8664,
+	"n2d": cloud.ArchitectureX8664,
+	"n4":  cloud.ArchitectureX8664,
+	"n4a": cloud.ArchitectureARM64,
+	"n4d": cloud.ArchitectureX8664,
+	"t2a": cloud.ArchitectureARM64,
+	"t2d": cloud.ArchitectureX8664,
+}
 
 // MachineRow is one machine as a pricing page publishes it: identifier,
 // specification, and the single price that page's contracted column carries.
@@ -352,11 +367,11 @@ func SeriesOf(id cloud.MachineID) string {
 	return series
 }
 
-// ArchitectureOf resolves a machine series to its processor architecture.
-func ArchitectureOf(id cloud.MachineID) cloud.Architecture {
-	if _, arm := armSeries[SeriesOf(id)]; arm {
-		return cloud.ArchitectureARM64
-	}
+// ArchitectureOf resolves a machine series to its reviewed processor
+// architecture. A series this package has not classified reports false: the
+// caller must fail on it rather than assume one.
+func ArchitectureOf(id cloud.MachineID) (cloud.Architecture, bool) {
+	architecture, classified := seriesArchitecture[SeriesOf(id)]
 
-	return cloud.ArchitectureX8664
+	return architecture, classified
 }

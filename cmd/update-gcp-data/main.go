@@ -162,8 +162,28 @@ type page struct {
 	kinds     []snapshot.DataKind
 }
 
+// contractedHostClient refuses a redirect that leaves the contracted host. Go's
+// default policy would follow a response-supplied 3xx Location anywhere, and
+// the body it returned would then be hashed into the manifest against the
+// contracted URL — committing a moved source as if the contract still described
+// it. An in-host redirect is still followed: those are path and locale moves,
+// not a change of source.
+func contractedHostClient() *http.Client {
+	return &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			origin := via[0].URL
+			if req.URL.Scheme != origin.Scheme || req.URL.Hostname() != origin.Hostname() {
+				return fmt.Errorf("%s redirects to %s://%s, not the contracted %s://%s",
+					origin, req.URL.Scheme, req.URL.Hostname(), origin.Scheme, origin.Hostname())
+			}
+
+			return nil
+		},
+	}
+}
+
 func fetchSources(ctx context.Context, contract *snapshot.SourceContract) ([]page, error) {
-	client := &http.Client{}
+	client := contractedHostClient()
 	pages := make([]page, 0, len(contract.Sources))
 
 	for i := range contract.Sources {

@@ -205,8 +205,16 @@ func sizeRows(series string, rows [][]string) ([]SizeSpec, error) {
 	parsed := make([]SizeSpec, 0, len(rows))
 
 	for _, cells := range rows {
-		if len(cells) < specColumns || !strings.HasPrefix(cells[0], sizeNamePrefix) {
+		if len(cells) == 0 || !strings.HasPrefix(cells[0], sizeNamePrefix) {
 			continue
+		}
+
+		// The prefix decides that this is a size row, so a short row is a page
+		// that dropped or reordered a contracted column — not a row to skip, which
+		// would quietly publish a catalogue missing those sizes.
+		if len(cells) < specColumns {
+			return nil, fmt.Errorf("%w: %s in %s has %d columns, not the %d this parser reads",
+				ErrSourceContract, cells[0], series, len(cells), specColumns)
 		}
 
 		// A cell that starts with the size prefix is a size row, so a name this

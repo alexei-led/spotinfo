@@ -89,9 +89,15 @@ func BuildCatalog(region cloud.Region, spotRows, onDemandRows []MachineRow) (*Ca
 			continue
 		}
 
+		architecture, classified := ArchitectureOf(id)
+		if !classified {
+			return nil, nil, fmt.Errorf("%w: %s belongs to series %q, which has no reviewed architecture",
+				ErrSourceContract, id, SeriesOf(id))
+		}
+
 		machines = append(machines, CatalogMachine{
 			ID:           id,
-			Architecture: ArchitectureOf(id),
+			Architecture: architecture,
 			VCPU:         row.VCPU,
 			MemoryGiB:    row.MemoryGiB,
 			Spot:         row.Price,
@@ -109,18 +115,19 @@ func BuildCatalog(region cloud.Region, spotRows, onDemandRows []MachineRow) (*Ca
 	}, unpaired, nil
 }
 
-// indexRows keys rows by machine. A repeated row with the same price is
-// harmless redundancy — the pages list some machines under more than one
-// heading — but two different prices for one machine is ambiguity with no safe
-// resolution.
+// indexRows keys rows by machine. An exact repeat is harmless redundancy — the
+// pages list some machines under more than one heading — but two rows that
+// disagree are ambiguity with no safe resolution. The whole row is compared, not
+// just the price: two identical prices with different vCPU or memory would
+// otherwise publish whichever row the page happened to list last.
 func indexRows(rows []MachineRow, class cloud.PriceClass) (map[cloud.MachineID]MachineRow, error) {
 	indexed := make(map[cloud.MachineID]MachineRow, len(rows))
 
 	for _, row := range rows {
 		previous, repeated := indexed[row.ID]
-		if repeated && previous.Price != row.Price {
-			return nil, fmt.Errorf("%w: %s has two %s prices, %s and %s",
-				ErrSourceContract, row.ID, class, previous.Price, row.Price)
+		if repeated && previous != row {
+			return nil, fmt.Errorf("%w: %s is listed twice in the %s prices with different values, %+v and %+v",
+				ErrSourceContract, row.ID, class, previous, row)
 		}
 		indexed[row.ID] = row
 	}
@@ -202,9 +209,17 @@ func (m *CatalogMachine) verify(contract *snapshot.SourceContract) error {
 	if !slices.Contains(contract.Support.Architectures, m.Architecture) {
 		return fmt.Errorf("%w: %s declares unapproved architecture %q", ErrCatalog, m.ID, m.Architecture)
 	}
-	if m.Architecture != ArchitectureOf(m.ID) {
+	// A series with no reviewed architecture fails rather than defaulting: a new
+	// Arm series added to the contract alone would otherwise ship as x86_64 and
+	// pass every remaining gate.
+	reviewed, classified := ArchitectureOf(m.ID)
+	if !classified {
+		return fmt.Errorf("%w: %s belongs to series %q, which has no reviewed architecture",
+			ErrCatalog, m.ID, SeriesOf(m.ID))
+	}
+	if m.Architecture != reviewed {
 		return fmt.Errorf("%w: %s is recorded as %q but its series is %q",
-			ErrCatalog, m.ID, m.Architecture, ArchitectureOf(m.ID))
+			ErrCatalog, m.ID, m.Architecture, reviewed)
 	}
 	if m.VCPU <= 0 || m.MemoryGiB <= 0 {
 		return fmt.Errorf("%w: %s has no usable specification", ErrCatalog, m.ID)

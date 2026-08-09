@@ -179,7 +179,35 @@ func TestArchitectureComesFromTheReviewedSeriesList(t *testing.T) {
 		"n2d-standard-16": cloud.ArchitectureX8664,
 		"m3-ultramem-32":  cloud.ArchitectureX8664,
 	} {
-		assert.Equal(t, want, ArchitectureOf(machine), machine)
+		got, classified := ArchitectureOf(machine)
+		assert.True(t, classified, machine)
+		assert.Equal(t, want, got, machine)
+	}
+}
+
+// An unreviewed series has no architecture. Defaulting it to x86_64 is how a new
+// Arm series ships silently mislabelled, so the classification is total over the
+// contracted series and anything else fails.
+func TestAnUnreviewedSeriesHasNoArchitecture(t *testing.T) {
+	t.Parallel()
+
+	_, classified := ArchitectureOf("z9a-standard-2")
+	assert.False(t, classified)
+}
+
+func TestEveryContractedSeriesIsClassified(t *testing.T) {
+	t.Parallel()
+
+	loaded, err := LoadEmbeddedSnapshot()
+	require.NoError(t, err)
+
+	contract := loaded.Contract
+	require.NotEmpty(t, contract.Support.MachineSeries)
+
+	for _, series := range contract.Support.MachineSeries {
+		architecture, classified := ArchitectureOf(cloud.MachineID(series + "-standard-2"))
+		assert.True(t, classified, "series %q is approved by the contract but has no reviewed architecture", series)
+		assert.Contains(t, contract.Support.Architectures, architecture, series)
 	}
 }
 

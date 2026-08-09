@@ -25,6 +25,11 @@ func row(t *testing.T, id, price string, vcpu int, memoryGiB float64) MachineRow
 	return MachineRow{ID: cloud.MachineID(id), VCPU: vcpu, MemoryGiB: memoryGiB, Price: money(t, price)}
 }
 
+// testSeries is the small approved support matrix these tests build catalogues
+// against: one x86_64 series and one Arm series, named by the machines below so
+// the two lists cannot drift apart.
+var testSeries = []string{SeriesOf("c4-standard-2"), SeriesOf("t2a-standard-4")}
+
 // testContract mirrors the committed contract's shape with a small support
 // matrix, so a test can put a catalogue outside it deliberately.
 func testContract() *snapshot.SourceContract {
@@ -38,7 +43,7 @@ func testContract() *snapshot.SourceContract {
 			Architectures:    []cloud.Architecture{cloud.ArchitectureX8664, cloud.ArchitectureARM64},
 			PriceClasses:     []cloud.PriceClass{cloud.PriceClassSpot, cloud.PriceClassOnDemand},
 			Regions:          []cloud.Region{contractedRegion},
-			MachineSeries:    []string{"c4", "t2a"},
+			MachineSeries:    testSeries,
 		},
 		Thresholds: snapshot.Thresholds{
 			MinRegions: 1, MinMachines: 1, MaxCompressedBytes: 1 << 16, MaxFractionalDigits: 6,
@@ -70,7 +75,7 @@ func TestBuildCatalogJoinsSpotWithItsOnDemandPair(t *testing.T) {
 	assert.Equal(t, cloud.ArchitectureARM64, catalog.Machines[1].Architecture)
 	assert.Equal(t, cloud.OSLinux, catalog.OS)
 	assert.Equal(t, snapshot.Coverage{Regions: 1, Machines: 2, Prices: 4}, catalog.Coverage())
-	assert.Equal(t, []string{"c4", "t2a"}, catalog.Series())
+	assert.Equal(t, testSeries, catalog.Series())
 }
 
 func TestBuildCatalogLeavesOutASpotMachineWithNoOnDemandPair(t *testing.T) {
@@ -92,6 +97,15 @@ func TestBuildCatalogRejectsTwoDifferentPricesForOneMachine(t *testing.T) {
 
 	_, _, err := BuildCatalog(contractedRegion,
 		[]MachineRow{row(t, "c4-standard-2", "0.058121", 2, 7), row(t, "c4-standard-2", "0.06", 2, 7)},
+		[]MachineRow{row(t, "c4-standard-2", "0.117660", 2, 7)})
+	require.ErrorIs(t, err, ErrSourceContract)
+}
+
+func TestBuildCatalogRejectsTwoDifferentSpecificationsForOneMachine(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := BuildCatalog(contractedRegion,
+		[]MachineRow{row(t, "c4-standard-2", "0.058121", 2, 7), row(t, "c4-standard-2", "0.058121", 4, 15)},
 		[]MachineRow{row(t, "c4-standard-2", "0.117660", 2, 7)})
 	require.ErrorIs(t, err, ErrSourceContract)
 }

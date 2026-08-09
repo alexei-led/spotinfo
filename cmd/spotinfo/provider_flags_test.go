@@ -364,6 +364,47 @@ func TestMachineFlagIsAnAliasOfTheAWSSpellings(t *testing.T) {
 	}
 }
 
+// --machine aliases two different primary names, so placing it before the
+// subcommand sets root's --type while recommend reads --instance. The filter
+// must survive that placement rather than being dropped in silence.
+func TestMachineFilterResolvesAcrossContextLineage(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		want string
+		args []string
+	}{
+		{name: "unset", want: "", args: validRecommendArgs()},
+		{name: "after the subcommand", want: "m5.large", args: validRecommendArgs("--machine", "m5.large")},
+		{name: "recommend --instance", want: "m5.large", args: validRecommendArgs("--instance", "m5.large")},
+		{
+			name: "before the subcommand",
+			want: "m5.large",
+			args: append([]string{"--machine", "m5.large"}, validRecommendArgs()...),
+		},
+		{
+			name: "root --type",
+			want: "m5.large",
+			args: append([]string{"--type", "m5.large"}, validRecommendArgs()...),
+		},
+		{
+			name: "the nearest context wins",
+			want: "m5.large",
+			args: append([]string{"--machine", "root-value"}, validRecommendArgs("--instance", "m5.large")...),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var got string
+			record := func(ctx *cli.Context) error {
+				got = machineFilter(ctx)
+
+				return nil
+			}
+			require.NoError(t, newSpotinfoApp(record, record).Run(append([]string{appName}, test.args...)))
+			assert.Equal(t, test.want, got)
+		})
+	}
+}
+
 // An OS outside the neutral vocabulary is not a capability question: the
 // provider owns that error, and AWS already reports it with its own wording.
 func TestRequestedValuesIgnoreWhatIsNotInTheVocabulary(t *testing.T) {

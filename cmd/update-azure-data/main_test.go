@@ -183,6 +183,36 @@ func TestPaginationStaysOnTheContractedHost(t *testing.T) {
 // TestSweepRegionRefusesAnOffHostNextPageLink drives the guard through the real
 // pagination loop: the response chooses the next request, so the check has to
 // happen before that request is made, not after.
+// A 3xx Location is as response-supplied as a NextPageLink. Following one off
+// the contracted host would hash the moved page into the manifest against the
+// contracted URL, so it fails; an in-host redirect is a path move and is still
+// followed.
+func TestFetchRefusesAnOffHostRedirect(t *testing.T) {
+	t.Parallel()
+
+	contracted := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/off-host":
+			http.Redirect(w, r, "http://prices.example.invalid/api/retail/prices", http.StatusFound)
+		case "/in-host":
+			http.Redirect(w, r, "/prices", http.StatusFound)
+		default:
+			_, _ = io.WriteString(w, "contracted body")
+		}
+	}))
+	defer contracted.Close()
+
+	client := contractedHostClient()
+
+	_, err := fetchOnce(t.Context(), client, contracted.URL+"/off-host")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "prices.example.invalid")
+
+	body, err := fetchOnce(t.Context(), client, contracted.URL+"/in-host")
+	require.NoError(t, err)
+	assert.Equal(t, "contracted body", string(body))
+}
+
 func TestSweepRegionRefusesAnOffHostNextPageLink(t *testing.T) {
 	t.Parallel()
 

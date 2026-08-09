@@ -34,10 +34,12 @@
       },
       "max_price_per_hour": {
         "description": "Maximum USD per machine-hour. Omit for no price ceiling",
+        "exclusiveMinimum": 0,
         "type": "number"
       },
       "min_memory_gib": {
         "description": "Required minimum memory in GiB",
+        "exclusiveMinimum": 0,
         "type": "number"
       },
       "min_vcpu": {
@@ -60,9 +62,12 @@
         ],
         "description": "Provider regions to search. Use ['all'] for every region the provider publishes",
         "items": {
+          "minLength": 1,
           "type": "string"
         },
-        "type": "array"
+        "minItems": 1,
+        "type": "array",
+        "uniqueItems": true
       },
       "top": {
         "default": 3,

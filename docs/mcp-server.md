@@ -67,8 +67,8 @@ Search for AWS EC2 Spot Instance options based on requirements.
 
 List all AWS regions where EC2 Spot Instances are available.
 
-**Parameters:**
-- `include_names` (optional): Include human-readable region names (default: true)
+**Parameters:** none. The advisor feed carries no human-readable region names, so
+the tool takes no arguments.
 
 **Response:** Array of available region codes and total count.
 

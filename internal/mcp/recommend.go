@@ -28,6 +28,13 @@ const (
 
 const recommendToolName = "recommend_spot_instances"
 
+// exclusiveMinimum declares the contract's exclusive lower bound, which mcp-go
+// has no helper for. `minimum: 0` is not the same promise: it advertises zero as
+// an acceptable memory floor or price ceiling, and the handler rejects both.
+func exclusiveMinimum(bound float64) mcp.PropertyOption {
+	return func(schema map[string]any) { schema["exclusiveMinimum"] = bound }
+}
+
 // registerRecommendTool advertises the provider-neutral recommendation tool.
 // The schema mirrors the published v2 input contract; the MCP host rejects
 // values outside each enum before a request reaches the handler.
@@ -41,7 +48,9 @@ func (s *Server) registerRecommendTool() {
 			mcp.DefaultString(string(cloud.ProviderAWS))),
 		mcp.WithArray(argRegions,
 			mcp.Description("Provider regions to search. Use ['all'] for every region the provider publishes"),
-			mcp.Items(map[string]any{jsonSchemaType: jsonTypeString}),
+			mcp.Items(map[string]any{jsonSchemaType: jsonTypeString, jsonSchemaMinLength: 1}),
+			mcp.MinItems(1),
+			mcp.UniqueItems(true),
 			mcp.DefaultArray([]string{allRegions})),
 		mcp.WithString(argMachine,
 			mcp.Description("Machine type RE2 regexp. Omit for no machine-name filter"),
@@ -60,9 +69,11 @@ func (s *Server) registerRecommendTool() {
 			mcp.Required()),
 		mcp.WithNumber(argMinMemoryGiB,
 			mcp.Description("Required minimum memory in GiB"),
+			exclusiveMinimum(0),
 			mcp.Required()),
 		mcp.WithNumber(argMaxPricePerHour,
-			mcp.Description("Maximum USD per machine-hour. Omit for no price ceiling")),
+			mcp.Description("Maximum USD per machine-hour. Omit for no price ceiling"),
+			exclusiveMinimum(0)),
 		mcp.WithString(argWorkload,
 			mcp.Description("Ranking policy. 'cost' ranks by price alone and makes no interruption claim; "+
 				"'web', 'ci' and 'batch' cap interruption frequency and need a provider that publishes risk"),
@@ -350,7 +361,13 @@ func intArg(args map[string]any, key string, defaultValue int) (int, error) {
 }
 
 // optionalPrice converts a price ceiling. An absent argument means no ceiling;
-// a present one must be a representable positive amount.
+// a present one must be a positive amount.
+//
+// A ceiling is truncated to the fixed-point scale rather than rejected for
+// precision: a client that divides a monthly budget by 720 sends
+// 0.041666666666666664, which find_spot_instances already filters on, so
+// failing it here would make the v2 tool reject a budget v1 accepts. NaN and
+// out-of-range amounts still fail — those are not ceilings.
 func optionalPrice(args map[string]any, key string) (*cloud.Money, error) {
 	amount, present, err := numberArg(args, key)
 	if err != nil {
@@ -364,7 +381,7 @@ func optionalPrice(args map[string]any, key string) (*cloud.Money, error) {
 		return nil, fmt.Errorf("%w: %s must be positive", cloud.ErrInvalidArgument, argMaxPricePerHour)
 	}
 
-	price, err := cloud.MoneyFromFloat(amount)
+	price, err := cloud.MoneyCeilingFromFloat(amount)
 	if err != nil {
 		return nil, err
 	}
