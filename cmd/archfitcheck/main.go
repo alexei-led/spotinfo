@@ -71,39 +71,43 @@ func main() {
 func run(input io.Reader, output, errOutput io.Writer) int {
 	contents, err := io.ReadAll(input)
 	if err != nil {
-		fmt.Fprintf(errOutput, "archfitcheck: read report: %v\n", err) //nolint:errcheck // diagnostics only
+		writeDiagnostic(errOutput, "archfitcheck: read report: %v\n", err)
 
 		return exitInvalidInput
 	}
 
 	var parsed report
 	if err := json.Unmarshal(contents, &parsed); err != nil {
-		fmt.Fprintf(errOutput, "archfitcheck: parse report: %v\n", err) //nolint:errcheck
+		writeDiagnostic(errOutput, "archfitcheck: parse report: %v\n", err)
 
 		return exitInvalidInput
 	}
 	if parsed.Verdict == "" {
-		fmt.Fprintln(errOutput, "archfitcheck: report has no verdict; is this an archfit analyze --json report?") //nolint:errcheck
+		writeDiagnostic(errOutput, "archfitcheck: report has no verdict; is this an archfit analyze --json report?\n")
 
 		return exitInvalidInput
 	}
 
 	open := openBlockingFindings(parsed.Findings)
 	if len(open) == 0 {
-		fmt.Fprintf(output, "archfitcheck: no open critical or high findings (%d findings reviewed)\n", //nolint:errcheck
+		writeDiagnostic(output, "archfitcheck: no open critical or high findings (%d findings reviewed)\n",
 			len(parsed.Findings))
 
 		return exitOK
 	}
 
-	fmt.Fprintf(errOutput, "archfitcheck: %d open critical or high finding(s):\n", len(open)) //nolint:errcheck
+	writeDiagnostic(errOutput, "archfitcheck: %d open critical or high finding(s):\n", len(open))
 	for _, item := range open {
-		fmt.Fprintf(errOutput, "  %s %s [%s] %s -> %s (%s)\n    %s\n", //nolint:errcheck
+		writeDiagnostic(errOutput, "  %s %s [%s] %s -> %s (%s)\n    %s\n",
 			item.Severity, item.ID, item.RuleID,
 			item.Edge.From.Module, item.Edge.To.Module, item.Edge.From.Path, item.Why)
 	}
 
 	return exitFindingsOpen
+}
+
+func writeDiagnostic(output io.Writer, format string, args ...any) {
+	_, _ = fmt.Fprintf(output, format, args...)
 }
 
 // openBlockingFindings returns every Critical or High finding that is not

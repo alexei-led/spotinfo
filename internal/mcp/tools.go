@@ -367,7 +367,7 @@ func buildResponse(candidates []cloud.Candidate, startTime time.Time, mode cloud
 		fieldResults: results,
 		fieldMetadata: map[string]any{
 			fieldTotalResults:    len(results),
-			fieldRegionsSearched: slices.Collect(maps.Keys(regionsSearched)),
+			fieldRegionsSearched: slices.Sorted(maps.Keys(regionsSearched)),
 			fieldQueryTimeMS:     time.Since(startTime).Milliseconds(),
 			fieldDataSource:      dataSourceFor(mode),
 			fieldDataFreshness:   freshnessFor(mode),
@@ -553,5 +553,5 @@ func (t *ListSpotRegionsTool) fetchRegions(ctx context.Context) ([]string, error
 func regionNames(regionSet map[string]bool) []string {
 	names := make([]string, 0, len(regionSet))
 
-	return append(names, slices.Collect(maps.Keys(regionSet))...)
+	return append(names, slices.Sorted(maps.Keys(regionSet))...)
 }

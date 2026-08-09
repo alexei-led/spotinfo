@@ -22,7 +22,7 @@ const (
 	// is declared as an alias of each.
 	flagMachine = "machine"
 
-	cloudFlagUsage = "cloud provider: aws|gcp|azure (default: aws)"
+	cloudFlagUsage = "cloud provider: aws|gcp|azure (default: aws; GCP/Azure require recommend)"
 )
 
 // machineFilter resolves the machine-type filter from the nearest context that

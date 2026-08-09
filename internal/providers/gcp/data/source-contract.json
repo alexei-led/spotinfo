@@ -9,7 +9,7 @@
   "terms": {
     "redistribution_decision": "approved",
     "evidence_url": "https://developers.google.com/site-policies",
-    "notes": "The committed catalogue republishes factual figures only - machine type, vCPU count, memory in GiB, and USD per instance-hour - with attribution to the exact source URLs recorded in the sidecar manifest. No page markup, styling, prose, or image is redistributed. The machine-architecture reference page is published under the Creative Commons Attribution 4.0 License linked from its footer. Confirm this decision with the project owner before each schema change."
+    "notes": "The committed catalogue republishes factual figures only - machine type, vCPU count, memory in GiB, and USD per instance-hour - with attribution to the exact source URLs recorded in the sidecar manifest. No page markup, styling, prose, or image is redistributed. The machine-architecture reference page is published under the Creative Commons Attribution 4.0 License linked from its footer. The project owner approved this redistribution decision; reconfirm it before each schema change."
   },
   "sources": [
     {

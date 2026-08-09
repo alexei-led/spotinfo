@@ -66,16 +66,69 @@ func WriteFile(path string, data []byte) error {
 // invalid manifest is never written: a snapshot must not ship with a sidecar
 // that would fail its own gate.
 func WriteManifest(path string, manifest *Manifest) error {
-	if err := manifest.Validate(); err != nil {
+	data, err := encodeManifest(manifest, path)
+	if err != nil {
 		return err
+	}
+
+	return WriteFile(path, data)
+}
+
+// WriteSnapshot writes a payload and its manifest as one update. The two files
+// cannot be renamed as one filesystem object, so the payload is restored if the
+// manifest commit fails. Callers therefore never return from a failed update
+// with the reviewed payload replaced by an unpaired one.
+func WriteSnapshot(payloadPath string, payload []byte, manifestPath string, manifest *Manifest) error {
+	manifestData, err := encodeManifest(manifest, manifestPath)
+	if err != nil {
+		return err
+	}
+
+	previousPayload, payloadExists, err := previousFile(payloadPath)
+	if err != nil {
+		return err
+	}
+	if err := WriteFile(payloadPath, payload); err != nil {
+		return fmt.Errorf("write snapshot payload: %w", err)
+	}
+	if err := WriteFile(manifestPath, manifestData); err != nil {
+		if payloadExists {
+			if restoreErr := WriteFile(payloadPath, previousPayload); restoreErr != nil {
+				return fmt.Errorf("write snapshot manifest: %w; restore payload: %w", err, restoreErr)
+			}
+		} else if restoreErr := os.Remove(payloadPath); restoreErr != nil && !os.IsNotExist(restoreErr) {
+			return fmt.Errorf("write snapshot manifest: %w; remove payload: %w", err, restoreErr)
+		}
+
+		return fmt.Errorf("write snapshot manifest: %w", err)
+	}
+
+	return nil
+}
+
+func encodeManifest(manifest *Manifest, path string) ([]byte, error) {
+	if err := manifest.Validate(); err != nil {
+		return nil, err
 	}
 
 	data, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode manifest %s: %w", path, err)
+		return nil, fmt.Errorf("encode manifest %s: %w", path, err)
 	}
 
-	return WriteFile(path, append(data, '\n'))
+	return append(data, '\n'), nil
+}
+
+func previousFile(path string) ([]byte, bool, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // the caller owns the snapshot path.
+	if err == nil {
+		return data, true, nil
+	}
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+
+	return nil, false, fmt.Errorf("read previous snapshot payload: %w", err)
 }
 
 func writeAndSync(file *os.File, data []byte) error {

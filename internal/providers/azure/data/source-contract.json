@@ -9,7 +9,7 @@
   "terms": {
     "redistribution_decision": "approved",
     "evidence_url": "https://learn.microsoft.com/en-us/legal/termsofuse",
-    "notes": "The Retail Prices API is documented for anonymous use and returns no licensed content: the committed catalogue republishes factual figures only - VM size name, vCPU count, memory in GiB, processor architecture, and USD per instance-hour - with attribution to the exact source URLs recorded in the sidecar manifest. Microsoft Learn documentation content is published under the Creative Commons Attribution 4.0 International License. No page markup, styling, prose, or image is redistributed. Confirm this decision with the project owner before each schema change."
+    "notes": "The Retail Prices API is documented for anonymous use and returns no licensed content: the committed catalogue republishes factual figures only - VM size name, vCPU count, memory in GiB, processor architecture, and USD per instance-hour - with attribution to the exact source URLs recorded in the sidecar manifest. Microsoft Learn documentation content is published under the Creative Commons Attribution 4.0 International License. No page markup, styling, prose, or image is redistributed. The project owner approved this redistribution decision; reconfirm it before each schema change."
   },
   "sources": [
     {

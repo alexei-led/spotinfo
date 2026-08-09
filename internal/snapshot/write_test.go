@@ -101,6 +101,36 @@ func TestWriteManifestRoundTrips(t *testing.T) {
 	assert.Equal(t, manifest, reloaded)
 }
 
+func TestWriteSnapshotRestoresPayloadWhenManifestWriteFails(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	payloadPath := filepath.Join(dir, "catalog.json.gz")
+	manifestPath := filepath.Join(dir, "manifest.json")
+	require.NoError(t, os.WriteFile(payloadPath, []byte("reviewed"), 0o644))
+	require.NoError(t, os.Mkdir(manifestPath, 0o755))
+
+	err := WriteSnapshot(payloadPath, []byte("replacement"), manifestPath, validManifest(t))
+	require.ErrorContains(t, err, "write snapshot manifest")
+
+	payload, readErr := os.ReadFile(payloadPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, "reviewed", string(payload))
+}
+
+func TestWriteSnapshotRemovesNewPayloadWhenManifestWriteFails(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	payloadPath := filepath.Join(dir, "catalog.json.gz")
+	manifestPath := filepath.Join(dir, "manifest.json")
+	require.NoError(t, os.Mkdir(manifestPath, 0o755))
+
+	err := WriteSnapshot(payloadPath, []byte("replacement"), manifestPath, validManifest(t))
+	require.ErrorContains(t, err, "write snapshot manifest")
+	assert.NoFileExists(t, payloadPath)
+}
+
 // A manifest that would fail its own gate must never reach disk: writing it
 // would replace a good sidecar with one the next verification rejects.
 func TestWriteManifestRefusesAnInvalidManifest(t *testing.T) {

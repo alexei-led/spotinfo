@@ -492,7 +492,7 @@ them.
   with explicit regions. It is also the default, so an omitted `regions` searches every
   region of the selected cloud. (The CLI differs: its `--region` default is the AWS region
   name `us-east-1`, which on a non-AWS cloud is treated as unset and expands to `all`.)
-- `cost` ranks by price alone and makes **no** interruption claim. `web`, `ci` and `batch`
+- `cost` makes **no** interruption claim. v2 ranks by price, excess vCPU, excess memory, region, and machine; v1 ranks by price, interruption cap, excess vCPU, excess memory, region, and instance. `web`, `ci` and `batch`
   admit only a risk bucket whose **maximum** is at most 5%, 16% and 22% respectively. On
   AWS the reachable Advisor buckets make those effective ceilings 5%, 15% and 20%. All
   three require a cloud that publishes risk; asking for one on a cloud that does not

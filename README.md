@@ -24,9 +24,9 @@ AWS is the full surface. GCP and Azure are served offline from committed price s
 
 ### 💡 **Single-Instance Recommendations**
 - `recommend` requires an `x86_64` or `arm64` architecture plus positive vCPU and memory minima
-- Workload caps apply to a risk bucket's maximum: web ≤5%, CI ≤16%, batch ≤22%. On AWS the reachable Advisor buckets make those effective ceilings `<5%`, `<=15%` and `<=20%`; `cost` ranks by price only and works on every cloud
+- Workload caps apply to a risk bucket's maximum: web ≤5%, CI ≤16%, batch ≤22%. On AWS the reachable Advisor buckets make those effective ceilings `<5%`, `<=15%` and `<=20%`; `cost` applies no interruption constraint and works on every cloud
 - The default concise table includes deterministic rationale codes; `--output json` emits a versioned request-and-results wrapper
-- Ranking uses price, interruption, and right-sizing excess; savings is displayed but never used to rank
+- AWS v1 ranks by price, interruption, and right-sizing excess. v2 ranks by price and right-sizing excess, then region and machine; unavailable risk is never compared. Savings is displayed but never used to rank
 - Repeated recommendation regions are deduplicated; `all` cannot be mixed with explicit regions
 - **GCP support** (offline, no credentials): `spotinfo recommend --cloud gcp` serves `us-central1`, Linux, x86\_64 and arm64; risk is always `unavailable`, so only `--workload cost` applies. The root query command is AWS-only.
 - **Azure support** (offline, no credentials): `spotinfo recommend --cloud azure` serves eight regions,
@@ -155,7 +155,7 @@ This is **expected AWS behavior** - providing multiple instance types gives AWS 
 | **[AWS Spot Placement Scores](docs/aws-spot-placement-scores.md)** | Deep dive into placement scores with visual guides |
 | **[Examples & Use Cases](docs/examples.md)** | Real-world DevOps scenarios and automation patterns |
 | **[MCP Server Setup](docs/mcp-server.md)** | Model Context Protocol integration guide |
-| **[Data Sources](docs/data-sources.md)** | AWS data feeds, caching strategy, and troubleshooting |
+| **[Data Sources](docs/data-sources.md)** | AWS, GCP, and Azure feeds, snapshots, caching, and troubleshooting |
 
 ## AWS Credentials
 

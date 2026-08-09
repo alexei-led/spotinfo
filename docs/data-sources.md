@@ -385,13 +385,13 @@ parser to make a changed page fit.
 ### API Access
 - **IAM permissions**: `ec2:DescribeSpotPriceHistory` (live pricing), `ec2:GetSpotPlacementScores` (placement scores)
 - **Credential management**: Uses AWS SDK default credential chain
-- **Network security**: HTTPS for advisor data, HTTP for pricing (AWS provided)
-- **Optional**: Both API features degrade gracefully without credentials
+- **Network security**: HTTPS for all AWS, GCP, and Azure source pages and APIs
+- **Optional**: AWS API features degrade gracefully without credentials; GCP and Azure catalogue refreshes use public endpoints
 
 ### Data Privacy
-- **No personal data**: All data is public AWS pricing information
+- **No personal data**: All catalogues contain public cloud pricing and machine specifications
 - **No data retention**: Only temporary caching for performance
-- **No external transmission**: Data stays within AWS and local system
+- **No runtime external transmission**: Embedded catalogues are read locally; refresh commands fetch public source data only
 
 ## Troubleshooting Data Issues
 

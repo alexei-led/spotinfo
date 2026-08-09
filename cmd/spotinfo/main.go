@@ -125,14 +125,14 @@ const (
 	// defaultInstanceOS is the --os flag default
 	defaultInstanceOS = "linux"
 
-	// allRegions is the --region value selecting every AWS region
+	// allRegions is the --region value selecting every published region.
 	allRegions = "all"
 
-	// appName is the CLI application name
+	// appName is the CLI application name.
 	appName = "spotinfo"
 
 	recommendCommandName = "recommend"
-	regionFlagUsage      = "set one or more AWS regions, use \"all\" for all AWS regions"
+	regionFlagUsage      = "set one or more provider regions, use \"all\" for all published regions"
 )
 
 //nolint:cyclop
@@ -847,7 +847,7 @@ func newSpotinfoApp(rootAction, recommendationAction cli.ActionFunc) *cli.App {
 			&cli.StringFlag{
 				Name:    flagType,
 				Aliases: []string{flagMachine},
-				Usage:   "EC2 instance type (can be RE2 regexp patten)",
+				Usage:   "EC2 instance type (can be RE2 regexp pattern)",
 			},
 			&cli.StringFlag{
 				Name:  flagOS,

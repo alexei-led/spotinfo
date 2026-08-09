@@ -6,10 +6,9 @@
 // It reads no credentials and writes nothing until every source has been
 // fetched, parsed, joined, and validated against the contract and the previous
 // coverage floor, so a failure before that point leaves the reviewed snapshot
-// exactly as it was. The payload and the manifest are then two separate atomic
-// renames: a failure between them leaves the new payload under the old
-// manifest, which fails closed at load and in `make verify-data` rather than
-// being served.
+// exactly as it was. The payload and manifest commit uses a rollback pair: if
+// the second file cannot be replaced, the previous payload is restored and the
+// update fails rather than leaving an unpaired snapshot.
 package main
 
 import (
@@ -134,10 +133,10 @@ func run(ctx context.Context, dataDir string) error {
 		return err
 	}
 
-	if err := snapshot.WriteFile(filepath.Join(dataDir, payloadFile), payload); err != nil {
-		return err
-	}
-	if err := snapshot.WriteManifest(filepath.Join(dataDir, manifestFile), manifest); err != nil {
+	if err := snapshot.WriteSnapshot(
+		filepath.Join(dataDir, payloadFile), payload,
+		filepath.Join(dataDir, manifestFile), manifest,
+	); err != nil {
 		return err
 	}
 

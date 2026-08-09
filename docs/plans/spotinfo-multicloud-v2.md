@@ -914,13 +914,10 @@ Final verification:
 - Review saved to `docs/reviews/spotinfo-multicloud-v2-architecture-review.md`: no open Critical
   or High, ship recommendation conditional on the redistribution approvals below.
 
-**Open for the project owner — the one thing tooling cannot close.** Both
-`internal/providers/{gcp,azure}/data/source-contract.json` carry `review_status: approved`,
-`reviewer: alexei-led` and `terms.redistribution_decision: approved`, all written by an agent
-with no human review. The reasoning is recorded in `docs/research/multicloud-source-contracts.md`
-— factual figures with attribution, and Microsoft Learn content under CC BY 4.0 — but the fields
-already read "approved", which is exactly how such a thing gets skimmed past. Confirm both
-before release.
+**Project owner approval recorded.** The project owner confirmed both redistribution decisions
+for `internal/providers/{gcp,azure}/data/source-contract.json`. The reasoning is recorded in
+`docs/research/multicloud-source-contracts.md`: factual figures with attribution, and Microsoft
+Learn content under CC BY 4.0. Reconfirm each decision before a schema change or source expansion.
 
 ## Acceptance criteria
 
