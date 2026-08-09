@@ -27,7 +27,9 @@
 - Ranking uses price, interruption, and right-sizing excess; savings is displayed but never used to rank
 - Repeated recommendation regions are deduplicated; `all` cannot be mixed with explicit regions
 - **GCP support** (offline, no credentials): `spotinfo recommend --cloud gcp` serves `us-central1`, Linux, x86\_64 and arm64; risk is always `unavailable`, so only `--workload cost` applies. The root query command is AWS-only.
-- **Azure**: recognised but returns `DATA_UNAVAILABLE`; no data embedded yet
+- **Azure support** (offline, no credentials): `spotinfo recommend --cloud azure` serves eight regions,
+  Linux, x86\_64 and arm64; risk is always `unavailable`, so only `--workload cost` applies. The root
+  query command is AWS-only.
 
 ### 📊 **Multiple Output Formats**
 - **Visual formats**: Table with emoji indicators, plain text
@@ -86,6 +88,9 @@ spotinfo recommend --architecture x86_64 --cpu 2 --memory 8 --os windows --outpu
 
 # GCP Spot VMs (offline, no credentials, us-central1, cost workload)
 spotinfo recommend --cloud gcp --architecture x86_64 --cpu 2 --memory 8 --top 3
+
+# Azure Spot VMs (offline, no credentials, eight regions, cost workload)
+spotinfo recommend --cloud azure --architecture arm64 --cpu 2 --memory 8 --top 3
 ```
 
 ### New Placement Score Flags
@@ -179,6 +184,9 @@ make update-data update-price verify-data
 
 # Update embedded GCP data (weekly update-gcp-data workflow normally handles this)
 make update-gcp-data verify-data
+
+# Update embedded Azure data (weekly update-azure-data workflow normally handles this)
+make update-azure-data verify-data
 
 # Docker build
 docker buildx build --platform=linux/arm64,linux/amd64 -t spotinfo .

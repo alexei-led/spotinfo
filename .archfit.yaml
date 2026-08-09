@@ -108,6 +108,28 @@ modules:
     # high: its source is a set of public HTML pages Google restyles on its own
     # schedule, refreshed weekly by an update workflow.
     volatility: high
+  providers_azure:
+    paths:
+      - internal/providers/azure/**
+    public:
+      - internal/providers/azure
+    layer: provider
+    owner: spotinfo
+    role: adapter
+    subdomain: core
+    # high: it joins a live third-party REST API with public documentation pages
+    # Microsoft restyles on its own schedule, refreshed weekly by a workflow.
+    volatility: high
+  cmd_update_azure_data:
+    paths:
+      - cmd/update-azure-data/**
+    public:
+      - cmd/update-azure-data
+    layer: cmd
+    owner: spotinfo
+    role: composition_root
+    subdomain: generic
+    volatility: medium
   cmd_update_gcp_data:
     paths:
       - cmd/update-gcp-data/**

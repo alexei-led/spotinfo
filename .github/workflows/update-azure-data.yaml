@@ -1,0 +1,119 @@
+name: Update embedded Azure data
+# Refreshes the embedded Azure catalogue and opens a PR when it changes.
+#
+# The updater is anonymous: no credential, token, subscription, or tenant is
+# used or needed. It writes nothing unless every gate passes, so a failed run
+# leaves the reviewed snapshot exactly as it was. Build, test and release
+# workflows never refresh it.
+on:
+  schedule:
+    # Weekly, Monday 07:30 UTC — an hour after the GCP refresh, so the two PRs
+    # do not land in the same minute.
+    - cron: 30 7 * * 1
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+# A second run must not race the first for the shared bot branch.
+concurrency:
+  group: update-azure-data
+  cancel-in-progress: false
+jobs:
+  update:
+    name: Refresh Azure catalogue
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+      # Fails closed on a renamed size-page header, a missing processor
+      # architecture marker, two prices in effect for one machine at the same
+      # instant, a price that needs more precision than the contract allows, or
+      # any region falling below the reviewed per-region machine floor.
+      - name: Refresh catalogue
+        run: make update-azure-data
+      - name: Verify embedded data, manifests and parser contracts
+        run: make verify-data
+      - name: Run tests
+        run: go test ./... -count=1
+      - name: Open or update pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- internal/providers/azure/data/; then
+            echo "Azure catalogue unchanged, nothing to do."
+            exit 0
+          fi
+
+          # One long-lived bot branch, so there is a single PR that always
+          # carries the latest data rather than a new PR every week.
+          branch="chore/update-azure-data"
+
+          # Single definition: the commit identity and the guard below must
+          # agree, or the workflow refuses its own branch forever.
+          bot_name="github-actions[bot]"
+
+          git config user.name  "$bot_name"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add internal/providers/azure/data/
+          git commit -m "chore: refresh embedded Azure catalogue"
+
+          # actions/checkout leaves a single-branch refspec, so the explicit
+          # refspec is what creates refs/remotes/origin/$branch and lets the
+          # author guard below run at all.
+          git fetch origin "+refs/heads/$branch:refs/remotes/origin/$branch" 2>/dev/null || true
+
+          if remote_sha=$(git rev-parse --verify -q "refs/remotes/origin/$branch"); then
+            tip_author=$(git log -1 --format='%an' "$remote_sha")
+            if [ "$tip_author" != "$bot_name" ]; then
+              echo "::warning::$branch tip is authored by '$tip_author', not this workflow. Refusing to overwrite it — merge or close the open PR first."
+              exit 0
+            fi
+            git push --force origin "HEAD:refs/heads/$branch"
+          else
+            git push origin "HEAD:refs/heads/$branch"
+          fi
+
+          state=$(gh pr view "$branch" --json state --jq .state 2>/dev/null || echo "")
+          if [ "$state" = "OPEN" ]; then
+            echo "PR already open for $branch; pushed the latest catalogue to it."
+            exit 0
+          fi
+
+          cat > "${RUNNER_TEMP}/pr-body.md" <<'EOF'
+          Automated refresh of the embedded Azure catalogue.
+
+          Sources are the ones enumerated in
+          `internal/providers/azure/data/source-contract.json`:
+
+          - Prices: the anonymous Azure Retail Prices API,
+            `https://prices.azure.com/api/retail/prices`, swept once per approved
+            region with `serviceName eq 'Virtual Machines' and priceType eq 'Consumption'`.
+          - Specifications and processor architecture: the Microsoft Learn VM
+            size pages, one per approved machine series.
+
+          Architecture comes from each size page's own `[x86-64]` / `[Arm64]`
+          processor marker, never from the size name. Legacy `Low Priority` and
+          `Cloud Services` meters are excluded, and a machine with two prices in
+          effect at the same instant fails the refresh rather than being guessed.
+
+          The catalogue was validated against its source contract, its manifest,
+          the per-region coverage floor and the full test suite before this PR was
+          opened.
+
+          Review the diff for VM sizes entering or leaving the catalogue, and
+          spot-check one Spot and one On-Demand price against the source.
+
+          Note: PRs opened with `GITHUB_TOKEN` do not trigger CI workflows, so the
+          checks below may appear empty. The data was validated by this workflow.
+          EOF
+
+          gh pr create \
+            --head "$branch" \
+            --title "chore: refresh embedded Azure catalogue" \
+            --body-file "${RUNNER_TEMP}/pr-body.md"

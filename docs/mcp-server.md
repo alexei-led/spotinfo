@@ -92,7 +92,9 @@ Rank Spot machines from the committed multi-cloud catalogue and return a `spotin
 
 **Cloud constraints:**
 - `gcp`: `us-central1` only, `linux` only, `--workload cost` only. `web`/`ci`/`batch` return `UNSUPPORTED_CAPABILITY`. `--os windows` returns `UNSUPPORTED_CAPABILITY`.
-- `azure`: Always returns `DATA_UNAVAILABLE` (no data embedded yet).
+- `azure`: eight regions (`australiaeast`, `eastus`, `eastus2`, `northeurope`, `southeastasia`,
+  `uksouth`, `westeurope`, `westus2`), `linux` only, `--workload cost` only. `web`/`ci`/`batch` and
+  `os: windows` return `UNSUPPORTED_CAPABILITY`; any other region returns `NO_CANDIDATES`.
 - `find_spot_instances` and `list_spot_regions` are AWS-only.
 
 ## Configuration Options
@@ -178,6 +180,27 @@ Once configured with Claude Desktop, you can ask natural language questions:
 - c3d-highcpu-4: $0.035088/hour (76% savings, risk unavailable)
 
 > GCP preemption history is not available in the public pricing feed. All candidates show `risk: unavailable`.
+
+### Example 4: Azure Arm Spot Recommendations
+
+**Human**: What are the cheapest arm64 Azure Spot VMs with 4 vCPUs and 16 GiB across your regions?
+
+**Claude**: I'll rank the committed Azure catalogue by price.
+
+```json
+{
+  "cloud": "azure",
+  "architecture": "arm64",
+  "min_vcpu": 4,
+  "min_memory_gib": 16,
+  "top": 3
+}
+```
+
+**Results**: Three arm64 Spot VMs ranked by price, each naming its own region.
+
+> Azure eviction rates require a subscription, so all candidates show `risk: unavailable`
+> and only the `cost` workload applies.
 
 ### Example 4: Infrastructure Planning
 

@@ -24,6 +24,7 @@ import (
 	"spotinfo/internal/mcp"
 	"spotinfo/internal/providers"
 	awsprovider "spotinfo/internal/providers/aws"
+	azureprovider "spotinfo/internal/providers/azure"
 	gcpprovider "spotinfo/internal/providers/gcp"
 	"spotinfo/internal/spot"
 )
@@ -170,6 +171,10 @@ func newProviderRegistry(client *spot.Client) (*providers.Registry, error) {
 		providers.Registration{
 			ID:    cloud.ProviderGCP,
 			Build: func() (cloud.Provider, error) { return gcpprovider.New() },
+		},
+		providers.Registration{
+			ID:    cloud.ProviderAzure,
+			Build: func() (cloud.Provider, error) { return azureprovider.New() },
 		},
 	)
 	if err != nil {

@@ -1,0 +1,225 @@
+{
+  "schema_version": "spotinfo.snapshot-manifest/v1",
+  "data_schema_version": "spotinfo.azure-catalog/v1",
+  "parser_version": "azure-retail-prices/1",
+  "provider": "azure",
+  "kind": "spot-price",
+  "currency": "USD",
+  "billing_unit": "instance-hour",
+  "payload": {
+    "file": "catalog.json.gz",
+    "form": "parsed-catalog",
+    "sha256": "f1d612447fe47e3975d95060c1fd14cdc6c6788ef775e0ac6c79e8a61659f297"
+  },
+  "sources": [
+    {
+      "fetched_at": "2026-08-09T06:16:37.99848Z",
+      "observed_at": null,
+      "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27australiaeast%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
+      "sha256": "7e12f05e3e45a2d1d25515ef92b1c2d75b6c868856a13ee9f8f7c91e5e67b399"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:40.308862Z",
+      "observed_at": null,
+      "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27eastus%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
+      "sha256": "999e51ff160c785284c44bc648c32d428283f4550861956927c9d8bb873f154b"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:42.495355Z",
+      "observed_at": null,
+      "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27eastus2%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
+      "sha256": "196901b1b79dadf16b241dc7997939ecfde0af4bda7aa312ff352032ac6b6f0a"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:44.671339Z",
+      "observed_at": null,
+      "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27northeurope%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
+      "sha256": "d0485dc04e030a7259831bf35d9d7cc820745b87bea4a6a21f600bc142205280"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:46.617832Z",
+      "observed_at": null,
+      "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27southeastasia%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
+      "sha256": "343bb61fd504d041d09c695965327ddc1eb7f73c89ef9e432f664c50a9c7c095"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:48.175509Z",
+      "observed_at": null,
+      "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27uksouth%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
+      "sha256": "9e83015ffa15ada7c04c1734cbd51a6270b71cafea33944198b5f24d687fdb55"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:50.219189Z",
+      "observed_at": null,
+      "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27westeurope%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
+      "sha256": "4aec5218d42569aceface4027c356c7b94abcb3e8853e624b6c4b483238dde8b"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:52.372667Z",
+      "observed_at": null,
+      "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27westus2%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
+      "sha256": "a670acd42690f986864484c15d6f12d4513cd87af64f051aecae7e18075f009d"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.093606Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/bsv2-series",
+      "sha256": "99b08b24404f395ea73a8708626efba82ae5eca49ca3d3d5263fe6704f59ead8"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.671201Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/basv2-series",
+      "sha256": "db9e4dcfaedce8c58f6c3565affddbcd522270bbca9df9b29c0208dd596ac0ac"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.683713Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/bpsv2-series",
+      "sha256": "be591bb5da44efce2192ae596447d1460f86b0d398069ae705a5defccf20ffb0"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.696224Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dv5-series",
+      "sha256": "9c842c4b9b68229e8c8dbb49e49beaf3dcb008b855ebb4cd81c6ce77d86f0b53"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.707481Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dsv5-series",
+      "sha256": "44a6ff11a9035a206dc73b2703167d968e6694a5e4d795b623de911d2507f19f"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.72055Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/ddv5-series",
+      "sha256": "9ed86fc61b4f3baaaa18c538eaa6ff97bec65eb166d0b91c743121ad92e832b7"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.731214Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/ddsv5-series",
+      "sha256": "93d2ca66fa14d78b368d51b077ae05ddb127c6a54a99709767edd3147e16e828"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.750967Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dasv5-series",
+      "sha256": "f9f6e019467a7302039ce135d39386c6bae8961bf5a0b415e9b1255285e8cde6"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.76283Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dadsv5-series",
+      "sha256": "d5ef2cd697ade3bc1300ea6f289c595a313ba4ea9b66c251e1570caea44ad1f2"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.777294Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dpsv5-series",
+      "sha256": "f8a683bc9708730e14d06975f30b2f0b53f1808e2b212d7dd4931c86bc4c2d7c"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.79861Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dpdsv5-series",
+      "sha256": "7bc7ea4e7874e16cdced53b74f620e7f2264319162e15a549bc1b4fee20c02fd"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.811396Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dsv6-series",
+      "sha256": "d9cdb3a4880adafd713b17b360af9c337ccc7c09764d21038ea6904fe70dcef0"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.822173Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dasv6-series",
+      "sha256": "a19bbb278aa1defb07813cb4890660a8676ec2277cfe1d4ea0e75127ef3560ad"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.83511Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dalsv6-series",
+      "sha256": "663de9e4e169608232abe9fef7bdc8d81c323ed919eb4557fe868ce406328351"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.84766Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dpsv6-series",
+      "sha256": "43593dd3dac3abca0b276a4741337d416cd8cb18641cd64ea1fb11bbecac9b49"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.859432Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/compute-optimized/fsv2-series",
+      "sha256": "383e949381cbd724e6cd5c40ec437ee11991c2d4e232459ed3d5571b754c41dc"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.87193Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/compute-optimized/fasv6-series",
+      "sha256": "dcbda32b4a17a167fc85380dcd0fda51de3116c09920d1e5688662aeeba3e74e"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.88589Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/compute-optimized/falsv6-series",
+      "sha256": "c8f5b069b62b88b771f411133e17820e40772ba4c0166577e6f214fa79f30613"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.900732Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/ev5-series",
+      "sha256": "27fd785c82fe5f8c14c827d0bc9e6e22d760101b2394eb8461c2f0e79884780d"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.916759Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/esv5-series",
+      "sha256": "7706065220ab55b8e6e9dab4f888ac4b78558ef8208ac79e5020897431f16bba"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.932324Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/edv5-series",
+      "sha256": "9cad9ac3da2e5a0547519f610396abced2fe4e7358d86f30946e1e8314dd9264"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.943206Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/edsv5-series",
+      "sha256": "4437cc8d5fd313be59e7d97080d660c43ab57df796c680a2c743a60fa1929da5"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.953978Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/easv5-series",
+      "sha256": "5283abd1d6435bb4f39f6187a4ecabd8eefb3ad9976cf095110038ca4ad2575d"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.964397Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/epsv5-series",
+      "sha256": "7d0775a67a696f0c59c3468e1ab9f43b31529f8d6195822b94c57af4b466c3bd"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.975915Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/esv6-series",
+      "sha256": "610d0230f2295fd8d6fd8e15a097ffe3d69e166fb524242a1b7ef2255ae239ce"
+    },
+    {
+      "fetched_at": "2026-08-09T06:16:37.988487Z",
+      "observed_at": null,
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/easv6-series",
+      "sha256": "444b48dfe4404816d8629afb52128e0267b65004cfac5a4ba7a100a37462a02c"
+    }
+  ],
+  "min_records": {
+    "regions": 8,
+    "machines": 180,
+    "prices": 2880
+  }
+}

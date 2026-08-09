@@ -435,11 +435,45 @@ chmod +x /path/to/spotinfo
 
 **Solution:** Omit `--region` (expands to `us-central1`) or use `--region us-central1` explicitly.
 
-### "data unavailable: cloud provider "azure" is unavailable (PROVIDER_NOT_REGISTERED)" (`DATA_UNAVAILABLE`)
+### "azure: unsupported capability: risk" (`UNSUPPORTED_CAPABILITY`)
 
-**Cause:** `--cloud azure` is recognised but no data is embedded yet.
+**Cause:** Either of:
 
-**Solution:** Use `--cloud aws` or `--cloud gcp`. Azure support requires a future data refresh.
+1. Running the root query command with `--cloud azure` (e.g., `spotinfo --cloud azure --type 'Standard_D2s.*'`).
+   The root command renders an interruption column, which requires risk data that Azure does not publish
+   without a subscription.
+2. Running `spotinfo recommend --cloud azure --workload web` (or `ci` or `batch`). These workloads cap
+   interruption frequency and require risk data.
+
+**Solution:** Use `spotinfo recommend --cloud azure` with `--workload cost` (the default on Azure). The
+root query command is AWS-only.
+
+### "azure: unsupported capability: os windows" (`UNSUPPORTED_CAPABILITY`)
+
+**Cause:** `--os windows` on `--cloud azure`. The embedded Azure catalogue is Linux-only; Windows meters
+bundle a licence and are excluded from it.
+
+**Solution:** Drop `--os windows`, or use `--cloud aws` for Windows pricing.
+
+### "no candidates for architecture ... and workload cost" (`NO_CANDIDATES`) on Azure
+
+**Cause:** An explicit `--region` was given that the embedded Azure catalogue does not cover. It covers
+eight reviewed regions: `australiaeast`, `eastus`, `eastus2`, `northeurope`, `southeastasia`, `uksouth`,
+`westeurope`, `westus2`.
+
+**Solution:** Use one of those regions, or omit `--region` to rank across all eight. Widening the matrix
+is a source-contract change plus a data refresh, not a runtime option.
+
+### "data unavailable: cloud provider ... is unavailable (PROVIDER_NOT_REGISTERED)" (`DATA_UNAVAILABLE`)
+
+**Cause:** The cloud is recognised but this build has no usable snapshot for it — either the provider was
+not compiled in, or its embedded snapshot failed verification at startup (`SNAPSHOT_UNAVAILABLE`). A
+disabled provider is never silently answered with another cloud's prices.
+
+**Solution:** Run `spotinfo --debug ...` — every disabled provider is logged with its reason code and the
+underlying detail. `PROVIDER_NOT_REGISTERED` means the binary was built without it;
+`SNAPSHOT_UNAVAILABLE` means the committed data, its manifest hash, or its source contract failed a gate,
+which a rebuilt binary from a clean checkout will fix.
 
 ## Debugging Techniques
 

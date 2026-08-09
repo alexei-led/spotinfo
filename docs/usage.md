@@ -83,7 +83,7 @@ spotinfo recommend --architecture <x86_64|arm64> --cpu N --memory N [flags]
 | `--top N` | Maximum candidates returned | `3` |
 | `--output table|json` | Recommendation output format | `table` |
 
-`cost` ranks purely by price with no interruption constraint and works on every cloud. `web` accepts only the Advisor `<5%` label. `ci` accepts Advisor labels through `10-15%` (at most 15%), and `batch` accepts labels through `15-20%` (at most 20%). `web`, `ci`, and `batch` require a cloud that publishes interruption or preemption risk; requesting them on GCP returns `UNSUPPORTED_CAPABILITY`. `--cpu` and `--memory` are inclusive minima, as is `--budget`; a supplied budget must be greater than zero. Prices of zero, missing prices, and non-finite prices are never candidates; existing live-price enrichment can provide a usable positive price. `--os` selects Linux or Windows pricing before ranking. Repeated `--region` values are trimmed, deduplicated, and sorted before fetching and reporting; repeated `--region all` becomes one `all`, while `all` combined with an explicit region (or an empty region value) is rejected before fetching.
+`cost` ranks purely by price with no interruption constraint and works on every cloud. `web` accepts only the Advisor `<5%` label. `ci` accepts Advisor labels through `10-15%` (at most 15%), and `batch` accepts labels through `15-20%` (at most 20%). `web`, `ci`, and `batch` require a cloud that publishes interruption or preemption risk; requesting them on GCP or Azure returns `UNSUPPORTED_CAPABILITY`. `--cpu` and `--memory` are inclusive minima, as is `--budget`; a supplied budget must be greater than zero. Prices of zero, missing prices, and non-finite prices are never candidates; existing live-price enrichment can provide a usable positive price. `--os` selects Linux or Windows pricing before ranking. Repeated `--region` values are trimmed, deduplicated, and sorted before fetching and reporting; repeated `--region all` becomes one `all`, while `all` combined with an explicit region (or an empty region value) is rejected before fetching.
 
 The shared root `--cloud`, `--os`, `--region`, `--output`, `--cpu`, and `--memory` flags can be placed before `recommend` (for example, `spotinfo --cloud gcp --output json --cpu 2 --memory 8 recommend --architecture x86_64`). Explicit flags after `recommend` take precedence; if neither is set, the command defaults apply. `--architecture`, `--instance`, `--budget`, `--workload`, and `--top` remain command-local.
 
@@ -129,7 +129,7 @@ Non-AWS clouds and AWS with `--workload cost` emit `spotinfo.recommend/v2` (see 
 |-------|-------------|---------|-----|---------------|-----------|-----------|
 | `aws` | root + `recommend` | all Advisor regions | linux, windows | x86_64, arm64 | interruption buckets | cost, web, ci, batch |
 | `gcp` | `recommend` only | `us-central1` | linux | x86_64, arm64 | unavailable | cost |
-| `azure` | — | — | — | — | — | `DATA_UNAVAILABLE` |
+| `azure` | `recommend` only | 8 regions | linux | x86_64, arm64 | unavailable | cost |
 
 **GCP notes:**
 
@@ -140,7 +140,19 @@ Non-AWS clouds and AWS with `--workload cost` emit `spotinfo.recommend/v2` (see 
 - Every machine carries a Spot price, a paired On-Demand price, and a derived savings percent. Risk is always `status: "unavailable"`.
 - The embedded catalogue is refreshed by `make update-gcp-data` and the weekly `update-gcp-data` workflow.
 
-**Azure note:** Selecting `--cloud azure` always returns `DATA_UNAVAILABLE` (no data embedded yet).
+**Azure notes:**
+
+- The root query command (`spotinfo --cloud azure ...`) is not supported; it requires interruption data
+  and returns `UNSUPPORTED_CAPABILITY`.
+- Eight regions are served: `australiaeast`, `eastus`, `eastus2`, `northeurope`, `southeastasia`,
+  `uksouth`, `westeurope`, `westus2`. Naming any other region returns `NO_CANDIDATES`. An unset
+  `--region` expands to all eight.
+- 224 VM sizes across 26 machine series (37 arm64 sizes in `bpsv2`, `dpsv5`, `dpdsv5`, `dpsv6`,
+  `epsv5`). `--machine` accepts the full Azure size name, for example `Standard_D2s_v5`.
+- Azure publishes eviction rates only through Resource Graph and Resource SKUs, both of which need a
+  subscription, so every Azure candidate reports `risk.status = "unavailable"`.
+- The embedded catalogue is refreshed by `make update-azure-data` and the weekly `update-azure-data`
+  workflow.
 
 ## Output Formats
 

@@ -47,7 +47,7 @@ export GO111MODULE=on
 export CGO_ENABLED=0
 
 .PHONY: all build test test-verbose test-race test-coverage lint fmt clean help version
-.PHONY: update-data update-price update-gcp-data refresh-manifests verify-data check-deps setup-tools release mocks hooks
+.PHONY: update-data update-price update-gcp-data update-azure-data refresh-manifests verify-data check-deps setup-tools release mocks hooks
 .PHONY: verify-architecture-rules verify-architecture
 
 # Default target
@@ -130,6 +130,13 @@ update-gcp-data:
 	@echo "Updating GCP catalogue from the contracted pricing pages..."
 	@go run ./cmd/update-gcp-data
 
+# Rebuilds the committed Azure catalogue from the anonymous Retail Prices API
+# and the contracted Microsoft Learn size pages. Same rules as the GCP target:
+# no credentials, nothing written until every gate passes.
+update-azure-data:
+	@echo "Updating Azure catalogue from the Retail Prices API and size pages..."
+	@go run ./cmd/update-azure-data
+
 # Deterministic embedded-data gate, run offline. It checks the generic snapshot
 # manifest and source-contract validators, then every committed AWS snapshot:
 # it must parse, hash to what its sidecar manifest declares, and still cover its
@@ -141,6 +148,7 @@ verify-data:
 	@go test ./internal/snapshot/ -count=1
 	@go test ./internal/spot/ -run '$(DATA_GATE_TESTS)' -count=1
 	@go test ./internal/providers/gcp/ -count=1
+	@go test ./internal/providers/azure/ -count=1
 
 # Package-boundary gate. Checks the declared layer direction and module
 # metadata in .archfit.yaml; it is not a data-correctness or test substitute.

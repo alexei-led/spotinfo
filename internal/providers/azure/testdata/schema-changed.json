@@ -1,0 +1,20 @@
+{
+  "BillingCurrency": "USD",
+  "NextPageLink": "",
+  "Count": 1,
+  "Items": [
+    {
+      "currencyCode": "USD",
+      "retailPrice": 30.05,
+      "armRegionName": "eastus",
+      "effectiveStartDate": "2026-01-01T00:00:00Z",
+      "meterName": "D2s v5 Spot",
+      "productName": "Virtual Machines Dsv5 Series",
+      "skuName": "D2s v5 Spot",
+      "serviceName": "Virtual Machines",
+      "unitOfMeasure": "1 Month",
+      "type": "Consumption",
+      "armSkuName": "Standard_D2s_v5"
+    }
+  ]
+}

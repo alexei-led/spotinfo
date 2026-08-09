@@ -1,0 +1,100 @@
+{
+  "BillingCurrency": "USD",
+  "CustomerEntityId": "Default",
+  "CustomerEntityType": "Retail",
+  "NextPageLink": "https://prices.azure.com/api/retail/prices?$skip=100",
+  "Count": 7,
+  "Items": [
+    {
+      "currencyCode": "USD",
+      "retailPrice": 0.0412,
+      "armRegionName": "eastus",
+      "effectiveStartDate": "2026-01-01T00:00:00Z",
+      "meterName": "D2s v5 Spot",
+      "productName": "Virtual Machines Dsv5 Series",
+      "skuName": "D2s v5 Spot",
+      "serviceName": "Virtual Machines",
+      "unitOfMeasure": "1 Hour",
+      "type": "Consumption",
+      "armSkuName": "Standard_D2s_v5"
+    },
+    {
+      "currencyCode": "USD",
+      "retailPrice": 0.096,
+      "armRegionName": "eastus",
+      "effectiveStartDate": "2026-01-01T00:00:00Z",
+      "meterName": "D2s v5",
+      "productName": "Virtual Machines Dsv5 Series",
+      "skuName": "D2s v5",
+      "serviceName": "Virtual Machines",
+      "unitOfMeasure": "1 Hour",
+      "type": "Consumption",
+      "armSkuName": "Standard_D2s_v5"
+    },
+    {
+      "currencyCode": "USD",
+      "retailPrice": 0.1783,
+      "armRegionName": "eastus",
+      "effectiveStartDate": "2026-01-01T00:00:00Z",
+      "meterName": "D2s v5 Spot",
+      "productName": "Virtual Machines Dsv5 Series Windows",
+      "skuName": "D2s v5 Spot",
+      "serviceName": "Virtual Machines",
+      "unitOfMeasure": "1 Hour",
+      "type": "Consumption",
+      "armSkuName": "Standard_D2s_v5"
+    },
+    {
+      "currencyCode": "USD",
+      "retailPrice": 0.0192,
+      "armRegionName": "eastus",
+      "effectiveStartDate": "2026-01-01T00:00:00Z",
+      "meterName": "D2s v5 Low Priority",
+      "productName": "Virtual Machines Dsv5 Series",
+      "skuName": "D2s v5 Low Priority",
+      "serviceName": "Virtual Machines",
+      "unitOfMeasure": "1 Hour",
+      "type": "Consumption",
+      "armSkuName": "Standard_D2s_v5"
+    },
+    {
+      "currencyCode": "USD",
+      "retailPrice": 0.144,
+      "armRegionName": "eastus",
+      "effectiveStartDate": "2026-01-01T00:00:00Z",
+      "meterName": "D2s v5",
+      "productName": "Dsv5 Series CloudServices",
+      "skuName": "D2s v5",
+      "serviceName": "Virtual Machines",
+      "unitOfMeasure": "1 Hour",
+      "type": "Consumption",
+      "armSkuName": "Standard_D2s_v5"
+    },
+    {
+      "currencyCode": "USD",
+      "retailPrice": 0,
+      "armRegionName": "eastus",
+      "effectiveStartDate": "2026-01-01T00:00:00Z",
+      "meterName": "B1ls v2 Spot",
+      "productName": "Virtual Machines Bsv2 Series",
+      "skuName": "B1ls v2 Spot",
+      "serviceName": "Virtual Machines",
+      "unitOfMeasure": "1 Hour",
+      "type": "Consumption",
+      "armSkuName": "Standard_B1ls_v2"
+    },
+    {
+      "currencyCode": "USD",
+      "retailPrice": 0.5,
+      "armRegionName": "eastus",
+      "effectiveStartDate": "2026-01-01T00:00:00Z",
+      "meterName": "Unattributed Spot",
+      "productName": "Virtual Machines Dsv5 Series",
+      "skuName": "Unattributed Spot",
+      "serviceName": "Virtual Machines",
+      "unitOfMeasure": "1 Hour",
+      "type": "Consumption",
+      "armSkuName": ""
+    }
+  ]
+}

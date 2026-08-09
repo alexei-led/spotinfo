@@ -16,10 +16,6 @@ const (
 	percentScale = 100
 	// pricesPerMachine is the two classes every catalogue row publishes.
 	pricesPerMachine = 2
-	// nanosPerUnit is one currency unit in the fixed-point scale Money stores.
-	nanosPerUnit = 1_000_000_000
-	// decimalBase is the radix trailing zeros are counted in.
-	decimalBase = 10
 )
 
 // Catalog is the committed GCP price catalogue: one region, one operating
@@ -224,7 +220,7 @@ func (m *CatalogMachine) verify(contract *snapshot.SourceContract) error {
 
 	limit := contract.Thresholds.MaxFractionalDigits
 	for _, amount := range []cloud.Money{m.Spot, m.OnDemand} {
-		if digits := fractionalDigits(amount); digits > limit {
+		if digits := amount.FractionalDigits(); digits > limit {
 			return fmt.Errorf("%w: %s needs %d fractional digits, contract allows %d",
 				ErrCatalog, m.ID, digits, limit)
 		}
@@ -282,23 +278,4 @@ func (c *Catalog) Series() []string {
 	slices.Sort(series)
 
 	return series
-}
-
-// fractionalDigits is how many decimal places an amount actually needs — the
-// fixed-point scale less its trailing zeros. It exists so the contract's
-// precision threshold measures the published price rather than the storage
-// format, which always renders every digit.
-func fractionalDigits(amount cloud.Money) int {
-	nanos := amount.Nanos() % nanosPerUnit
-	if nanos == 0 {
-		return 0
-	}
-
-	digits := cloud.MoneyScale
-	for nanos%decimalBase == 0 {
-		nanos /= decimalBase
-		digits--
-	}
-
-	return digits
 }

@@ -1,0 +1,235 @@
+package azure
+
+import (
+	"cmp"
+	"context"
+	"fmt"
+	"regexp"
+	"slices"
+	"strings"
+
+	"spotinfo/internal/cloud"
+)
+
+// Provider answers neutral queries from the committed Azure catalogue. It makes
+// no network request and needs no credentials, subscription, or tenant:
+// everything it serves is in the binary.
+type Provider struct {
+	catalog *Catalog
+	specs   map[cloud.MachineID]*CatalogMachine
+	sources []cloud.SourceRef
+}
+
+// New builds the Azure provider from the committed snapshot. A snapshot that
+// fails any of its gates returns an error, which the registry turns into a
+// disabled provider rather than a process failure.
+func New() (*Provider, error) {
+	loaded, err := LoadEmbeddedSnapshot()
+	if err != nil {
+		return nil, err
+	}
+
+	specs := make(map[cloud.MachineID]*CatalogMachine, len(loaded.Catalog.Machines))
+	for i := range loaded.Catalog.Machines {
+		machine := &loaded.Catalog.Machines[i]
+		specs[machine.ID] = machine
+	}
+
+	return &Provider{catalog: loaded.Catalog, specs: specs, sources: loaded.Manifest.SourceRefs()}, nil
+}
+
+// ID identifies this provider.
+func (p *Provider) ID() cloud.ProviderID { return cloud.ProviderAzure }
+
+// Capabilities reports what the committed snapshot can answer.
+//
+// Risk is false and stays false: Azure publishes eviction rates through Resource
+// Graph and Resource SKUs, both of which require a subscription, so this
+// provider has nothing to report and must not let silence be ranked as low
+// interruption. Placement scores, zone detail and live enrichment would all
+// require an authenticated API, which the offline contract rules out.
+func (p *Provider) Capabilities() cloud.Capabilities {
+	return cloud.Capabilities{
+		OperatingSystems: []cloud.OperatingSystem{p.catalog.OS},
+		Architectures:    []cloud.Architecture{cloud.ArchitectureX8664, cloud.ArchitectureARM64},
+		SpotPrice:        true,
+		OnDemandPrice:    true,
+		MachineSpec:      true,
+	}
+}
+
+// Query filters the committed catalogue. A region the snapshot does not cover
+// yields no candidates rather than an error: "spotinfo has no Azure data for
+// francecentral" is an empty result, not a malformed request, and the caller
+// reports it as NO_CANDIDATES.
+func (p *Provider) Query(_ context.Context, query *cloud.Query) (cloud.Result, error) {
+	if query == nil {
+		return cloud.Result{}, fmt.Errorf("%w: query is required", cloud.ErrInvalidArgument)
+	}
+
+	capabilities := p.Capabilities()
+	if !capabilities.SupportsOS(query.OS) {
+		return cloud.Result{}, fmt.Errorf("%w: azure does not support os %q", cloud.ErrInvalidArgument, query.OS)
+	}
+	if query.Architecture != "" && !capabilities.SupportsArchitecture(query.Architecture) {
+		return cloud.Result{}, fmt.Errorf("%w: azure does not support architecture %q",
+			cloud.ErrInvalidArgument, query.Architecture)
+	}
+
+	pattern, err := machinePattern(query.MachinePattern)
+	if err != nil {
+		return cloud.Result{}, err
+	}
+
+	var candidates []cloud.Candidate
+
+	for i := range p.catalog.Regions {
+		region := &p.catalog.Regions[i]
+		if !covers(query.Regions, region.ID) {
+			continue
+		}
+
+		for j := range region.Prices {
+			price := &region.Prices[j]
+
+			machine := p.specs[price.Machine]
+			if machine == nil || !accepts(machine, price, query, pattern) {
+				continue
+			}
+			candidates = append(candidates, p.toCandidate(region.ID, machine, price, query.OS))
+		}
+	}
+
+	sortCandidates(candidates, query.Sort)
+
+	return cloud.Result{
+		Provider:   cloud.ProviderAzure,
+		Mode:       cloud.DataModeEmbeddedSnapshot,
+		Sources:    slices.Clone(p.sources),
+		Candidates: candidates,
+	}, nil
+}
+
+// covers reports whether the requested regions include this one. An empty list
+// applies no region filter.
+func covers(requested []cloud.Region, region cloud.Region) bool {
+	if len(requested) == 0 {
+		return true
+	}
+
+	return slices.Contains(requested, cloud.RegionAll) || slices.Contains(requested, region)
+}
+
+func accepts(machine *CatalogMachine, price *CatalogPrice, query *cloud.Query, pattern *regexp.Regexp) bool {
+	if query.Architecture != "" && machine.Architecture != query.Architecture {
+		return false
+	}
+	if machine.VCPU < query.MinVCPU || machine.MemoryGiB < query.MinMemoryGiB {
+		return false
+	}
+	if pattern != nil && !pattern.MatchString(string(machine.ID)) {
+		return false
+	}
+	if query.MaxPrice != nil && price.Spot.Nanos() > query.MaxPrice.Nanos() {
+		return false
+	}
+
+	return true
+}
+
+func (p *Provider) toCandidate(region cloud.Region, machine *CatalogMachine, price *CatalogPrice,
+	machineOS cloud.OperatingSystem,
+) cloud.Candidate {
+	location := cloud.Location{Region: region}
+	observation := func(class cloud.PriceClass, amount cloud.Money) *cloud.PriceObservation {
+		return &cloud.PriceObservation{
+			Location: location,
+			Class:    class,
+			Currency: p.catalog.Currency,
+			Unit:     p.catalog.BillingUnit,
+			Amount:   amount,
+		}
+	}
+
+	return cloud.Candidate{
+		Provider: cloud.ProviderAzure,
+		Location: location,
+		OS:       machineOS,
+		Machine: cloud.MachineSpec{
+			ID:           machine.ID,
+			Architecture: machine.Architecture,
+			MemoryGiB:    machine.MemoryGiB,
+			VCPU:         machine.VCPU,
+		},
+		Spot:           observation(cloud.PriceClassSpot, price.Spot),
+		OnDemand:       observation(cloud.PriceClassOnDemand, price.OnDemand),
+		SavingsPercent: price.SavingsPercent(),
+		Risk:           cloud.UnavailableRisk(),
+	}
+}
+
+// machinePattern compiles the machine-name filter. An unset filter matches
+// every machine.
+func machinePattern(expression string) (*regexp.Regexp, error) {
+	if strings.TrimSpace(expression) == "" {
+		return nil, nil //nolint:nilnil // no pattern is the absence of a filter
+	}
+
+	pattern, err := regexp.Compile(expression)
+	if err != nil {
+		return nil, fmt.Errorf("%w: machine pattern: %w", cloud.ErrInvalidArgument, err)
+	}
+
+	return pattern, nil
+}
+
+// sortCandidates applies the requested order. Keys this provider cannot serve —
+// risk and placement score — leave the catalogue's own region-then-machine
+// order, because the capability gate rejects those requests before acquisition.
+func sortCandidates(candidates []cloud.Candidate, order cloud.SortOrder) {
+	compare := candidateComparator(order.Key)
+	if compare == nil {
+		return
+	}
+
+	slices.SortStableFunc(candidates, func(left, right cloud.Candidate) int {
+		if order.Descending {
+			return compare(&right, &left)
+		}
+
+		return compare(&left, &right)
+	})
+}
+
+func candidateComparator(key cloud.SortKey) func(left, right *cloud.Candidate) int {
+	switch key {
+	case cloud.SortByPrice:
+		return func(left, right *cloud.Candidate) int {
+			return cmp.Compare(left.Spot.Amount.Nanos(), right.Spot.Amount.Nanos())
+		}
+	case cloud.SortBySavings:
+		return func(left, right *cloud.Candidate) int {
+			return cmp.Compare(derefSavings(left), derefSavings(right))
+		}
+	case cloud.SortByMachine:
+		return func(left, right *cloud.Candidate) int {
+			return strings.Compare(string(left.Machine.ID), string(right.Machine.ID))
+		}
+	case cloud.SortByRegion:
+		return func(left, right *cloud.Candidate) int {
+			return strings.Compare(string(left.Location.Region), string(right.Location.Region))
+		}
+	case cloud.SortByRisk, cloud.SortByPlacementScore:
+		return nil
+	default:
+		return nil
+	}
+}
+
+func derefSavings(candidate *cloud.Candidate) int {
+	if candidate.SavingsPercent == nil {
+		return 0
+	}
+
+	return *candidate.SavingsPercent
+}

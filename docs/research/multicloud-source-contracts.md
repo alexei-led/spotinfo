@@ -174,26 +174,153 @@ Binary-size delta for the whole GCP slice: **+127,056 bytes** (parser, provider,
 `advice.capacityHistory` is authenticated and beta. It is deferred to optional
 live enrichment and is not part of the offline contract.
 
-### Azure — decisions open
+### Azure — approved, eight regions
 
-Candidate sources:
+Two sources, because neither answers the whole question:
 
-- Azure Retail Prices API: `https://prices.azure.com/api/retail/prices`
-  (anonymous and documented).
-- Official Azure VM-size documentation for vCPU, memory, and architecture.
+- **Prices**: `https://prices.azure.com/api/retail/prices`, the documented, anonymous
+  Azure Retail Prices API. No key, subscription, or tenant.
+- **Specifications and architecture**: one Microsoft Learn size page per approved
+  machine series. The Retail API publishes no vCPU count, no memory figure and no
+  processor architecture, so all three come from the pages.
 
-Open decisions before any Azure code:
+Contract: `internal/providers/azure/data/source-contract.json`. Parser:
+`azure-retail-prices/1`.
 
-1. The exact filter and `priceType=Consumption` selection, plus how a Spot row is
-   recognised.
-2. Pagination via `NextPageLink`, and what happens when a page fails midway.
-3. Effective-date rules, and which row wins when several are current.
-4. The exact Linux VM-size, region, and architecture matrix to claim.
-5. Redistribution terms, with the evidence URL.
-6. Canonical USD-per-hour units and the decimal precision observed.
+#### 1. The exact request, and what a Spot row is
 
-Resource Graph `SpotResources` and Resource SKUs require a subscription. Both
-are deferred to optional live enrichment.
+Per region, one sweep:
+
+```
+GET https://prices.azure.com/api/retail/prices
+    ?api-version=2023-01-01-preview
+    &currencyCode=USD
+    &$filter=serviceName eq 'Virtual Machines'
+        and armRegionName eq '<region>'
+        and priceType eq 'Consumption'
+```
+
+`NextPageLink` is followed until empty, bounded at 40 pages (a region returns 8-10
+today) and checked to stay on the contracted scheme and host — the response chooses
+the next request, and nothing else in this repository lets a server do that.
+
+Four response values are contract, not data: `serviceName`, `type`, `unitOfMeasure`
+and `currencyCode`. A row that disagrees means the filter stopped selecting what it
+was reviewed to select, so the refresh fails rather than skipping the row.
+
+Classification, in order:
+
+| Rule | Outcome | Why |
+| --- | --- | --- |
+| `skuName` ends ` Spot` | Spot price | The only interruptible meter |
+| `skuName` ends ` Low Priority` | **excluded** | Retired Batch product, different eviction model, priced alongside Spot |
+| otherwise | On-Demand price | List rate |
+| `productName` contains `Windows` | excluded | Bundles a licence; the catalogue is Linux-only |
+| `productName` contains `Cloud Services`/`CloudServices` | excluded | Legacy PaaS, same `armSkuName`, different rate |
+| `armSkuName` empty | skipped | Cannot be attributed to a machine (0 observed) |
+| `retailPrice` zero | skipped | Promotional or placeholder, not a quotable rate |
+
+The Cloud Services exclusion was not anticipated: it made about 40 sizes per region
+ambiguous, and the second spelling (`Eadsv5 Series CloudServices`, no space) survived
+a first fix that matched only `Cloud Services`. The marker is matched with spaces
+removed.
+
+#### 2. The effective-date rule — where this could silently go wrong
+
+The API returns every interval it knows about. In `eastus`, 289 meters carry more
+than one row, typically an interval that ended last month beside the one now in
+force. A parser that took the first row, or the last, would publish an expired price
+and pass every other gate.
+
+The rule: a price is the interval where `effectiveStartDate <= at` and
+`effectiveEndDate` is absent or not before `at`.
+
+- `at` is an **argument**, set once per run, not `time.Now()` inside the parser. All
+  eight regions resolve against the same instant, so a sweep cannot mix an expiring
+  price with its replacement, and a rebuild is reproducible from its inputs.
+- No interval in effect: the machine is dropped and reported. An expired price is
+  worse than a missing one.
+- Two intervals in effect at different amounts: the refresh fails. Nothing can choose
+  between them. The same amount twice is redundancy and is accepted.
+- Resolution runs **after** the reviewed matrix filter. The sweep prices every size
+  Azure sells — around 1,700 per region against 224 contracted — and a conflict in
+  `Standard_NCC40ads_H100_v5` is not a reason to fail a refresh for machines nobody
+  can ask this binary about.
+
+#### 3. Architecture — read, never inferred
+
+Each size page's parts table carries a `Processor` row listing processor models with
+a bracketed architecture marker. Three spellings are in use today: `[x86-64]`,
+`[Arm64]` and `[ARM-64]`. They are normalised; a page with no marker, or two
+different markers, fails the parse.
+
+This is deliberately stricter than the GCP slice, which keeps a reviewed Arm series
+list in code because Google publishes no marker. Here the source states it, so the
+source is used. An Arm size shipped as `x86_64` would pass coverage, price sanity and
+schema checks and silently recommend a machine that cannot run the caller's binaries.
+
+#### 4. Memory is labelled two ways
+
+18 pages write `Memory (GiB)`; the 8 memory-optimized pages write `Memory (GB)`. The
+figures are identical for equivalent sizes — `Standard_E2_v5` reads 16 on a "GB" page,
+`Standard_E2s_v5` reads 16 on a "GiB" one — so this is one quantity under two labels,
+not two units. Both are accepted as gibibytes; a third label fails.
+
+#### 5. Exact support matrix
+
+- **Regions (8)**: `australiaeast`, `eastus`, `eastus2`, `northeurope`,
+  `southeastasia`, `uksouth`, `westeurope`, `westus2`.
+
+  A reviewed selection, not a limit of the source: the API serves every Azure region.
+  Eight bounds the weekly refresh to about 100 requests and the payload to 16 KB.
+  Widening it is a contract edit plus a refresh, with no code change.
+
+- **Machine series (26)**, one Learn page each:
+
+  | Architecture | Series |
+  | --- | --- |
+  | x86_64 (21) | `basv2` `bsv2` `dadsv5` `dalsv6` `dasv5` `dasv6` `ddsv5` `ddv5` `dsv5` `dsv6` `dv5` `easv5` `easv6` `edsv5` `edv5` `esv5` `esv6` `ev5` `falsv6` `fasv6` `fsv2` |
+  | arm64 (5) | `bpsv2` `dpdsv5` `dpsv5` `dpsv6` `epsv5` |
+
+- **Sizes**: 224 priced in all eight regions (37 arm64). 225 sizes are documented by
+  the contracted pages; one is not offered as Spot.
+- **OS**: Linux only. **Classes**: Spot and On-Demand, always paired.
+- **Risk**: `unavailable`, permanently for the offline path.
+
+#### 6. Redistribution
+
+`terms.redistribution_decision = approved`, evidence
+`https://learn.microsoft.com/en-us/legal/termsofuse`.
+
+The Retail Prices API is documented for anonymous use and returns factual figures.
+Microsoft Learn documentation content is published under CC BY 4.0. The committed
+catalogue republishes size name, vCPU count, memory in GiB, architecture and USD per
+instance-hour, attributed to the exact source URLs in the manifest. No markup,
+styling, prose, or image is copied.
+
+**This decision was recorded by an agent, not by a human reviewer.** The project
+owner must confirm it before release, exactly as for the GCP contract.
+
+#### 7. Thresholds and precision
+
+| Threshold | Value | Basis |
+| --- | --- | --- |
+| `min_regions` | 8 | Every approved region must be present |
+| `min_machines` | 180 | ~80% of the 224 observed. Applied **per region**, so one region returning short fails instead of being absorbed by seven healthy ones |
+| `max_compressed_bytes` | 65536 | 16,515 observed; ~4x headroom |
+| `max_fractional_digits` | 6 | Maximum observed across all eight regions. `cloud.MoneyScale` is 9, so there are three digits of real headroom before `ErrPrecisionLoss` |
+
+Binary-size delta: **+119,536 bytes** (0.20%). `golang.org/x/net/html` was already a
+dependency from the GCP slice.
+
+Cross-checked against the live source at commit time: `uksouth/Standard_D2as_v6`
+Spot `0.014013` and On-Demand `0.106`; `westeurope/Standard_D2ps_v5` Spot `0.017002`.
+Both match exactly.
+
+#### 8. Deferred
+
+Resource Graph `SpotResources` and the Resource SKUs API require a subscription. Both
+stay deferred to optional live enrichment and are named in the excluded list.
 
 ### Excluded
 

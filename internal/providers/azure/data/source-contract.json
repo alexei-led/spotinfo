@@ -1,0 +1,233 @@
+{
+  "schema_version": "spotinfo.source-contract/v1",
+  "provider": "azure",
+  "review_status": "approved",
+  "reviewer": "alexei-led",
+  "reviewed_at": "2026-08-09",
+  "parser_version": "azure-retail-prices/1",
+  "update_cadence": "weekly",
+  "terms": {
+    "redistribution_decision": "approved",
+    "evidence_url": "https://learn.microsoft.com/en-us/legal/termsofuse",
+    "notes": "The Retail Prices API is documented for anonymous use and returns no licensed content: the committed catalogue republishes factual figures only - VM size name, vCPU count, memory in GiB, processor architecture, and USD per instance-hour - with attribution to the exact source URLs recorded in the sidecar manifest. Microsoft Learn documentation content is published under the Creative Commons Attribution 4.0 International License. No page markup, styling, prose, or image is redistributed. Confirm this decision with the project owner before each schema change."
+  },
+  "sources": [
+    {
+      "url": "https://prices.azure.com/api/retail/prices",
+      "source_type": "documented-rest-api",
+      "data_kinds": ["spot-price", "on-demand-price"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/bsv2-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/basv2-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/bpsv2-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dv5-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dsv5-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/ddv5-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/ddsv5-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dasv5-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dadsv5-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dpsv5-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dpdsv5-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dsv6-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dasv6-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dalsv6-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dpsv6-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/compute-optimized/fsv2-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/compute-optimized/fasv6-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/compute-optimized/falsv6-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/ev5-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/esv5-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/edv5-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/edsv5-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/easv5-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/epsv5-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/esv6-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/easv6-series",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["machine-spec", "architecture"]
+    }
+  ],
+  "expected_fields": [
+    "request filter: serviceName eq 'Virtual Machines' and armRegionName eq '<region>' and priceType eq 'Consumption'",
+    "request query: api-version=2023-01-01-preview, currencyCode=USD",
+    "response envelope: Items array, NextPageLink string, Count integer",
+    "response row: serviceName = Virtual Machines",
+    "response row: type = Consumption",
+    "response row: unitOfMeasure = 1 Hour",
+    "response row: currencyCode = USD",
+    "response row: retailPrice = plain decimal number, no exponent",
+    "response row: armSkuName = <vm size>, required for a row to be used",
+    "response row: armRegionName = <region>",
+    "response row: effectiveStartDate = RFC 3339 timestamp",
+    "response row: effectiveEndDate = RFC 3339 timestamp, absent while the interval is in force",
+    "spot classification: skuName ends with ' Spot'",
+    "excluded classification: skuName ends with ' Low Priority', the legacy Batch meter",
+    "windows exclusion: productName contains 'Windows'",
+    "cloud services exclusion: productName contains 'Cloud Services' or 'CloudServices', the legacy PaaS product published under the same armSkuName at a different rate",
+    "size page table header: Size Name | vCPUs (Qty.) | Memory (GiB) or Memory (GB); both label gibibytes and carry identical figures for equivalent sizes",
+    "size page size cell: ^Standard_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*$",
+    "size page parts table row: Processor | <range> vCPUs | <model> [x86-64] or [Arm64] or [ARM-64]"
+  ],
+  "support": {
+    "risk_status": "unavailable",
+    "operating_systems": ["linux"],
+    "architectures": ["x86_64", "arm64"],
+    "price_classes": ["spot", "on-demand"],
+    "regions": [
+      "australiaeast",
+      "eastus",
+      "eastus2",
+      "northeurope",
+      "southeastasia",
+      "uksouth",
+      "westeurope",
+      "westus2"
+    ],
+    "machine_series": [
+      "basv2",
+      "bpsv2",
+      "bsv2",
+      "dadsv5",
+      "dalsv6",
+      "dasv5",
+      "dasv6",
+      "ddsv5",
+      "ddv5",
+      "dpdsv5",
+      "dpsv5",
+      "dpsv6",
+      "dsv5",
+      "dsv6",
+      "dv5",
+      "easv5",
+      "easv6",
+      "edsv5",
+      "edv5",
+      "epsv5",
+      "esv5",
+      "esv6",
+      "ev5",
+      "falsv6",
+      "fasv6",
+      "fsv2"
+    ]
+  },
+  "thresholds": {
+    "min_regions": 8,
+    "min_machines": 180,
+    "max_compressed_bytes": 65536,
+    "max_fractional_digits": 6
+  },
+  "no_go_conditions": [
+    "The Retail Prices API stops serving anonymous requests or requires a subscription.",
+    "A size page stops publishing the bracketed [x86-64] or [Arm64] processor architecture marker, or publishes two different markers, leaving no defensible architecture.",
+    "A size page renames a contracted header cell, or labels its memory column with a third unit, which empties the parse and trips the coverage floor.",
+    "The 'Cloud Services' product stops being distinguishable by productName, leaving its rate ambiguous with the virtual-machine rate for the same size.",
+    "A machine has two different prices in effect at the same instant, with no rule that chooses between them.",
+    "A published price needs more fractional digits than the contracted maximum.",
+    "A Spot meter has no paired On-Demand meter in the same region, leaving a savings figure with no denominator.",
+    "The ' Spot' sku-name suffix stops distinguishing interruptible meters from the legacy ' Low Priority' meters.",
+    "Redistribution of the factual pricing and specification figures can no longer be approved."
+  ]
+}

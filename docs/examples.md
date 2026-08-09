@@ -398,10 +398,50 @@ spotinfo recommend --cloud gcp --architecture x86_64 --cpu 4 --memory 16 --outpu
 
 **Sample output (x86_64, top 3):**
 ```
-RANK  CLOUD  REGION       MACHINE        ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR       RISK          WHY
-   1  gcp    us-central1  n2d-standard-2 x86_64          2         8.0  0.026912000    unavailable   ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
-   2  gcp    us-central1  t2d-standard-2 x86_64          2         8.0  0.034676000    unavailable   ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
-   3  gcp    us-central1  c3d-highcpu-4  x86_64          4         8.0  0.035088000    unavailable   ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
+RANK  CLOUD  REGION       MACHINE         ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR       RISK          WHY
+   1  gcp    us-central1  n2d-standard-2  x86_64           2         8.0  0.026912000    unavailable   ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
+   2  gcp    us-central1  t2d-standard-2  x86_64           2         8.0  0.034676000    unavailable   ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
+   3  gcp    us-central1  c3d-highcpu-4   x86_64           4         8.0  0.035088000    unavailable   ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
+```
+
+### 19. Azure Spot VM Recommendations
+
+**Scenario**: Find the cheapest Azure Spot VMs that meet minimum resource requirements.
+
+**Notes:**
+- Azure data is offline/embedded; no credential, subscription, or tenant needed.
+- Eight regions are covered: `australiaeast`, `eastus`, `eastus2`, `northeurope`, `southeastasia`,
+  `uksouth`, `westeurope`, `westus2`. An unset `--region` ranks across all of them.
+- Risk is always `unavailable`; only `--workload cost` is supported.
+
+```bash
+# x86_64 candidates across every covered region, default top 3
+spotinfo recommend --cloud azure --architecture x86_64 --cpu 2 --memory 8
+
+# arm64 candidates (bpsv2, dpsv5, dpdsv5, dpsv6, epsv5 series)
+spotinfo recommend --cloud azure --architecture arm64 --cpu 4 --memory 16 --top 3
+
+# One region only
+spotinfo recommend --cloud azure --architecture x86_64 --cpu 2 --memory 8 --region westeurope
+
+# JSON output for automation (v2 schema, 9-digit decimal prices)
+spotinfo recommend --cloud azure --architecture x86_64 --cpu 4 --memory 16 --output json
+```
+
+**Sample output (x86_64, top 3):**
+```
+RANK  CLOUD  REGION   MACHINE           ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR       RISK          WHY
+   1  azure  uksouth  Standard_D2as_v6  x86_64           2         8.0  0.014013000    unavailable   ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
+   2  azure  uksouth  Standard_D2as_v5  x86_64           2         8.0  0.014310000    unavailable   ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
+   3  azure  uksouth  Standard_D2s_v6   x86_64           2         8.0  0.015444000    unavailable   ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
+```
+
+**Sample output (arm64, top 3):**
+```
+RANK  CLOUD  REGION   MACHINE           ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR       RISK          WHY
+   1  azure  uksouth  Standard_D4ps_v5  arm64            4        16.0  0.023496000    unavailable   ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
+   2  azure  uksouth  Standard_D4ps_v6  arm64            4        16.0  0.024737000    unavailable   ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
+   3  azure  westus2  Standard_D4ps_v6  arm64            4        16.0  0.025872000    unavailable   ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
 ```
 
 ## See Also

@@ -15,6 +15,8 @@ const (
 	nanosPerUnit = 1_000_000_000
 	// maxWholeUnits keeps whole units × nanosPerUnit inside int64.
 	maxWholeUnits = 9_223_372_035
+	// decimalBase is the radix trailing zeros are counted in.
+	decimalBase = 10
 )
 
 // ErrPrecisionLoss reports an amount that cannot be stored without rounding.
@@ -86,6 +88,25 @@ func (m Money) IsZero() bool { return m.nanos == 0 }
 // Float64 converts back to float64 for legacy APIs that only accept floats.
 // Lossy by definition: never use it for storage, comparison, or rendering.
 func (m Money) Float64() float64 { return float64(m.nanos) / nanosPerUnit }
+
+// FractionalDigits is how many decimal places the amount actually needs — the
+// fixed-point scale less its trailing zeros. Snapshot gates measure the
+// published price against a reviewed precision limit with it; String always
+// renders every digit, so it cannot answer the same question.
+func (m Money) FractionalDigits() int {
+	fraction := m.nanos % nanosPerUnit
+	if fraction == 0 {
+		return 0
+	}
+
+	digits := MoneyScale
+	for fraction%decimalBase == 0 {
+		fraction /= decimalBase
+		digits--
+	}
+
+	return digits
+}
 
 // String renders the canonical decimal form with exactly MoneyScale fractional
 // digits, so the same amount always serialises to the same bytes.

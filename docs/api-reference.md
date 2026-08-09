@@ -511,6 +511,15 @@ them.
 - Architectures: `x86_64` and `arm64` (arm series: `c4a`, `n4a`, `t2a`).
 - The root query command (`find_spot_instances`, `list_spot_regions`) is AWS-only.
 
+**Azure capability constraints:**
+- Regions: `australiaeast`, `eastus`, `eastus2`, `northeurope`, `southeastasia`, `uksouth`,
+  `westeurope`, `westus2`. Any other explicit region returns `NO_CANDIDATES`.
+- OS: `linux` only. `os: "windows"` returns `UNSUPPORTED_CAPABILITY`.
+- Workload: `cost` only. `web`, `ci`, `batch` return `UNSUPPORTED_CAPABILITY`.
+- Risk: always `status: "unavailable"`. Azure eviction rates need a subscription.
+- Architectures: `x86_64` and `arm64` (arm series: `bpsv2`, `dpsv5`, `dpdsv5`, `dpsv6`, `epsv5`).
+- `machine` is the full Azure size name, for example `Standard_D2s_v5`.
+
 #### Success Schema
 
 A successful result has `isError=false` and a single text content item containing JSON:
@@ -689,12 +698,19 @@ The spotinfo MCP server uses embedded data included in the binary at build time:
 - **Update Frequency**: Refreshed weekly by the `update-gcp-data` workflow (`make update-gcp-data`)
 - **Coverage**: `us-central1` only (other GCP regions require JavaScript rendering not performed by spotinfo)
 
+**Azure:**
+- **Spot VM Catalogue**: Spot and On-Demand prices from the anonymous Azure Retail Prices API, joined to vCPU, memory and processor architecture parsed from the Microsoft Learn VM size pages
+- **Update Frequency**: Refreshed weekly by the `update-azure-data` workflow (`make update-azure-data`)
+- **Coverage**: 224 VM sizes across 26 series in 8 regions (Linux only)
+
 ### Data Limitations
 
 1. **Offline Operation**: All data is embedded, enabling offline functionality
 2. **Update Lag**: Data freshness depends on the weekly refresh workflow
 3. **GCP Regional Coverage**: Limited to `us-central1` — the only region with static pricing pages
 4. **GCP Risk Data**: Preemption history requires an authenticated beta API; it is not embedded
+5. **Azure Coverage**: 8 reviewed regions and 26 reviewed machine series, not the whole Azure catalogue
+6. **Azure Risk Data**: Eviction rates require a subscription (Resource Graph, Resource SKUs); they are not embedded
 
 ## Performance Characteristics
 

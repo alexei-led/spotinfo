@@ -99,6 +99,60 @@
   risk-free `cost` workload.
 - **Runtime**: entirely offline. No credential, token, project, or network request.
 
+### 7. Azure Retail Prices API and Microsoft Learn VM size pages
+
+- **Prices**: `https://prices.azure.com/api/retail/prices`, the documented, anonymous Azure
+  Retail Prices API. It is swept once per approved region with
+  `serviceName eq 'Virtual Machines' and armRegionName eq '<region>' and priceType eq 'Consumption'`,
+  following `NextPageLink` until the region is exhausted.
+- **Specifications and architecture**: one Microsoft Learn size page per approved machine
+  series, for example
+  `https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dv5-series`.
+  The Retail API publishes no vCPU count, memory figure, or processor architecture, so none of
+  the three is inferred from a size name.
+- **Approved contract**: `internal/providers/azure/data/source-contract.json`. All 27 source
+  URLs are enumerated there; no other document is read.
+- **Embedded snapshot**: `internal/providers/azure/data/catalog.json.gz` plus its sidecar
+  `manifest.json`. 224 VM sizes across 26 series in 8 regions, 3,584 prices, 16,515 compressed
+  bytes.
+- **Update frequency**: weekly, through the `update-azure-data` workflow.
+- **Region coverage**: `australiaeast`, `eastus`, `eastus2`, `northeurope`, `southeastasia`,
+  `uksouth`, `westeurope`, `westus2`. These eight are a reviewed selection, not everything the
+  API serves; the API covers every Azure region, and widening the matrix is a contract edit plus
+  a refresh. A request for any other region returns `NO_CANDIDATES`; no region is substituted.
+- **OS coverage**: Linux only. Meters whose `productName` contains `Windows` bundle a licence
+  and are excluded.
+- **Risk**: none. Azure publishes eviction rates only through Resource Graph `SpotResources` and
+  Resource SKUs, both of which require a subscription, so every Azure candidate reports
+  `risk.status = "unavailable"` rather than a low number. Consequently Azure serves only the
+  risk-free `cost` workload.
+- **Runtime**: entirely offline. No credential, token, subscription, tenant, or network request.
+
+**Three source quirks the parser handles deliberately:**
+
+1. **`Low Priority` is not Spot.** The retired Batch meter is priced like Spot and sits beside
+   it under the same size. It is excluded; only a `skuName` ending in ` Spot` is Spot.
+2. **Cloud Services meters share the VM service name.** The legacy PaaS product is published
+   under `serviceName = "Virtual Machines"` against the same `armSkuName` at a different rate,
+   which made roughly 40 sizes per region ambiguous. Rows whose `productName` contains
+   `Cloud Services` or `CloudServices` are excluded.
+3. **Memory is labelled two ways.** The 18 general-purpose and compute-optimized pages write
+   `Memory (GiB)`; the 8 memory-optimized pages write `Memory (GB)` for the same gibibyte
+   figure — `Standard_E2_v5` reads 16 on one and `Standard_E2s_v5` reads 16 on the other. Both
+   labels are read; a third label fails the parse.
+
+**Effective-date rule.** The API returns every interval it knows about, including expired ones
+and ones not yet in force. A price is the interval where `effectiveStartDate <= now` and
+`effectiveEndDate` is absent or in the future. All eight regions resolve against one instant, so
+a sweep cannot mix an expiring price with its replacement. A machine with no interval in effect
+is dropped and reported; a machine with two different prices in effect fails the refresh.
+
+### Excluded Azure sources
+
+- Azure Spot Advisor and the Spot eviction-rate pages: not a published, anonymous interface.
+- Resource Graph `SpotResources` and the Resource SKUs API: require a subscription.
+- The Azure pricing calculator and any third-party aggregator.
+
 ### Excluded GCP sources
 - The 12 MB `AF_initDataCallback` blob that powers the region switcher: an undocumented
   positional array, not a published interface.
@@ -245,6 +299,38 @@ architecture documentation, add the reviewed family mapping to
 `internal/spot/data/architecture-snapshot.json`, update its non-empty `provenance` and
 `reviewed_at` (`YYYY-MM-DD`), then rerun `make verify-data`. The snapshot is intentionally
 committed review evidence; no runtime metadata call or automatic unreviewed generator exists.
+
+### Refreshing the embedded Azure catalogue
+The `update-azure-data` workflow runs weekly and opens a PR. To do it manually:
+
+```bash
+make update-azure-data   # Rebuilds internal/providers/azure/data/{catalog.json.gz,manifest.json}
+make verify-data         # Gates the contract, manifest, hashes and coverage floor
+make build
+```
+
+The updater makes roughly 100 anonymous requests (26 size pages, then 8 to 10 API pages per
+region), joins prices to specifications, and validates the result against the source contract,
+the manifest hash and the reviewed floor **before** writing anything. A failed run leaves the
+committed snapshot exactly as it was.
+
+Failures are deliberate, not transient noise. Expect to see:
+
+| Message | Meaning |
+| --- | --- |
+| `region X prices N machines, contract requires at least M` | One region returned short. The floor is applied per region so a healthy total cannot absorb it. Retry; if it persists, the size list changed. |
+| `page publishes no processor architecture marker` | A Learn page dropped its `[x86-64]`/`[Arm64]` marker. The parser refuses to guess — an Arm size labelled `x86_64` passes every other gate. |
+| `page mixes X and Y processors` | One page now documents two architectures. The series needs splitting, or the page changed shape. |
+| `page publishes no size table` | A contracted header was renamed, including a third memory-unit label. |
+| `two different current prices for one machine` | Two intervals are in force at once for an in-scope size. There is no safe way to choose; review the meters. |
+| `serviceName is "X", the contracted request returns only "Virtual Machines"` | The request filter stopped selecting what it was reviewed to select. |
+| `needs N fractional digits, contract allows 6` | A price got finer. Raise `max_fractional_digits` deliberately after review; never round. |
+| `priced in only one class` | Informational. The size is skipped rather than published with a savings figure that has no denominator. |
+| `belongs to unapproved series` | Microsoft added a series to a contracted page. Add it to `support.machine_series` and rerun. Architecture comes from the page, so unlike GCP there is no ordering trap here. |
+
+Apart from the last two, any of these means reviewing the sources and, if they really changed
+shape, bumping `parser_version` in both the parser and the source contract. Do not widen the
+parser to make a changed source fit.
 
 ### Refreshing the embedded GCP catalogue
 The `update-gcp-data` workflow runs weekly and opens a PR. To do it manually:

@@ -359,12 +359,26 @@ func writeRecommendationTable(recommendations []spot.Recommendation, output io.W
 // status when no figure was published, so a cost recommendation never reads as
 // an interruption claim.
 func writeNeutralRecommendationTable(recommendations []cloud.RecommendationDTO, output io.Writer) error {
-	if _, err := fmt.Fprintln(output, "RANK  CLOUD  REGION       MACHINE        ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR       RISK          WHY"); err != nil {
+	// The region and machine columns are sized from the rows rather than fixed:
+	// an Azure size name runs to twenty-odd characters where an AWS instance
+	// type takes ten, and a fixed width lets the longer one push every later
+	// column out of alignment.
+	regionWidth, machineWidth := len("REGION"), len("MACHINE")
+	for i := range recommendations {
+		regionWidth = max(regionWidth, len(recommendations[i].Region))
+		machineWidth = max(machineWidth, len(recommendations[i].Machine))
+	}
+
+	header := fmt.Sprintf("RANK  CLOUD  %-*s  %-*s  ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR       RISK          WHY",
+		regionWidth, "REGION", machineWidth, "MACHINE")
+	if _, err := fmt.Fprintln(output, header); err != nil {
 		return fmt.Errorf("write recommendation output: %w", err)
 	}
+
 	for _, recommendation := range recommendations {
-		if _, err := fmt.Fprintf(output, "%4d  %-5s  %-11s  %-14s %-12s %4d  %10.1f  %-13s  %-12s  %s\n",
-			recommendation.Rank, recommendation.Cloud, recommendation.Region, recommendation.Machine,
+		if _, err := fmt.Fprintf(output, "%4d  %-5s  %-*s  %-*s  %-12s  %4d  %10.1f  %-13s  %-12s  %s\n",
+			recommendation.Rank, recommendation.Cloud,
+			regionWidth, recommendation.Region, machineWidth, recommendation.Machine,
 			recommendation.Architecture, recommendation.VCPU, recommendation.MemoryGiB,
 			recommendation.SpotUSDPerHour, riskDisplay(&recommendation.Risk),
 			strings.Join(recommendation.RationaleCodes, ",")); err != nil {
