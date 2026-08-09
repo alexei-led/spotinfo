@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head><title>Spot VM pricing</title></head>
+<body>
+<!-- Trimmed to the structure the parser contracts on: an ARIA region selector
+     followed by the tables rendered for that region. -->
+<div aria-label="Region selector" role="listbox">
+  <ul>
+    <li role="option" aria-selected="false" data-value="Frankfurt (europe-west3)"><span>Frankfurt (europe-west3)</span></li>
+    <li role="option" aria-selected="true" data-value="Iowa (us-central1)"><span>Iowa (us-central1)</span></li>
+  </ul>
+</div>
+<div role="region" aria-label="C4 standard machine types">
+  <table>
+    <tr>
+      <th><div><p>Machine type</p></div></th>
+      <th><div><p>Virtual CPUs</p></div></th>
+      <th><div><p>Memory</p></div></th>
+      <th><div><p>Current Spot pricing (USD)</p></div></th>
+    </tr>
+    <tr>
+      <td>c4-standard-2</td><td>2</td><td>7&nbsp;GiB</td><td>$0.058121 / 1 hour</td>
+    </tr>
+    <tr>
+      <td>t2a-standard-4</td><td>4</td><td>16 GiB</td><td>$0.031500 / 1 hour</td>
+    </tr>
+    <tr>
+      <td>n1-highcpu-2</td><td>2</td><td>1.80 GiB</td><td>$0.007300 / 1 hour</td>
+    </tr>
+    <!-- A platform variant, not a machine type a user can request. -->
+    <tr>
+      <td>n1-standard-96 Skylake Platform only</td><td>96</td><td>360 GiB</td><td>$0.900000 / 1 hour</td>
+    </tr>
+    <!-- A shared-core machine: a fraction of a vCPU has no whole-core count. -->
+    <tr>
+      <td>f1-micro</td><td>0.2</td><td>0.60 GiB</td><td>$0.003100 / 1 hour</td>
+    </tr>
+    <!-- Spot price with no on-demand pair on the other page. -->
+    <tr>
+      <td>e2-orphan-2</td><td>2</td><td>8 GiB</td><td>$0.011000 / 1 hour</td>
+    </tr>
+  </table>
+</div>
+<!-- A family this region does not offer falls back to another region. Its
+     prices must never be relabelled as us-central1. -->
+<div aria-label="Region selector" role="listbox">
+  <ul>
+    <li role="option" aria-selected="true" data-value="Johannesburg (africa-south1)"><span>Johannesburg (africa-south1)</span></li>
+  </ul>
+</div>
+<div role="region" aria-label="Elsewhere">
+  <table>
+    <tr>
+      <th>Machine type</th><th>Virtual CPUs</th><th>Memory</th><th>Current Spot pricing (USD)</th>
+    </tr>
+    <tr>
+      <td>c4-elsewhere-8</td><td>8</td><td>32 GiB</td><td>$0.500000 / 1 hour</td>
+    </tr>
+  </table>
+</div>
+<!-- Not a machine-type table: the header does not match. -->
+<div role="region" aria-label="Local SSD">
+  <table>
+    <tr><th>Item</th><th>Current Spot pricing (USD)</th></tr>
+    <tr><td>Local SSD</td><td>$0.019000 / 1 gibibyte month</td></tr>
+  </table>
+</div>
+</body>
+</html>

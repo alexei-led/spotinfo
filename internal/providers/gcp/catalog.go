@@ -1,0 +1,304 @@
+package gcp
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"maps"
+	"slices"
+
+	"spotinfo/internal/cloud"
+	"spotinfo/internal/snapshot"
+)
+
+const (
+	// percentScale converts a price ratio to whole percent.
+	percentScale = 100
+	// pricesPerMachine is the two classes every catalogue row publishes.
+	pricesPerMachine = 2
+	// nanosPerUnit is one currency unit in the fixed-point scale Money stores.
+	nanosPerUnit = 1_000_000_000
+	// decimalBase is the radix trailing zeros are counted in.
+	decimalBase = 10
+)
+
+// Catalog is the committed GCP price catalogue: one region, one operating
+// system, one row per machine type. Every row carries both a Spot and an
+// On-Demand price, because a savings figure without its denominator is a number
+// no consumer can check.
+//
+//nolint:govet // Metadata reads before the rows it describes in a review diff.
+type Catalog struct {
+	SchemaVersion string                `json:"schema_version"`
+	Region        cloud.Region          `json:"region"`
+	OS            cloud.OperatingSystem `json:"os"`
+	Currency      cloud.Currency        `json:"currency"`
+	BillingUnit   cloud.BillingUnit     `json:"billing_unit"`
+	Machines      []CatalogMachine      `json:"machines"`
+}
+
+// CatalogMachine is one priced machine type.
+type CatalogMachine struct {
+	ID           cloud.MachineID    `json:"id"`
+	Architecture cloud.Architecture `json:"architecture"`
+	Spot         cloud.Money        `json:"spot_usd_per_hour"`
+	OnDemand     cloud.Money        `json:"on_demand_usd_per_hour"`
+	MemoryGiB    float64            `json:"memory_gib"`
+	VCPU         int                `json:"vcpu"`
+}
+
+// SavingsPercent is the whole-percent discount of the Spot price against the
+// paired On-Demand price. It is absent when the two prices cannot produce a
+// figure in the 1..100 range a consumer can read as a percentage.
+func (m *CatalogMachine) SavingsPercent() *int {
+	if m.OnDemand.IsZero() || m.Spot.Nanos() >= m.OnDemand.Nanos() {
+		return nil
+	}
+
+	saved := int((m.OnDemand.Nanos() - m.Spot.Nanos()) * percentScale / m.OnDemand.Nanos())
+	if saved <= 0 {
+		return nil
+	}
+
+	return &saved
+}
+
+// BuildCatalog joins Spot rows with their On-Demand prices. It returns the
+// machines priced in both classes plus the identifiers that had a Spot price but
+// no On-Demand pair; those are left out rather than published with a missing
+// denominator, and the caller reports them for review.
+func BuildCatalog(region cloud.Region, spotRows, onDemandRows []MachineRow) (*Catalog, []cloud.MachineID, error) {
+	onDemand, err := indexRows(onDemandRows, cloud.PriceClassOnDemand)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	spot, err := indexRows(spotRows, cloud.PriceClassSpot)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var (
+		machines = make([]CatalogMachine, 0, len(spot))
+		unpaired []cloud.MachineID
+	)
+
+	for _, id := range slices.Sorted(maps.Keys(spot)) {
+		row := spot[id]
+
+		paired, found := onDemand[id]
+		if !found {
+			unpaired = append(unpaired, id)
+
+			continue
+		}
+
+		machines = append(machines, CatalogMachine{
+			ID:           id,
+			Architecture: ArchitectureOf(id),
+			VCPU:         row.VCPU,
+			MemoryGiB:    row.MemoryGiB,
+			Spot:         row.Price,
+			OnDemand:     paired.Price,
+		})
+	}
+
+	return &Catalog{
+		SchemaVersion: CatalogSchemaVersion,
+		Region:        region,
+		OS:            cloud.OSLinux,
+		Currency:      cloud.CurrencyUSD,
+		BillingUnit:   cloud.BillingUnitInstanceHour,
+		Machines:      machines,
+	}, unpaired, nil
+}
+
+// indexRows keys rows by machine. A repeated row with the same price is
+// harmless redundancy — the pages list some machines under more than one
+// heading — but two different prices for one machine is ambiguity with no safe
+// resolution.
+func indexRows(rows []MachineRow, class cloud.PriceClass) (map[cloud.MachineID]MachineRow, error) {
+	indexed := make(map[cloud.MachineID]MachineRow, len(rows))
+
+	for _, row := range rows {
+		previous, repeated := indexed[row.ID]
+		if repeated && previous.Price != row.Price {
+			return nil, fmt.Errorf("%w: %s has two %s prices, %s and %s",
+				ErrSourceContract, row.ID, class, previous.Price, row.Price)
+		}
+		indexed[row.ID] = row
+	}
+
+	return indexed, nil
+}
+
+// DecodeCatalog decodes a committed catalogue. Unknown fields are rejected so a
+// renamed key fails loudly instead of validating as a zero value.
+func DecodeCatalog(data []byte) (*Catalog, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+
+	var catalog Catalog
+	if err := decoder.Decode(&catalog); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrCatalog, err)
+	}
+
+	return &catalog, nil
+}
+
+// Encode renders the catalogue as compact JSON. The machine order is the order
+// BuildCatalog produced — sorted by identifier — so a refresh that changes no
+// price produces the same bytes.
+func (c *Catalog) Encode() ([]byte, error) {
+	data, err := json.Marshal(c)
+	if err != nil {
+		return nil, fmt.Errorf("encode gcp catalogue: %w", err)
+	}
+
+	return data, nil
+}
+
+// Verify checks a catalogue against the contract that approved its sources.
+// Everything the contract enumerates is checked: an unlisted region, operating
+// system, architecture, or machine series is out of contract rather than a
+// judgement call.
+func (c *Catalog) Verify(contract *snapshot.SourceContract) error {
+	if c.SchemaVersion != CatalogSchemaVersion {
+		return fmt.Errorf("%w: schema_version must be %q, got %q", ErrCatalog, CatalogSchemaVersion, c.SchemaVersion)
+	}
+	if !slices.Contains(contract.Support.Regions, c.Region) {
+		return fmt.Errorf("%w: region %q is not in the approved support matrix", ErrCatalog, c.Region)
+	}
+	if !slices.Contains(contract.Support.OperatingSystems, c.OS) {
+		return fmt.Errorf("%w: operating system %q is not in the approved support matrix", ErrCatalog, c.OS)
+	}
+	if c.Currency != cloud.CurrencyUSD || c.BillingUnit != cloud.BillingUnitInstanceHour {
+		return fmt.Errorf("%w: catalogue is priced in %s per %s, not %s per %s",
+			ErrCatalog, c.Currency, c.BillingUnit, cloud.CurrencyUSD, cloud.BillingUnitInstanceHour)
+	}
+	if len(c.Machines) == 0 {
+		return fmt.Errorf("%w: catalogue has no machines", ErrCatalog)
+	}
+
+	seen := make(map[cloud.MachineID]struct{}, len(c.Machines))
+	for i := range c.Machines {
+		machine := &c.Machines[i]
+		if _, duplicate := seen[machine.ID]; duplicate {
+			return fmt.Errorf("%w: %s appears twice", ErrCatalog, machine.ID)
+		}
+		seen[machine.ID] = struct{}{}
+
+		if err := machine.verify(contract); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (m *CatalogMachine) verify(contract *snapshot.SourceContract) error {
+	if !machineIDPattern.MatchString(string(m.ID)) {
+		return fmt.Errorf("%w: %q is not a machine type identifier", ErrCatalog, m.ID)
+	}
+	if !slices.Contains(contract.Support.MachineSeries, SeriesOf(m.ID)) {
+		return fmt.Errorf("%w: %s belongs to unapproved series %q", ErrCatalog, m.ID, SeriesOf(m.ID))
+	}
+	if !slices.Contains(contract.Support.Architectures, m.Architecture) {
+		return fmt.Errorf("%w: %s declares unapproved architecture %q", ErrCatalog, m.ID, m.Architecture)
+	}
+	if m.Architecture != ArchitectureOf(m.ID) {
+		return fmt.Errorf("%w: %s is recorded as %q but its series is %q",
+			ErrCatalog, m.ID, m.Architecture, ArchitectureOf(m.ID))
+	}
+	if m.VCPU <= 0 || m.MemoryGiB <= 0 {
+		return fmt.Errorf("%w: %s has no usable specification", ErrCatalog, m.ID)
+	}
+	if m.Spot.IsZero() || m.OnDemand.IsZero() {
+		return fmt.Errorf("%w: %s is missing a spot or on-demand price", ErrCatalog, m.ID)
+	}
+	// A Spot price at or above list price means the two pages were joined on
+	// different machines, not that spare capacity got expensive.
+	if m.Spot.Nanos() >= m.OnDemand.Nanos() {
+		return fmt.Errorf("%w: %s is priced %s spot against %s on-demand", ErrCatalog, m.ID, m.Spot, m.OnDemand)
+	}
+
+	limit := contract.Thresholds.MaxFractionalDigits
+	for _, amount := range []cloud.Money{m.Spot, m.OnDemand} {
+		if digits := fractionalDigits(amount); digits > limit {
+			return fmt.Errorf("%w: %s needs %d fractional digits, contract allows %d",
+				ErrCatalog, m.ID, digits, limit)
+		}
+	}
+
+	return nil
+}
+
+// PriceRecords flattens the catalogue into the neutral records the shared
+// snapshot validator checks for duplicates and coverage.
+func (c *Catalog) PriceRecords() []snapshot.PriceRecord {
+	records := make([]snapshot.PriceRecord, 0, len(c.Machines)*pricesPerMachine)
+
+	for i := range c.Machines {
+		machine := &c.Machines[i]
+		for _, priced := range []struct {
+			class  cloud.PriceClass
+			amount cloud.Money
+		}{
+			{class: cloud.PriceClassSpot, amount: machine.Spot},
+			{class: cloud.PriceClassOnDemand, amount: machine.OnDemand},
+		} {
+			records = append(records, snapshot.PriceRecord{
+				Region:   c.Region,
+				Machine:  machine.ID,
+				OS:       c.OS,
+				Class:    priced.class,
+				Currency: c.Currency,
+				Unit:     c.BillingUnit,
+				Amount:   priced.amount,
+			})
+		}
+	}
+
+	return records
+}
+
+// Coverage counts what the catalogue actually carries, for the manifest floor.
+func (c *Catalog) Coverage() snapshot.Coverage {
+	return snapshot.Coverage{
+		Regions:  1,
+		Machines: len(c.Machines),
+		Prices:   len(c.Machines) * pricesPerMachine,
+	}
+}
+
+// Series lists the machine series present, in stable order.
+func (c *Catalog) Series() []string {
+	series := make([]string, 0, len(c.Machines))
+	for i := range c.Machines {
+		if name := SeriesOf(c.Machines[i].ID); !slices.Contains(series, name) {
+			series = append(series, name)
+		}
+	}
+	slices.Sort(series)
+
+	return series
+}
+
+// fractionalDigits is how many decimal places an amount actually needs — the
+// fixed-point scale less its trailing zeros. It exists so the contract's
+// precision threshold measures the published price rather than the storage
+// format, which always renders every digit.
+func fractionalDigits(amount cloud.Money) int {
+	nanos := amount.Nanos() % nanosPerUnit
+	if nanos == 0 {
+		return 0
+	}
+
+	digits := cloud.MoneyScale
+	for nanos%decimalBase == 0 {
+		nanos /= decimalBase
+		digits--
+	}
+
+	return digits
+}

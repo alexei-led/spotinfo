@@ -414,6 +414,33 @@ chmod +x /path/to/spotinfo
 - Check network connectivity
 - Use embedded data mode
 
+### "gcp: unsupported capability: risk" (`UNSUPPORTED_CAPABILITY`)
+
+**Cause:** Two distinct triggers:
+
+1. Running the root query command with `--cloud gcp` (e.g., `spotinfo --cloud gcp --type 'c4.*'`). The root command renders an interruption column, which requires risk data that GCP does not publish.
+2. Running `spotinfo recommend --cloud gcp --workload web` (or `ci` or `batch`). These workloads cap interruption frequency and require risk data.
+
+**Solution:** Use `spotinfo recommend --cloud gcp` with `--workload cost` (the default on GCP). The root query command is AWS-only.
+
+### "gcp: unsupported capability: os windows" (`UNSUPPORTED_CAPABILITY`)
+
+**Cause:** `--os windows` on `--cloud gcp`. GCP Spot VMs are served with Linux pricing only.
+
+**Solution:** Omit `--os` or set `--os linux`.
+
+### "no candidates for architecture ... and workload cost" (`NO_CANDIDATES`) on GCP
+
+**Cause:** An explicit `--region` was given that is not `us-central1`. The embedded GCP catalogue covers `us-central1` only; other GCP regions require JavaScript rendering that spotinfo does not perform.
+
+**Solution:** Omit `--region` (expands to `us-central1`) or use `--region us-central1` explicitly.
+
+### "data unavailable: cloud provider "azure" is unavailable (PROVIDER_NOT_REGISTERED)" (`DATA_UNAVAILABLE`)
+
+**Cause:** `--cloud azure` is recognised but no data is embedded yet.
+
+**Solution:** Use `--cloud aws` or `--cloud gcp`. Azure support requires a future data refresh.
+
 ## Debugging Techniques
 
 ### 1. Enable Verbose Logging

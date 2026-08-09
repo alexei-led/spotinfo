@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"spotinfo/internal/mcp"
 	"spotinfo/internal/providers"
 	awsprovider "spotinfo/internal/providers/aws"
+	gcpprovider "spotinfo/internal/providers/gcp"
 	"spotinfo/internal/spot"
 )
 
@@ -150,20 +152,26 @@ func mainCmd(ctx *cli.Context) error {
 
 // newProviderRegistry composes the providers this binary serves. The AWS
 // client is shared with the legacy acquisition path so a single invocation
-// opens one client. GCP and Azure are recognised identifiers with no
-// registration yet, so the registry reports them disabled rather than absent.
+// opens one client. Azure is a recognised identifier with no registration yet,
+// so the registry reports it disabled rather than absent.
 func newProviderRegistry(client *spot.Client) (*providers.Registry, error) {
-	registry, err := providers.New(providers.Registration{
-		ID: cloud.ProviderAWS,
-		Build: func() (cloud.Provider, error) {
-			lookup, err := spot.LoadEmbeddedArchitectureLookup()
-			if err != nil {
-				return nil, fmt.Errorf("load aws architecture data: %w", err)
-			}
+	registry, err := providers.New(
+		providers.Registration{
+			ID: cloud.ProviderAWS,
+			Build: func() (cloud.Provider, error) {
+				lookup, err := spot.LoadEmbeddedArchitectureLookup()
+				if err != nil {
+					return nil, fmt.Errorf("load aws architecture data: %w", err)
+				}
 
-			return awsprovider.New(client, lookup)
+				return awsprovider.New(client, lookup)
+			},
 		},
-	})
+		providers.Registration{
+			ID:    cloud.ProviderGCP,
+			Build: func() (cloud.Provider, error) { return gcpprovider.New() },
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -283,6 +291,18 @@ func lineageString(ctx *cli.Context, name string) string {
 
 func lineageStringSlice(ctx *cli.Context, name string) []string {
 	return flagLineageContext(ctx, name).StringSlice(name)
+}
+
+// lineageIsSet reports whether a flag was given on any context in the lineage,
+// as opposed to carrying its declared default.
+func lineageIsSet(ctx *cli.Context, name string) bool {
+	for _, candidate := range ctx.Lineage() {
+		if slices.Contains(candidate.LocalFlagNames(), name) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func lineageInt(ctx *cli.Context, name string, aliases ...string) int {

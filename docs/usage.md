@@ -2,7 +2,7 @@
 
 ## Command Overview
 
-`spotinfo` is a command-line tool for exploring AWS EC2 Spot instances with advanced filtering, sorting, and placement score analysis capabilities.
+`spotinfo` is a command-line tool for exploring AWS EC2 Spot instances with advanced filtering, sorting, and placement score analysis capabilities. The `recommend` subcommand supports multiple cloud providers; see [Cloud Capability Matrix](#cloud-capability-matrix) below.
 
 ## Basic Syntax
 
@@ -12,10 +12,15 @@ spotinfo [global options]
 
 ## Global Options
 
+### Cloud Provider
+| Flag | Description | Example |
+|------|-------------|---------|
+| `--cloud value` | Cloud provider: `aws`, `gcp`, `azure` | `--cloud gcp` |
+
 ### Instance Selection
 | Flag | Description | Example |
 |------|-------------|---------|
-| `--type value` | EC2 instance type (supports RE2 regex) | `--type "m5.large"` or `--type "t3.*"` |
+| `--type value, --machine value` | EC2 instance type (supports RE2 regex) | `--type "m5.large"` or `--type "t3.*"` |
 | `--os value` | Operating system filter | `--os linux` (default) or `--os windows` |
 
 ### Geographic Filtering
@@ -66,20 +71,21 @@ spotinfo recommend --architecture <x86_64|arm64> --cpu N --memory N [flags]
 
 | Flag | Description | Default |
 |------|-------------|---------|
+| `--cloud aws|gcp|azure` | Cloud provider | `aws` |
 | `--architecture x86_64|arm64` | Required processor architecture | none |
-| `--instance REGEXP` | RE2 instance-type filter; combined with architecture using AND semantics | none |
-| `--region REGION` | One or more regions; `all` uses all Advisor regions | `us-east-1` |
+| `--instance REGEXP, --machine REGEXP` | RE2 machine-type filter; combined with architecture using AND semantics | none |
+| `--region REGION` | One or more regions; `all` uses all regions the selected cloud publishes | `us-east-1` (AWS name; unset on non-AWS clouds expands to all their published regions) |
 | `--cpu N`, `--vcpu N` | Required positive minimum vCPU count | none |
 | `--memory N`, `--memory-gib N` | Required positive minimum GiB of memory | none |
 | `--budget USD` | Positive maximum USD per candidate instance-hour | none |
 | `--os linux|windows` | Operating-system price stream | `linux` |
-| `--workload web|ci|batch` | Interruption-frequency cap | `web` |
+| `--workload cost|web|ci|batch` | Ranking policy; `cost` ranks by price only and requires no risk data | `web` on clouds with risk data; `cost` otherwise |
 | `--top N` | Maximum candidates returned | `3` |
 | `--output table|json` | Recommendation output format | `table` |
 
-`web` accepts only the Advisor `<5%` label. `ci` accepts Advisor labels through `10-15%` (at most 15%), and `batch` accepts labels through `15-20%` (at most 20%). `--cpu` and `--memory` are inclusive minima, as is `--budget`; a supplied budget must be greater than zero. Prices of zero, missing prices, and non-finite prices are never candidates; existing live-price enrichment can provide a usable positive price. `--os` selects Linux or Windows pricing before ranking. Repeated `--region` values are trimmed, deduplicated, and sorted before fetching and reporting; repeated `--region all` becomes one `all`, while `all` combined with an explicit region (or an empty region value) is rejected before fetching.
+`cost` ranks purely by price with no interruption constraint and works on every cloud. `web` accepts only the Advisor `<5%` label. `ci` accepts Advisor labels through `10-15%` (at most 15%), and `batch` accepts labels through `15-20%` (at most 20%). `web`, `ci`, and `batch` require a cloud that publishes interruption or preemption risk; requesting them on GCP returns `UNSUPPORTED_CAPABILITY`. `--cpu` and `--memory` are inclusive minima, as is `--budget`; a supplied budget must be greater than zero. Prices of zero, missing prices, and non-finite prices are never candidates; existing live-price enrichment can provide a usable positive price. `--os` selects Linux or Windows pricing before ranking. Repeated `--region` values are trimmed, deduplicated, and sorted before fetching and reporting; repeated `--region all` becomes one `all`, while `all` combined with an explicit region (or an empty region value) is rejected before fetching.
 
-The shared root `--os`, `--region`, `--output`, `--cpu`, and `--memory` flags can be placed before `recommend` (for example, `spotinfo --output json --cpu 2 --memory 8 recommend --architecture x86_64`). Explicit flags after `recommend` take precedence; if neither is set, the command defaults apply. `--architecture`, `--instance`, `--budget`, `--workload`, and `--top` remain command-local.
+The shared root `--cloud`, `--os`, `--region`, `--output`, `--cpu`, and `--memory` flags can be placed before `recommend` (for example, `spotinfo --cloud gcp --output json --cpu 2 --memory 8 recommend --architecture x86_64`). Explicit flags after `recommend` take precedence; if neither is set, the command defaults apply. `--architecture`, `--instance`, `--budget`, `--workload`, and `--top` remain command-local.
 
 The default `table` output is concise and has rank, region, instance, architecture, vCPU, memory GiB, USD/hour, savings, interruption, and `WHY`. `WHY` is a comma-separated list of deterministic rationale codes such as `ARCHITECTURE_MATCH`, `KNOWN_POSITIVE_PRICE`, `VCPU_MINIMUM_MET`, `MEMORY_MINIMUM_MET`, `WORKLOAD_CI_CAP_MET`, and, when applicable, `BUDGET_CAP_MET`. These are facts and policy checks, not generated prose.
 
@@ -114,6 +120,27 @@ The following JSON example abridges each recommendation item to its identifying 
 ```
 
 v1 does not use placement scores, GPUs, ML, Markdown output, composite scores, or savings ranking. Architecture comes from a committed reviewed family snapshot; unknown families fail closed and no runtime AWS metadata call is made. Snapshot `provenance` must be non-empty and `reviewed_at` must be a valid `YYYY-MM-DD` date. See [Data Sources](data-sources.md) for the manual reviewed update procedure and freshness limitations.
+
+Non-AWS clouds and AWS with `--workload cost` emit `spotinfo.recommend/v2` (see [API Reference](api-reference.md)). v2 prices are decimal strings with exactly nine fractional digits. AWS with `--workload web`, `ci`, or `batch` continues to emit v1.
+
+## Cloud Capability Matrix
+
+| Cloud | Entry point | Regions | OS | Architectures | Risk data | Workloads |
+|-------|-------------|---------|-----|---------------|-----------|-----------|
+| `aws` | root + `recommend` | all Advisor regions | linux, windows | x86_64, arm64 | interruption buckets | cost, web, ci, batch |
+| `gcp` | `recommend` only | `us-central1` | linux | x86_64, arm64 | unavailable | cost |
+| `azure` | — | — | — | — | — | `DATA_UNAVAILABLE` |
+
+**GCP notes:**
+
+- The root query command (`spotinfo --cloud gcp ...`) is not supported; it requires interruption data and returns `UNSUPPORTED_CAPABILITY`.
+- Only `us-central1` is served. Naming any other region in `--region` returns `NO_CANDIDATES`. An unset `--region` expands to all GCP-published regions, which is currently only `us-central1`.
+- `--os windows` returns `UNSUPPORTED_CAPABILITY`.
+- Arm series: `c4a`, `n4a`, `t2a`. x86_64 series: `c2`, `c3`, `c3d`, `c4`, `c4d`, `e2`, `m1`, `m2`, `m3`, `n1`, `n2`, `n2d`, `n4`, `n4d`, `t2d`.
+- Every machine carries a Spot price, a paired On-Demand price, and a derived savings percent. Risk is always `status: "unavailable"`.
+- The embedded catalogue is refreshed by `make update-gcp-data` and the weekly `update-gcp-data` workflow.
+
+**Azure note:** Selecting `--cloud azure` always returns `DATA_UNAVAILABLE` (no data embedded yet).
 
 ## Output Formats
 

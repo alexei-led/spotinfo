@@ -75,6 +75,7 @@ func TestPackagesRespectImportPolicies(t *testing.T) {
 	// files that live beside this one, would satisfy every policy vacuously.
 	require.Contains(t, scanned, "internal/cloud/provider.go")
 	require.Contains(t, scanned, "internal/providers/aws/provider.go")
+	require.Contains(t, scanned, "internal/providers/gcp/provider.go")
 	require.Contains(t, scanned, "internal/mcp/tools.go")
 
 	for file, paths := range imports {

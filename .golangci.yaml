@@ -76,6 +76,10 @@ linters:
             - github.com/spf13/cast
             - github.com/bluele/gcache
             - golang.org/x/time
+            # HTML tokenizer for the GCP pricing-page parser. The published
+            # pages are the only contracted GCP source, and the standard library
+            # has no HTML parser.
+            - golang.org/x/net/html
             - github.com/aws/aws-sdk-go-v2
             - github.com/aws/smithy-go
             - github.com/jedib0t/go-pretty/v6/table

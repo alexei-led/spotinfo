@@ -1,0 +1,51 @@
+{
+  "schema_version": "spotinfo.snapshot-manifest/v1",
+  "data_schema_version": "spotinfo.gcp-catalog/v1",
+  "parser_version": "gcp-pricing-html/1",
+  "provider": "gcp",
+  "kind": "spot-price",
+  "currency": "USD",
+  "billing_unit": "instance-hour",
+  "payload": {
+    "file": "catalog.json.gz",
+    "form": "parsed-catalog",
+    "sha256": "bff501bb261b61ec33eb0b51c5b77cbd845fad87083dca3bfa5538020a209067"
+  },
+  "sources": [
+    {
+      "fetched_at": "2026-08-09T05:26:02.483692Z",
+      "observed_at": null,
+      "url": "https://cloud.google.com/spot-vms/pricing",
+      "sha256": "145c737738229a71fa6cb31ee34fa147c08fff363e70761c53eca03302ec8d80"
+    },
+    {
+      "fetched_at": "2026-08-09T05:26:08.453116Z",
+      "observed_at": null,
+      "url": "https://cloud.google.com/products/compute/pricing/general-purpose",
+      "sha256": "206371f640ef3d710379d08725260c1bf026984591a548298c60c213dc4653fc"
+    },
+    {
+      "fetched_at": "2026-08-09T05:26:09.65227Z",
+      "observed_at": null,
+      "url": "https://cloud.google.com/products/compute/pricing/compute-optimized",
+      "sha256": "0c2dd2b550d0badc14d4786638112ba2a0832178a3b131fb0114a20b52358aac"
+    },
+    {
+      "fetched_at": "2026-08-09T05:26:10.841631Z",
+      "observed_at": null,
+      "url": "https://cloud.google.com/products/compute/pricing/memory-optimized",
+      "sha256": "7bc98b8c94a673c53cf19e5a6def49f3e2bb3b16d6c2c23bdfbdebe23f63621d"
+    },
+    {
+      "fetched_at": "2026-08-09T05:26:10.844221Z",
+      "observed_at": null,
+      "url": "https://docs.cloud.google.com/compute/docs/machine-resource",
+      "sha256": ""
+    }
+  ],
+  "min_records": {
+    "regions": 1,
+    "machines": 300,
+    "prices": 600
+  }
+}

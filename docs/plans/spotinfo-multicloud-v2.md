@@ -787,11 +787,47 @@ Manual checks:
 - Review every changed public JSON field and schema version.
 - Ask an independent reviewer to run a scoped architecture review against #35–#38, #28, and #29 and save it to `docs/reviews/spotinfo-multicloud-v2-architecture-review.md`.
 
-- [ ] Write `docs/research/multicloud-source-contracts.md` and the exact GCP support matrix.
-- [ ] Create and approve `internal/providers/gcp/data/source-contract.json`; run its schema and threshold gate; stop before GCP code if it fails.
-- [ ] Record GCP source headers, page list, exact Linux machine/region/architecture matrix, terms decision, coverage thresholds, and binary-size delta.
-- [ ] Implement and verify the GCP updater, parser, snapshot, provider, CLI flow, MCP flow, docs, and update workflow.
-- [ ] Run all GCP-focused gates and commit the #28 slice.
+- [x] Write `docs/research/multicloud-source-contracts.md` and the exact GCP support matrix.
+- [x] Create and approve `internal/providers/gcp/data/source-contract.json`; run its schema and threshold gate; stop before GCP code if it fails.
+- [x] Record GCP source headers, page list, exact Linux machine/region/architecture matrix, terms decision, coverage thresholds, and binary-size delta.
+- [x] Implement and verify the GCP updater, parser, snapshot, provider, CLI flow, MCP flow, docs, and update workflow.
+- [x] Run all GCP-focused gates and commit the #28 slice.
+
+GCP slice result (#28), recorded for the Azure slice and the final review:
+
+- **Region coverage is `us-central1` only.** The official pages server-render one region and
+  switch the rest in with JavaScript. The plan assumed a broader matrix; it is a narrower
+  claim, not a no-go. The parser attributes every table to the region selector rendered above
+  it, so a table Google renders for another region — the Spot page has one, for
+  `africa-south1` — is skipped rather than relabelled.
+- **Source list changed.** `https://cloud.google.com/compute/vm-instance-pricing` now
+  redirects to a landing page with no tables. On-Demand prices come from the
+  `products/compute/pricing/{general-purpose,compute-optimized,memory-optimized}` category
+  pages. `storage-optimized` is not read: no machine it prices is offered as Spot.
+- **`machine-resource.html` fixture not created.** Architecture is a reviewed series list in
+  the parser (`c4a`, `n4a`, `t2a` are Arm), with the documentation page recorded as its source
+  in the manifest — the same posture as the AWS architecture snapshot. There is no page to
+  parse, so there is no fixture for one.
+- **`internal/mcp/recommend_test.go` was left alone.** Its fake providers cover the error
+  matrix without pinning MCP tests to committed prices, and importing a concrete provider into
+  `internal/mcp` would add a layer edge the boundary gate exists to prevent. The embedded-GCP
+  MCP contract test lives in `cmd/spotinfo/multicloud_test.go`, which already composes the
+  real registry.
+- **The root query command stays AWS-only.** It renders an interruption column, so it requires
+  the risk capability, which GCP does not have; `spotinfo --cloud gcp --type …` returns
+  `UNSUPPORTED_CAPABILITY`. GCP is served by `recommend` and by `recommend_spot_instances`.
+- **`--region` default.** The declared default `us-east-1` is an AWS region name, so on a
+  non-AWS cloud an unset `--region` now means every region that cloud publishes. An explicit
+  `--region` is always honoured.
+- **Numbers.** 333 machines, 18 series, 666 prices, 5,815 compressed bytes, maximum 9
+  fractional digits (exactly `cloud.MoneyScale` — no headroom). Binary-size delta +127,056
+  bytes.
+- **The coverage floor already earned its keep.** One refresh received a partially rendered
+  page missing every `n4d` table; the run stopped at 295 machines and wrote nothing.
+- **Open maintainer item.** `terms.redistribution_decision` is recorded as `approved` with
+  evidence `https://developers.google.com/site-policies`. The pricing pages carry no Creative
+  Commons footer, so the decision rests on the figures being facts. The project owner must
+  confirm it before release.
 - [ ] After the GCP slice is reviewed and committed, record the exact Azure support matrix.
 - [ ] Create and approve `internal/providers/azure/data/source-contract.json`; run its schema and threshold gate; stop before Azure code if it fails.
 - [ ] Record Azure filters, page selection, exact Linux machine/region/architecture matrix, terms decision, effective-date rules, coverage thresholds, and binary-size delta.

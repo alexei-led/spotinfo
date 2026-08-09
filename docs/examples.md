@@ -374,6 +374,36 @@ time spotinfo --type "m5.*" --with-score --region "us-east-1" --output json >/de
 
 These examples demonstrate the flexibility and power of `spotinfo` for various DevOps scenarios. Adapt them to your specific requirements and integrate them into your infrastructure automation workflows.
 
+## Multi-Cloud
+
+### 18. GCP Spot VM Recommendations
+
+**Scenario**: Find the cheapest GCP Spot VMs that meet minimum resource requirements.
+
+**Notes:**
+- GCP data is offline/embedded; no credentials needed.
+- Only `us-central1` is covered in the embedded catalogue.
+- Risk is always `unavailable`; only `--workload cost` is supported.
+
+```bash
+# x86_64 candidates, default top 3
+spotinfo recommend --cloud gcp --architecture x86_64 --cpu 2 --memory 8
+
+# arm64 candidates (c4a, n4a, t2a series)
+spotinfo recommend --cloud gcp --architecture arm64 --cpu 2 --memory 8 --top 5
+
+# JSON output for automation (v2 schema, 9-digit decimal prices)
+spotinfo recommend --cloud gcp --architecture x86_64 --cpu 4 --memory 16 --output json
+```
+
+**Sample output (x86_64, top 3):**
+```
+RANK  CLOUD  REGION       MACHINE        ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR       RISK          WHY
+   1  gcp    us-central1  n2d-standard-2 x86_64          2         8.0  0.026912000    unavailable   ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
+   2  gcp    us-central1  t2d-standard-2 x86_64          2         8.0  0.034676000    unavailable   ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
+   3  gcp    us-central1  c3d-highcpu-4  x86_64          4         8.0  0.035088000    unavailable   ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
+```
+
 ## See Also
 
 - [Usage Guide](usage.md) - Complete command reference

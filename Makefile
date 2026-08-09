@@ -47,7 +47,7 @@ export GO111MODULE=on
 export CGO_ENABLED=0
 
 .PHONY: all build test test-verbose test-race test-coverage lint fmt clean help version
-.PHONY: update-data update-price refresh-manifests verify-data check-deps setup-tools release mocks hooks
+.PHONY: update-data update-price update-gcp-data refresh-manifests verify-data check-deps setup-tools release mocks hooks
 .PHONY: verify-architecture-rules verify-architecture
 
 # Default target
@@ -122,6 +122,14 @@ refresh-manifests:
 	@echo "Refreshing snapshot manifests..."
 	@UPDATE_GOLDEN=1 go test ./internal/spot/ -run TestEmbeddedSnapshotManifests -count=1
 
+# Rebuilds the committed GCP catalogue from the pages its approved source
+# contract names. It needs no credentials, writes nothing until every gate
+# passes, and leaves the reviewed snapshot untouched on failure. Not part of
+# build: refreshing data is always an explicit, reviewable step.
+update-gcp-data:
+	@echo "Updating GCP catalogue from the contracted pricing pages..."
+	@go run ./cmd/update-gcp-data
+
 # Deterministic embedded-data gate, run offline. It checks the generic snapshot
 # manifest and source-contract validators, then every committed AWS snapshot:
 # it must parse, hash to what its sidecar manifest declares, and still cover its
@@ -132,6 +140,7 @@ verify-data:
 	@echo "Verifying embedded data, snapshot manifests and reviewed architecture coverage..."
 	@go test ./internal/snapshot/ -count=1
 	@go test ./internal/spot/ -run '$(DATA_GATE_TESTS)' -count=1
+	@go test ./internal/providers/gcp/ -count=1
 
 # Package-boundary gate. Checks the declared layer direction and module
 # metadata in .archfit.yaml; it is not a data-correctness or test substitute.

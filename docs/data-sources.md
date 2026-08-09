@@ -72,6 +72,39 @@
   - Likelihood of successful spot instance launch
   - Contextual scoring based on request composition
 
+## Google Cloud Data Sources
+
+### 6. GCP Public Pricing Pages
+- **Sources** (all official, all server-rendered, all anonymous):
+  - [Spot VM pricing](https://cloud.google.com/spot-vms/pricing) — Spot price, vCPU, memory
+  - [General-purpose](https://cloud.google.com/products/compute/pricing/general-purpose),
+    [compute-optimized](https://cloud.google.com/products/compute/pricing/compute-optimized) and
+    [memory-optimized](https://cloud.google.com/products/compute/pricing/memory-optimized)
+    machine-family pages — the `Default* (USD)` On-Demand column
+  - [Machine resource documentation](https://docs.cloud.google.com/compute/docs/machine-resource) —
+    processor architecture, reviewed by hand
+- **Approved contract**: `internal/providers/gcp/data/source-contract.json`. No GCP page is read
+  unless it is enumerated there. The reasoning is in
+  [multicloud source contracts](research/multicloud-source-contracts.md).
+- **Embedded snapshot**: `internal/providers/gcp/data/catalog.json.gz` plus its sidecar
+  `manifest.json`. 333 machine types, both price classes, 5,815 compressed bytes.
+- **Update frequency**: weekly, through the `update-gcp-data` workflow.
+- **Region coverage**: `us-central1` only. The pages server-render one region and switch the
+  rest in with JavaScript, which spotinfo does not execute. A request for any other region
+  returns `NO_CANDIDATES`; no other region is ever substituted.
+- **OS coverage**: Linux only.
+- **Risk**: none. GCP publishes preemption history only through the authenticated
+  `advice.capacityHistory` beta, so every GCP candidate reports
+  `risk.status = "unavailable"` rather than a low number. Consequently GCP serves only the
+  risk-free `cost` workload.
+- **Runtime**: entirely offline. No credential, token, project, or network request.
+
+### Excluded GCP sources
+- The 12 MB `AF_initDataCallback` blob that powers the region switcher: an undocumented
+  positional array, not a published interface.
+- The Cloud Billing Catalog API: requires an API key.
+- `advice.capacityHistory` and any third-party aggregator.
+
 ## Data Flow Architecture
 
 ```mermaid
@@ -212,6 +245,34 @@ architecture documentation, add the reviewed family mapping to
 `internal/spot/data/architecture-snapshot.json`, update its non-empty `provenance` and
 `reviewed_at` (`YYYY-MM-DD`), then rerun `make verify-data`. The snapshot is intentionally
 committed review evidence; no runtime metadata call or automatic unreviewed generator exists.
+
+### Refreshing the embedded GCP catalogue
+The `update-gcp-data` workflow runs weekly and opens a PR. To do it manually:
+
+```bash
+make update-gcp-data   # Rebuilds internal/providers/gcp/data/{catalog.json.gz,manifest.json}
+make verify-data       # Gates the contract, manifest, hashes and coverage floor
+make build
+```
+
+The updater fetches about 65 MB of HTML, parses it, joins Spot to On-Demand, and validates the
+result against the source contract, the manifest hash and the reviewed coverage floor **before**
+writing anything. A failed run therefore leaves the committed snapshot exactly as it was.
+
+Failures are deliberate, not transient noise. Expect to see:
+
+| Message | Meaning |
+| --- | --- |
+| `coverage below the manifest floor` | Google served a partially rendered page. Retry; if it persists, the pages changed. |
+| `no machine-type table rendered for region us-central1` | A contracted header was renamed. |
+| `no region selector` | The ARIA listbox moved. The parser cannot attribute a table to a region. |
+| `exceeds 9 fractional digits` | A price needs more precision than `cloud.MoneyScale`. Raise the scale deliberately; never round. |
+| `spot price with no on-demand pair` | Informational. The machine is skipped rather than published with no denominator. |
+| `belongs to unapproved series` | Google added a machine series. This is routine, not a no-go: add the series to `support.machine_series` in the source contract — and to `armSeries` in `internal/providers/gcp/parser.go` **first** if it is Arm — then rerun. Contract-first would ship an Arm series labelled `x86_64`, because an unlisted series defaults to x86_64. |
+
+Apart from the last two, any of these means reviewing the pages and, if they really changed
+shape, bumping `parser_version` in both the parser and the source contract. Do not widen the
+parser to make a changed page fit.
 
 ### Runtime Data Flow
 1. **Startup**: Load embedded data as baseline

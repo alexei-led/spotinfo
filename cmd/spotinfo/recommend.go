@@ -282,7 +282,7 @@ func neutralRecommendRequest(ctx *cli.Context, id cloud.ProviderID, workload clo
 		Architecture: architecture,
 		OS:           instanceOS,
 		Workload:     workload,
-		Regions:      neutralRegions(lineageStringSlice(ctx, flagRegion)),
+		Regions:      requestedRegions(ctx, id),
 		MinMemoryGiB: float64(lineageInt(ctx, flagMemory, "memory-gib")),
 		MinVCPU:      lineageInt(ctx, flagCPU, "vcpu"),
 		Top:          top,
@@ -296,6 +296,18 @@ func neutralRecommendRequest(ctx *cli.Context, id cloud.ProviderID, workload clo
 	}
 
 	return request, nil
+}
+
+// requestedRegions resolves --region for the neutral path. The declared default
+// is an AWS region name, which no other cloud publishes, so an unset --region on
+// another provider means every region that provider publishes rather than an
+// AWS region it will never match. An explicit --region is always honoured.
+func requestedRegions(ctx *cli.Context, id cloud.ProviderID) []cloud.Region {
+	if id != cloud.ProviderAWS && !lineageIsSet(ctx, flagRegion) {
+		return []cloud.Region{cloud.RegionAll}
+	}
+
+	return neutralRegions(lineageStringSlice(ctx, flagRegion))
 }
 
 // neutralRegions trims and deduplicates repeated --region flags. It rejects

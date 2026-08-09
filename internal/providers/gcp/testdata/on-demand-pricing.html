@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head><title>General-purpose machine family pricing</title></head>
+<body>
+<div aria-label="Region selector" role="listbox">
+  <ul>
+    <li role="option" aria-selected="true" data-value="Iowa (us-central1)"><span>Iowa (us-central1)</span></li>
+  </ul>
+</div>
+<div role="region" aria-label="C4 standard machine types">
+  <table>
+    <tr>
+      <th><div><p>Machine type</p></div></th>
+      <th><div><p>Virtual CPUs</p></div></th>
+      <th><div><p>Memory</p></div></th>
+      <th><div><p>Default* (USD)</p><span>info</span><span>Consumption model ID:7754-699E-0EBF</span></div></th>
+      <th><div><p>Compute Flexible CUD - 1 Year* (USD)</p></div></th>
+      <th><div><p>Compute Flexible CUD - 3 Year* (USD)</p></div></th>
+    </tr>
+    <tr>
+      <td>c4-standard-2</td><td>2</td><td>7 GiB</td>
+      <td>$0.117660 / 1 hour</td><td>$0.084715 / 1 hour</td><td>$0.063536 / 1 hour</td>
+    </tr>
+    <tr>
+      <td>t2a-standard-4</td><td>4</td><td>16 GiB</td>
+      <td>$0.154000 / 1 hour</td><td>$0.110880 / 1 hour</td><td>$0.083160 / 1 hour</td>
+    </tr>
+    <tr>
+      <td>n1-highcpu-2</td><td>2</td><td>1.8 GiB</td>
+      <td>$0.070970 / 1 hour</td><td>$0.051098 / 1 hour</td><td>$0.038324 / 1 hour</td>
+    </tr>
+    <!-- A shared-core machine, priced but with no whole-core count. -->
+    <tr>
+      <td>f1-micro</td><td>0.2</td><td>0.60 GiB</td>
+      <td>$0.007600 / 1 hour</td><td>$0.005472 / 1 hour</td><td>$0.004104 / 1 hour</td>
+    </tr>
+    <!-- On-demand only: never offered as Spot, so it must not reach the catalogue. -->
+    <tr>
+      <td>m2-ondemandonly-16</td><td>16</td><td>128 GiB</td>
+      <td>$1.000000 / 1 hour</td><td>$0.720000 / 1 hour</td><td>$0.540000 / 1 hour</td>
+    </tr>
+  </table>
+</div>
+</body>
+</html>

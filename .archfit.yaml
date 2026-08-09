@@ -96,6 +96,28 @@ modules:
     role: adapter
     subdomain: core
     volatility: medium
+  providers_gcp:
+    paths:
+      - internal/providers/gcp/**
+    public:
+      - internal/providers/gcp
+    layer: provider
+    owner: spotinfo
+    role: adapter
+    subdomain: core
+    # high: its source is a set of public HTML pages Google restyles on its own
+    # schedule, refreshed weekly by an update workflow.
+    volatility: high
+  cmd_update_gcp_data:
+    paths:
+      - cmd/update-gcp-data/**
+    public:
+      - cmd/update-gcp-data
+    layer: cmd
+    owner: spotinfo
+    role: composition_root
+    subdomain: generic
+    volatility: medium
   mcp:
     paths:
       - internal/mcp/**

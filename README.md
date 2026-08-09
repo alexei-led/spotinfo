@@ -22,10 +22,12 @@
 
 ### 💡 **Single-Instance Recommendations**
 - `recommend` requires an `x86_64` or `arm64` architecture plus positive vCPU and memory minima
-- Workload interruption caps are conservative and explicit: web `<5%`, CI `<=15%`, batch `<=20%`
+- Workload interruption caps are conservative and explicit: web `<5%`, CI `<=15%`, batch `<=20%`; `cost` ranks by price only and works on every cloud
 - The default concise table includes deterministic rationale codes; `--output json` emits a versioned request-and-results wrapper
 - Ranking uses price, interruption, and right-sizing excess; savings is displayed but never used to rank
 - Repeated recommendation regions are deduplicated; `all` cannot be mixed with explicit regions
+- **GCP support** (offline, no credentials): `spotinfo recommend --cloud gcp` serves `us-central1`, Linux, x86\_64 and arm64; risk is always `unavailable`, so only `--workload cost` applies. The root query command is AWS-only.
+- **Azure**: recognised but returns `DATA_UNAVAILABLE`; no data embedded yet
 
 ### 📊 **Multiple Output Formats**
 - **Visual formats**: Table with emoji indicators, plain text
@@ -81,6 +83,9 @@ spotinfo recommend --architecture arm64 --workload web --vcpu 2 --memory-gib 8 -
 
 # Emit the versioned JSON report, using Windows Spot prices
 spotinfo recommend --architecture x86_64 --cpu 2 --memory 8 --os windows --output json
+
+# GCP Spot VMs (offline, no credentials, us-central1, cost workload)
+spotinfo recommend --cloud gcp --architecture x86_64 --cpu 2 --memory 8 --top 3
 ```
 
 ### New Placement Score Flags
@@ -171,6 +176,9 @@ make build
 # Update embedded data (usually unnecessary — a weekly workflow opens a PR for this)
 # verify-data also checks reviewed architecture snapshot metadata and Advisor-family coverage.
 make update-data update-price verify-data
+
+# Update embedded GCP data (weekly update-gcp-data workflow normally handles this)
+make update-gcp-data verify-data
 
 # Docker build
 docker buildx build --platform=linux/arm64,linux/amd64 -t spotinfo .

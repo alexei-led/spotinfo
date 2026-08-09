@@ -495,11 +495,21 @@ them.
 - Omitted `machine` means no machine-name filter; omitted `max_price_per_hour` means no
   price ceiling.
 - `regions: ["all"]` selects every region the provider publishes and cannot be combined
-  with explicit regions.
+  with explicit regions. It is also the default, so an omitted `regions` searches every
+  region of the selected cloud. (The CLI differs: its `--region` default is the AWS region
+  name `us-east-1`, which on a non-AWS cloud is treated as unset and expands to `all`.)
 - `cost` ranks by price alone and makes **no** interruption claim. `web`, `ci` and `batch`
   cap interruption frequency at 5%, 16% and 22% respectively and require a cloud that
   publishes risk; asking for one on a cloud that does not returns
   `UNSUPPORTED_CAPABILITY` before acquisition.
+
+**GCP capability constraints:**
+- Region: `us-central1` only. Any other explicit region returns `NO_CANDIDATES`.
+- OS: `linux` only. `os: "windows"` returns `UNSUPPORTED_CAPABILITY`.
+- Workload: `cost` only. `web`, `ci`, `batch` return `UNSUPPORTED_CAPABILITY`.
+- Risk: always `status: "unavailable"`. GCP preemption history is not in the public pricing feed.
+- Architectures: `x86_64` and `arm64` (arm series: `c4a`, `n4a`, `t2a`).
+- The root query command (`find_spot_instances`, `list_spot_regions`) is AWS-only.
 
 #### Success Schema
 
@@ -667,18 +677,24 @@ When no instances match the search criteria, the tool returns a successful respo
 ## Data Sources and Freshness
 
 ### Embedded Data
-The spotinfo MCP server uses embedded AWS data that is included in the binary during build time:
+The spotinfo MCP server uses embedded data included in the binary at build time:
 
-- **Spot Advisor Data**: Instance interruption frequency data from AWS Spot Instance Advisor
-- **Spot Pricing Data**: Current spot pricing from AWS Spot Pricing API
-- **Update Frequency**: Data is refreshed with each release of spotinfo
+**AWS:**
+- **Spot Advisor Data**: Instance interruption frequency from the AWS Spot Instance Advisor feed
+- **Spot Pricing Data**: Static spot pricing from the AWS pricing page feed
+- **Update Frequency**: Refreshed weekly by the `update-data` workflow
+
+**GCP:**
+- **Spot VM Catalogue**: Machine types, Spot prices, and On-Demand prices parsed from `cloud.google.com/spot-vms/pricing` and family-specific pricing pages
+- **Update Frequency**: Refreshed weekly by the `update-gcp-data` workflow (`make update-gcp-data`)
+- **Coverage**: `us-central1` only (other GCP regions require JavaScript rendering not performed by spotinfo)
 
 ### Data Limitations
 
 1. **Offline Operation**: All data is embedded, enabling offline functionality
-2. **Update Lag**: Data freshness depends on release frequency
-3. **Regional Coverage**: Limited to regions with public spot instance data
-4. **Instance Types**: Covers standard EC2 instance types available in spot market
+2. **Update Lag**: Data freshness depends on the weekly refresh workflow
+3. **GCP Regional Coverage**: Limited to `us-central1` — the only region with static pricing pages
+4. **GCP Risk Data**: Preemption history requires an authenticated beta API; it is not embedded
 
 ## Performance Characteristics
 

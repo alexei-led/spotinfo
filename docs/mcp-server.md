@@ -72,6 +72,29 @@ List all AWS regions where EC2 Spot Instances are available.
 
 **Response:** Array of available region codes and total count.
 
+### `recommend_spot_instances`
+
+Rank Spot machines from the committed multi-cloud catalogue and return a `spotinfo.recommend/v2` payload.
+
+**Parameters:**
+- `cloud` (optional): Cloud provider — `aws`, `gcp`, or `azure` (default: `aws`)
+- `architecture` (required): Processor architecture — `x86_64` or `arm64`
+- `min_vcpu` (required): Minimum vCPU count (integer ≥ 1)
+- `min_memory_gib` (required): Minimum memory in GiB (number > 0)
+- `regions` (optional): Array of region names; `["all"]` uses every region the cloud publishes (default: `["all"]`)
+- `machine` (optional): RE2 machine-type filter combined with architecture (default: no filter)
+- `os` (optional): Operating system — `linux` or `windows` (default: `linux`)
+- `workload` (optional): Ranking policy — `cost`, `web`, `ci`, or `batch` (default: `cost`)
+- `max_price_per_hour` (optional): Maximum USD per instance-hour (number > 0; no ceiling if omitted)
+- `top` (optional): Maximum candidates to return (default: 3, max: 50)
+
+**Response:** `spotinfo.recommend/v2` JSON with `schema_version`, `status`, `request`, `ranking_policy`, `data_source`, `recommendations`, and `warnings`. See [API Reference](api-reference.md) for the full schema.
+
+**Cloud constraints:**
+- `gcp`: `us-central1` only, `linux` only, `--workload cost` only. `web`/`ci`/`batch` return `UNSUPPORTED_CAPABILITY`. `--os windows` returns `UNSUPPORTED_CAPABILITY`.
+- `azure`: Always returns `DATA_UNAVAILABLE` (no data embedded yet).
+- `find_spot_instances` and `list_spot_regions` are AWS-only.
+
 ## Configuration Options
 
 ### Environment Variables
@@ -133,7 +156,30 @@ Once configured with Claude Desktop, you can ask natural language questions:
 - us-east-1: $0.0928/hour (70% savings, <5% interruption)
 - us-east-2: $0.1024/hour (68% savings, <5% interruption)
 
-### Example 3: Infrastructure Planning
+### Example 3: GCP Spot Recommendations
+
+**Human**: Find me the 3 cheapest GCP Spot VMs with at least 2 vCPUs and 8 GiB of memory for x86_64.
+
+**Claude**: I'll query the GCP catalogue for Spot VMs matching your requirements.
+
+```json
+{
+  "cloud": "gcp",
+  "architecture": "x86_64",
+  "min_vcpu": 2,
+  "min_memory_gib": 8,
+  "top": 3
+}
+```
+
+**Results**: Found 3 GCP Spot VMs in us-central1, ranked by price:
+- n2d-standard-2: $0.026912/hour (68% savings, risk unavailable)
+- t2d-standard-2: $0.034676/hour (58% savings, risk unavailable)
+- c3d-highcpu-4: $0.035088/hour (76% savings, risk unavailable)
+
+> GCP preemption history is not available in the public pricing feed. All candidates show `risk: unavailable`.
+
+### Example 4: Infrastructure Planning
 
 **Human**: I need instances with at least 16 vCPUs and 64GB RAM for machine learning workloads. What are my most reliable options under $1/hour?
 
