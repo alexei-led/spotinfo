@@ -43,7 +43,9 @@ DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestValidateCoverageRejectsATruncatedLiveF
 DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestEmbeddedPricesSatisfyTheNeutralRecordContract
 DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestEveryEmbeddedAdvisorRangeIsLabelled
 
-# Go environment
+# Go environment. CGO stays off so `build` and `release` produce static binaries
+# for the scratch-based image; test-race overrides it for itself, because the
+# race detector is built on cgo and cannot run without it.
 export GO111MODULE=on
 export CGO_ENABLED=0
 
@@ -72,9 +74,13 @@ test-verbose:
 	@echo "Running tests with verbose output..."
 	@go test -v ./...
 
+# CGO_ENABLED=1 is required, not preferred: the race detector is implemented in
+# C and `go test -race` refuses to run without cgo. The repository-wide
+# CGO_ENABLED=0 above keeps the shipped binaries static, so this target — which
+# builds nothing that ships — opts back in for itself.
 test-race:
 	@echo "Running tests with race detector..."
-	@go test -race ./...
+	@CGO_ENABLED=1 go test -race ./...
 
 test-coverage:
 	@echo "Running tests with coverage..."
