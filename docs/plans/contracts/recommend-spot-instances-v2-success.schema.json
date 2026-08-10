@@ -32,7 +32,7 @@
       "required": ["provider", "mode", "sources"],
       "properties": {
         "provider": {"type": "string", "enum": ["aws", "gcp", "azure"]},
-        "mode": {"type": "string", "enum": ["embedded-snapshot", "live"]},
+        "mode": {"type": "string", "enum": ["embedded-snapshot", "live", "cached"]},
         "sources": {
           "type": "array",
           "minItems": 1,

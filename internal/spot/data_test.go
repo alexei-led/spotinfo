@@ -41,7 +41,7 @@ func TestFetchAdvisorData_FallbackToEmbedded(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			data, err := fetchAdvisorData(tt.ctx, false)
+			data, _, err := fetchAdvisorData(tt.ctx, fetchOptions{})
 
 			// Should successfully get data from embedded fallback
 			require.NoError(t, err)
@@ -93,7 +93,7 @@ func TestFetchPricingData_FallbackToEmbedded(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			data, err := fetchPricingData(tt.ctx, tt.useEmbedded)
+			data, _, err := fetchPricingData(tt.ctx, fetchOptions{useEmbedded: tt.useEmbedded})
 
 			// Should successfully get data from embedded fallback
 			require.NoError(t, err)
@@ -180,7 +180,7 @@ func TestFetchAdvisorData_WithValidContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	data, err := fetchAdvisorData(ctx, false)
+	data, _, err := fetchAdvisorData(ctx, fetchOptions{})
 
 	// Should always succeed (either from network or fallback)
 	require.NoError(t, err)
@@ -194,7 +194,7 @@ func TestFetchPricingData_WithValidContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	data, err := fetchPricingData(ctx, false)
+	data, _, err := fetchPricingData(ctx, fetchOptions{})
 
 	// Should always succeed (either from network or fallback)
 	require.NoError(t, err)
@@ -205,7 +205,7 @@ func TestFetchPricingData_WithValidContext(t *testing.T) {
 
 func TestDefaultAdvisorProvider_Integration(t *testing.T) {
 	// Test the default advisor provider methods with real embedded data
-	provider := newDefaultAdvisorProvider(100*time.Millisecond, false)
+	provider := newDefaultAdvisorProvider(100*time.Millisecond, fetchOptions{})
 
 	t.Run("getRegions", func(t *testing.T) {
 		regions := provider.getRegions()
@@ -292,7 +292,7 @@ func TestDefaultAdvisorProvider_Integration(t *testing.T) {
 
 func TestDefaultPricingProvider_Integration(t *testing.T) {
 	// Test the default pricing provider methods with real embedded data
-	provider := newDefaultPricingProvider(100*time.Millisecond, true) // Force embedded mode
+	provider := newDefaultPricingProvider(100*time.Millisecond, fetchOptions{useEmbedded: true}) // Force embedded mode
 
 	t.Run("getSpotPrice", func(t *testing.T) {
 		price, err := provider.getSpotPrice(testInstanceT2Micro, testRegionUSEast1, "linux")
@@ -340,7 +340,7 @@ func TestDefaultPricingProvider_Integration(t *testing.T) {
 
 func TestDefaultPricingProvider_NetworkFallback(t *testing.T) {
 	// Test pricing provider that tries network first but falls back to embedded
-	provider := newDefaultPricingProvider(1*time.Millisecond, false) // Very short timeout
+	provider := newDefaultPricingProvider(1*time.Millisecond, fetchOptions{}) // Very short timeout
 
 	price, err := provider.getSpotPrice(testInstanceT2Micro, testRegionUSEast1, "linux")
 
@@ -393,7 +393,7 @@ func TestUseEmbeddedSkipsTheAdvisorFetch(t *testing.T) {
 
 	t.Cleanup(func() { slog.SetDefault(previous) })
 
-	data, err := fetchAdvisorData(cancelled, true)
+	data, _, err := fetchAdvisorData(cancelled, fetchOptions{useEmbedded: true})
 	require.NoError(t, err)
 	require.NotNil(t, data)
 	assert.True(t, data.Embedded)
@@ -410,7 +410,7 @@ func TestUseEmbeddedSkipsThePricingFetch(t *testing.T) {
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	data, err := fetchPricingData(cancelled, true)
+	data, _, err := fetchPricingData(cancelled, fetchOptions{useEmbedded: true})
 	require.NoError(t, err)
 	require.NotNil(t, data)
 	assert.True(t, data.Embedded)

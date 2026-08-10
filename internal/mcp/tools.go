@@ -101,11 +101,15 @@ const (
 const (
 	dataFreshnessLive     = "live"
 	dataFreshnessSnapshot = "embedded-snapshot"
+	// dataFreshnessCached is AWS data served from the local cache without being
+	// revalidated this run. data_source stays "aws" — the provenance is
+	// unchanged — while freshness says what recency was actually established.
+	dataFreshnessCached = "cached"
 )
 
 // dataSourceFor maps a neutral data mode onto the v1 data_source value.
 func dataSourceFor(mode cloud.DataMode) string {
-	if mode == cloud.DataModeLive {
+	if mode == cloud.DataModeLive || mode == cloud.DataModeCached {
 		return dataSourceLive
 	}
 
@@ -114,8 +118,12 @@ func dataSourceFor(mode cloud.DataMode) string {
 
 // freshnessFor maps a neutral data mode onto the freshness it can honestly claim.
 func freshnessFor(mode cloud.DataMode) string {
-	if mode == cloud.DataModeLive {
+	switch mode {
+	case cloud.DataModeLive:
 		return dataFreshnessLive
+	case cloud.DataModeCached:
+		return dataFreshnessCached
+	case cloud.DataModeEmbeddedSnapshot:
 	}
 
 	return dataFreshnessSnapshot

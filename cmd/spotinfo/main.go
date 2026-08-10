@@ -110,6 +110,7 @@ const (
 	flagOrder        = "order"
 	flagWithScore    = "with-score"
 	flagOffline      = "offline"
+	flagRefresh      = "refresh"
 	flagMinScore     = "min-score"
 	flagAZ           = "az"
 	flagScoreTimeout = "score-timeout"
@@ -133,6 +134,7 @@ const (
 	appName = "spotinfo"
 
 	recommendCommandName = "recommend"
+	refreshFlagUsage     = "ignore any cached AWS feed and fetch it again"
 	regionFlagUsage      = "set one or more provider regions, use \"all\" for all published regions"
 )
 
@@ -164,11 +166,15 @@ func mainCmd(ctx *cli.Context) error {
 // The default is unchanged: without the flag, live data is still fetched and the
 // snapshot remains a fallback.
 func newSpotClient(ctx *cli.Context) *spot.Client {
-	if !lineageBool(ctx, flagOffline) {
-		return spot.New()
+	policy := spot.FetchPolicy{
+		UseEmbedded: lineageBool(ctx, flagOffline),
+		Refresh:     lineageBool(ctx, flagRefresh),
 	}
 
-	client := spot.NewWithOptions(spot.DefaultTimeoutSeconds*time.Second, true)
+	client := spot.NewWithFetchOptions(spot.DefaultTimeoutSeconds*time.Second, policy)
+	if !policy.UseEmbedded {
+		return client
+	}
 
 	// Offline has to mean offline. The embedded feeds price most instances but
 	// not all, and an unpriced one otherwise falls through to
@@ -845,6 +851,10 @@ func recommendCommand(action cli.ActionFunc) *cli.Command {
 				Name:  flagOffline,
 				Usage: "answer from the embedded snapshot instead of fetching the live AWS feeds",
 			},
+			&cli.BoolFlag{
+				Name:  flagRefresh,
+				Usage: refreshFlagUsage,
+			},
 			&cli.StringFlag{Name: flagOutput, Usage: "format output: table|json", Value: outputTable},
 		},
 	}
@@ -942,6 +952,10 @@ func newSpotinfoApp(rootAction, recommendationAction cli.ActionFunc) *cli.App {
 			&cli.BoolFlag{
 				Name:  flagOffline,
 				Usage: "answer from the embedded AWS snapshot instead of fetching the live feeds",
+			},
+			&cli.BoolFlag{
+				Name:  flagRefresh,
+				Usage: refreshFlagUsage,
 			},
 			&cli.IntFlag{
 				Name:  flagMinScore,

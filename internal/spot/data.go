@@ -108,24 +108,108 @@ type feed[T any] struct {
 	// live feed cannot replace a complete snapshot.
 	validate func(*T) error
 	// name appears in the log lines, so "advisor" and "pricing" read as before.
+	// name appears in log lines and names the cache entry.
 	name string
 	url  string
+	// ttl is how long a cached copy is served without asking the origin.
+	ttl time.Duration
 }
 
-// fetchFeed retrieves one AWS feed, or answers from the committed snapshot.
+// feedOrigin records where an answer actually came from, so the CLI and the MCP
+// tools can say so instead of implying every non-embedded answer is current.
+type feedOrigin int
+
+const (
+	// originLive means the document was fetched, or the origin confirmed the
+	// cached copy is still current. Either way it matches AWS right now.
+	originLive feedOrigin = iota
+	// originCached means a cached copy was served without asking the origin.
+	originCached
+	// originEmbedded means the committed snapshot answered.
+	originEmbedded
+)
+
+// fetchOptions carries what the caller decided about freshness.
+type fetchOptions struct {
+	// useEmbedded answers from the committed snapshot and makes no request.
+	useEmbedded bool
+	// refresh ignores any cached copy for this run. The fetched document still
+	// replaces it, so --refresh repairs a cache rather than bypassing it forever.
+	refresh bool
+}
+
+// fetchFeed answers one AWS feed from the freshest source it can reach.
 //
-// Every failure falls back rather than erroring: the embedded copy is always
-// usable, so a transient upstream problem must not fail the command. The one
-// path that does not fetch at all is useEmbedded, which is what makes --offline
-// offline.
+// The order is deliberate: a cached copy inside its time-to-live, then the
+// origin, then a cached copy that has expired, then the committed snapshot. The
+// expired copy sits above the snapshot because it is AWS data that is merely
+// old, while the snapshot is AWS data that is old *and* frozen at build time.
 //
-// The two feeds shared this shape verbatim before it was extracted; adding the
-// useEmbedded arm to both is what made them identical.
-func fetchFeed[T any](ctx context.Context, useEmbedded bool, source feed[T]) (*T, error) {
-	if useEmbedded {
-		return source.embedded()
+// Every failure falls through rather than erroring: something usable always
+// exists, so a transient upstream problem must not fail the command.
+func fetchFeed[T any](ctx context.Context, options fetchOptions, source feed[T]) (*T, feedOrigin, error) {
+	if options.useEmbedded {
+		result, err := source.embedded()
+
+		return result, originEmbedded, err
 	}
 
+	cache := openFeedCache()
+	now := time.Now()
+
+	cached, entry, hit := cache.load(source.name)
+	if hit && !options.refresh && entry.fresh(source.url, source.ttl, now) {
+		if result, err := source.parse(cached); err == nil && source.validate(result) == nil {
+			slog.Debug("serving a cached feed",
+				slog.String("feed", source.name),
+				slog.Duration("age", now.Sub(entry.FetchedAt)))
+
+			return result, originCached, nil
+		}
+
+		// A cached document that no longer parses is not worth keeping; fall
+		// through and let the fetch below replace it.
+		slog.Debug("cached feed is unusable; refetching", slog.String("feed", source.name))
+
+		hit = false
+	}
+
+	result, err := fetchFromOrigin(ctx, cache, options, source, cached, entry, hit, now)
+	if err == nil {
+		return result, originLive, nil
+	}
+
+	// The origin could not be used. An expired cached copy still beats the
+	// snapshot compiled into this binary.
+	if hit {
+		if stale, parseErr := source.parse(cached); parseErr == nil && source.validate(stale) == nil {
+			slog.Warn("serving an expired cached feed; AWS is unreachable",
+				slog.String("feed", source.name),
+				slog.Duration("age", now.Sub(entry.FetchedAt)))
+
+			return stale, originCached, nil
+		}
+	}
+
+	fallback, fallbackErr := source.embedded()
+
+	return fallback, originEmbedded, fallbackErr
+}
+
+// errFeedUnusable reports that the origin produced nothing this run.
+var errFeedUnusable = errors.New("feed unusable")
+
+// fetchFromOrigin performs the conditional request and updates the cache.
+//
+// A 304 is the point of the whole design: both feeds publish ETag and
+// Last-Modified, so confirming an expired copy is still current costs one round
+// trip and no payload, instead of re-transferring a document that has not moved
+// in months.
+//
+//nolint:cyclop // one linear request path; each branch is a distinct HTTP outcome
+func fetchFromOrigin[T any](ctx context.Context, cache *feedCache, options fetchOptions,
+	source feed[T], cached []byte, entry *cacheEntry, hit bool, now time.Time,
+) (*T, error) {
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
 
@@ -133,33 +217,47 @@ func fetchFeed[T any](ctx context.Context, useEmbedded bool, source feed[T]) (*T
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source.url, http.NoBody)
 	if err != nil {
-		// If request creation fails, try embedded data
-		return source.embedded()
+		return nil, errFeedUnusable
+	}
+
+	if hit && !options.refresh {
+		applyValidators(req, entry)
 	}
 
 	resp, err := client.Do(req) //nolint:gosec // G704: every url is a package-level constant, not user input
 	if err != nil {
-		slog.Warn("failed to fetch "+source.name+" data from AWS, using embedded data",
+		slog.Warn("failed to fetch "+source.name+" data from AWS",
 			slog.String("url", source.url),
 			slog.Any("error", err))
 
-		return source.embedded()
+		return nil, errFeedUnusable
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if resp.StatusCode == http.StatusNotModified && hit {
+		result, parseErr := source.parse(cached)
+		if parseErr == nil && source.validate(result) == nil {
+			cache.touch(source.name, entry, now)
+			slog.Debug("origin confirmed the cached feed is current", slog.String("feed", source.name))
+
+			return result, nil
+		}
+
+		return nil, errFeedUnusable
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		slog.Warn("non-200 response from AWS "+source.name+" API, using embedded data", //nolint:gosec // G706: status_code is an integer from the HTTP response, not user-controlled input
+		slog.Warn("non-200 response from AWS "+source.name+" API", //nolint:gosec // G706: status_code is an integer from the HTTP response, not user-controlled input
 			slog.Int("status_code", resp.StatusCode))
 
-		return source.embedded()
+		return nil, errFeedUnusable
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		slog.Warn("failed to read "+source.name+" response body, using embedded data",
-			slog.Any("error", err))
+		slog.Warn("failed to read "+source.name+" response body", slog.Any("error", err))
 
-		return source.embedded()
+		return nil, errFeedUnusable
 	}
 
 	result, err := source.parse(body)
@@ -168,25 +266,31 @@ func fetchFeed[T any](ctx context.Context, useEmbedded bool, source feed[T]) (*T
 	}
 
 	if err != nil {
-		slog.Warn("unusable "+source.name+" data from AWS, using embedded data",
-			slog.Any("error", err))
+		slog.Warn("unusable "+source.name+" data from AWS", slog.Any("error", err))
 
-		return source.embedded()
+		return nil, errFeedUnusable
 	}
 
+	cache.save(source.name, body, &cacheEntry{
+		FetchedAt:    now,
+		URL:          source.url,
+		ETag:         resp.Header.Get("ETag"),
+		LastModified: resp.Header.Get("Last-Modified"),
+	})
 	slog.Debug("successfully fetched " + source.name + " data from AWS")
 
 	return result, nil
 }
 
 // fetchAdvisorData retrieves spot advisor data from AWS or falls back to embedded data.
-func fetchAdvisorData(ctx context.Context, useEmbedded bool) (*advisorData, error) {
-	return fetchFeed(ctx, useEmbedded, feed[advisorData]{
-		name:     "advisor",
+func fetchAdvisorData(ctx context.Context, options fetchOptions) (*advisorData, feedOrigin, error) {
+	return fetchFeed(ctx, options, feed[advisorData]{
+		name:     advisorFeedName,
 		url:      spotAdvisorJSONURL,
 		embedded: loadEmbeddedAdvisorData,
 		parse:    parseAdvisorResponse,
 		validate: validateAdvisorCoverage,
+		ttl:      advisorCacheTTL,
 	})
 }
 
@@ -258,13 +362,14 @@ func loadEmbeddedAdvisorData() (*advisorData, error) {
 }
 
 // fetchPricingData retrieves spot pricing data from AWS or falls back to embedded data.
-func fetchPricingData(ctx context.Context, useEmbedded bool) (*rawPriceData, error) {
-	return fetchFeed(ctx, useEmbedded, feed[rawPriceData]{
+func fetchPricingData(ctx context.Context, options fetchOptions) (*rawPriceData, feedOrigin, error) {
+	return fetchFeed(ctx, options, feed[rawPriceData]{
 		name:     "pricing",
 		url:      spotPriceJSURL,
 		embedded: loadEmbeddedPricingData,
 		parse:    parsePricingResponse,
 		validate: validatePriceCoverage,
+		ttl:      priceCacheTTL,
 	})
 }
 

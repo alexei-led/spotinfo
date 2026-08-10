@@ -192,8 +192,14 @@ type DataMode string
 const (
 	// DataModeEmbeddedSnapshot means the answer came from committed data.
 	DataModeEmbeddedSnapshot DataMode = "embedded-snapshot"
-	// DataModeLive means the answer came from a provider API.
+	// DataModeLive means the answer came from a provider API this run, or the
+	// origin confirmed a cached copy is still current.
 	DataModeLive DataMode = "live"
+	// DataModeCached means the answer came from a locally cached provider
+	// document that was not revalidated this run. It is distinct from live
+	// because the data is the provider's but its recency is bounded by a
+	// time-to-live rather than confirmed.
+	DataModeCached DataMode = "cached"
 )
 
 // Candidate is one machine, in one location, priced for one OS. Optional

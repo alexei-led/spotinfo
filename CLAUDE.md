@@ -109,6 +109,28 @@ The default is unchanged — live feeds, with the snapshot as fallback. `useEmbe
 governs both feeds; it used to apply to pricing only, so an "embedded" client still
 downloaded the advisor document and no caller could actually avoid the network.
 
+**Feed cache.** Fetched feeds are cached under `os.UserCacheDir()/spotinfo`
+(`SPOTINFO_CACHE_DIR` overrides, `SPOTINFO_CACHE=off` disables). The two time-to-live
+values differ because the feeds do: the advisor document takes over a second to
+transfer and its `Last-Modified` is months old, so it is cached for **24h**; prices are
+rewritten through the day and transfer in a tenth of a second, so they are cached for
+**1h**. Expiry revalidates with `If-None-Match`/`If-Modified-Since` rather than
+re-downloading — both feeds serve ETags, and a 304 costs one round trip and no payload.
+`--refresh` ignores any cached copy for the run.
+
+Resolution order is: fresh cache, then the origin, then an *expired* cache entry, then
+the committed snapshot. The expired entry outranks the snapshot because it is AWS data
+that is merely old, while the snapshot is AWS data that is old *and* frozen at build
+time. Every cache failure is non-fatal — a read-only filesystem costs time, not answers.
+
+**This added a third data-source state, and that is a deliberate contract change.**
+`data_source.mode` in `spotinfo.recommend/v2` gained `cached`, and the v1 MCP
+`data_freshness` gained `cached` (its `data_source` stays `aws` — provenance is
+unchanged, only established recency differs). Reporting a cached answer as `live` would
+have been a claim about recency that nothing verified, which is the same class of silent
+substitution the provider seam exists to prevent. A copy the origin confirmed with a 304
+*is* `live`: it matches AWS right now.
+
 GCP: Google's public server-rendered Spot and Compute pricing pages, `us-central1` only.
 Azure: the anonymous Azure Retail Prices API for amounts, joined to Microsoft Learn VM size
 pages for vCPU, memory and processor architecture; eight reviewed regions, 26 machine series.

@@ -434,6 +434,10 @@ func memoryGiB(ram float32) float64 {
 }
 
 func dataMode(source string) cloud.DataMode {
+	if source == spot.DataSourceCached {
+		return cloud.DataModeCached
+	}
+
 	if source == spot.DataSourceAWS {
 		return cloud.DataModeLive
 	}

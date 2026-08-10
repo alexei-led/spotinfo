@@ -27,6 +27,11 @@ const (
 	// from, so callers can tell a live answer from the embedded snapshot.
 	DataSourceAWS      = "aws"
 	DataSourceEmbedded = "embedded"
+	// DataSourceCached is AWS data served from the local feed cache without
+	// asking the origin this run. It is deliberately distinct from
+	// DataSourceAWS: the data is AWS's, but reporting it as freshly fetched
+	// would be a claim about recency that nothing checked.
+	DataSourceCached = "cached"
 )
 
 // getSpotSavingsConfig holds configuration options for GetSpotSavingsWithOptions.
@@ -167,13 +172,28 @@ func New() *Client {
 //
 //nolint:contextcheck // Initialization function appropriately uses context.Background() for AWS config
 func NewWithOptions(timeout time.Duration, useEmbedded bool) *Client {
+	return NewWithFetchOptions(timeout, FetchPolicy{UseEmbedded: useEmbedded})
+}
+
+// FetchPolicy is how a caller wants feeds obtained.
+type FetchPolicy struct {
+	// UseEmbedded answers from the committed snapshot and makes no request.
+	UseEmbedded bool
+	// Refresh ignores any cached copy for this run.
+	Refresh bool
+}
+
+// NewWithFetchOptions creates a client with an explicit freshness policy.
+func NewWithFetchOptions(timeout time.Duration, policy FetchPolicy) *Client {
+	options := fetchOptions{useEmbedded: policy.UseEmbedded, refresh: policy.Refresh}
+
 	return &Client{
-		advisorProvider:   newDefaultAdvisorProvider(timeout, useEmbedded),
-		pricingProvider:   newDefaultPricingProvider(timeout, useEmbedded),
+		advisorProvider:   newDefaultAdvisorProvider(timeout, options),
+		pricingProvider:   newDefaultPricingProvider(timeout, options),
 		scoreProvider:     newScoreCache(),
 		livePriceProvider: createLivePriceProvider(),
 		timeout:           timeout,
-		useEmbedded:       useEmbedded,
+		useEmbedded:       policy.UseEmbedded,
 	}
 }
 
@@ -196,7 +216,25 @@ func (c *Client) DataSource() string {
 		return DataSourceEmbedded
 	}
 
+	// The weakest input decides. An answer built from one freshly fetched feed
+	// and one cached feed is not current, and saying so is the whole point of
+	// having a third value.
+	if originOf(c.advisorProvider) == originCached || originOf(c.pricingProvider) == originCached {
+		return DataSourceCached
+	}
+
 	return DataSourceAWS
+}
+
+// originOf reads the origin from a provider that tracks one. A test double that
+// does not is treated as live, matching how usedEmbeddedData already behaves for
+// injected providers.
+func originOf(provider any) feedOrigin {
+	if tracked, ok := provider.(interface{ dataOrigin() feedOrigin }); ok {
+		return tracked.dataOrigin()
+	}
+
+	return originLive
 }
 
 // SetLivePriceProvider sets the live price provider (for testing).
@@ -331,15 +369,16 @@ type defaultAdvisorProvider struct {
 	err     error
 	timeout time.Duration
 	once    sync.Once
-	// useEmbedded skips the network entirely, exactly as it does for pricing.
-	// It used to be absent here, so "embedded" still downloaded the advisor feed
-	// — the slower of the two by an order of magnitude — and no caller could
-	// actually avoid the network.
-	useEmbedded bool
+	// options carries the caller's freshness choice: the committed snapshot, or
+	// a refresh that ignores any cached copy.
+	options fetchOptions
+	// origin records where the loaded document actually came from, so the client
+	// can report a cached answer as cached instead of implying it is current.
+	origin feedOrigin
 }
 
-func newDefaultAdvisorProvider(timeout time.Duration, useEmbedded bool) *defaultAdvisorProvider {
-	return &defaultAdvisorProvider{timeout: timeout, useEmbedded: useEmbedded}
+func newDefaultAdvisorProvider(timeout time.Duration, options fetchOptions) *defaultAdvisorProvider {
+	return &defaultAdvisorProvider{timeout: timeout, options: options}
 }
 
 func (p *defaultAdvisorProvider) loadData() error {
@@ -347,7 +386,7 @@ func (p *defaultAdvisorProvider) loadData() error {
 		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout(p.timeout))
 		defer cancel()
 
-		p.data, p.err = fetchAdvisorData(ctx, p.useEmbedded)
+		p.data, p.origin, p.err = fetchAdvisorData(ctx, p.options)
 	})
 
 	return p.err
@@ -358,6 +397,16 @@ func (p *defaultAdvisorProvider) loadData() error {
 // positively know we fetched.
 func (p *defaultAdvisorProvider) usedEmbeddedData() bool {
 	return p.data == nil || p.data.Embedded
+}
+
+// dataOrigin reports where the loaded document came from. Unloaded counts as
+// embedded: never claim data we do not positively know we obtained.
+func (p *defaultAdvisorProvider) dataOrigin() feedOrigin {
+	if p.data == nil {
+		return originEmbedded
+	}
+
+	return p.origin
 }
 
 func (p *defaultAdvisorProvider) getRegions() []string {
@@ -431,17 +480,18 @@ type defaultPricingProvider struct {
 	data    *spotPriceData
 	err     error
 	timeout time.Duration
-	// useEmbedded skips the network entirely; rawEmbedded records what the load
-	// actually used, which also covers falling back after a failed fetch.
-	useEmbedded bool
+	origin  feedOrigin
+	once    sync.Once
+	// options carries the caller's freshness choice; rawEmbedded records what the
+	// load actually used, which also covers falling back after a failed fetch.
+	options     fetchOptions
 	rawEmbedded bool
-	once        sync.Once
 }
 
-func newDefaultPricingProvider(timeout time.Duration, useEmbedded bool) *defaultPricingProvider {
+func newDefaultPricingProvider(timeout time.Duration, options fetchOptions) *defaultPricingProvider {
 	return &defaultPricingProvider{
-		timeout:     timeout,
-		useEmbedded: useEmbedded,
+		timeout: timeout,
+		options: options,
 	}
 }
 
@@ -450,12 +500,13 @@ func (p *defaultPricingProvider) loadData() error {
 		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout(p.timeout))
 		defer cancel()
 
-		rawData, err := fetchPricingData(ctx, p.useEmbedded)
+		rawData, origin, err := fetchPricingData(ctx, p.options)
 		if err != nil {
 			p.err = err
 			return
 		}
 
+		p.origin = origin
 		p.rawEmbedded = rawData.Embedded
 		p.data = convertRawPriceData(rawData)
 	})
@@ -466,6 +517,15 @@ func (p *defaultPricingProvider) loadData() error {
 // embedded copy. Unloaded counts as embedded, as above.
 func (p *defaultPricingProvider) usedEmbeddedData() bool {
 	return p.rawEmbedded
+}
+
+// dataOrigin reports where the loaded document came from.
+func (p *defaultPricingProvider) dataOrigin() feedOrigin {
+	if p.data == nil {
+		return originEmbedded
+	}
+
+	return p.origin
 }
 
 func (p *defaultPricingProvider) getSpotPrice(instance, region, os string) (float64, error) {
