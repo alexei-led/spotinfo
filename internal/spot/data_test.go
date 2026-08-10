@@ -1,8 +1,10 @@
 package spot
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -39,7 +41,7 @@ func TestFetchAdvisorData_FallbackToEmbedded(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			data, err := fetchAdvisorData(tt.ctx)
+			data, err := fetchAdvisorData(tt.ctx, false)
 
 			// Should successfully get data from embedded fallback
 			require.NoError(t, err)
@@ -178,7 +180,7 @@ func TestFetchAdvisorData_WithValidContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	data, err := fetchAdvisorData(ctx)
+	data, err := fetchAdvisorData(ctx, false)
 
 	// Should always succeed (either from network or fallback)
 	require.NoError(t, err)
@@ -203,7 +205,7 @@ func TestFetchPricingData_WithValidContext(t *testing.T) {
 
 func TestDefaultAdvisorProvider_Integration(t *testing.T) {
 	// Test the default advisor provider methods with real embedded data
-	provider := newDefaultAdvisorProvider(100 * time.Millisecond)
+	provider := newDefaultAdvisorProvider(100*time.Millisecond, false)
 
 	t.Run("getRegions", func(t *testing.T) {
 		regions := provider.getRegions()
@@ -367,4 +369,49 @@ func TestEveryEmbeddedAdvisorRangeIsLabelled(t *testing.T) {
 		assert.NotEmptyf(t, published.Label,
 			"advisor range %d has no label; AWS candidates in it would report risk as unavailable", i)
 	}
+}
+
+// useEmbedded must skip the network for the advisor feed, not just for pricing.
+//
+// It used to apply to pricing only, so an "embedded" client still downloaded the
+// advisor document — the slower of the two feeds by an order of magnitude — and
+// no caller could actually avoid the network.
+//
+// The assertion is that no fetch was *attempted*, which the returned data cannot
+// show: a failed fetch falls back to the same embedded copy, so both paths
+// return identical data. What separates them is the warning the fallback logs,
+// so this captures the log instead. A cancelled context guarantees any real
+// attempt fails, and therefore warns.
+func TestUseEmbeddedSkipsTheAdvisorFetch(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var logged bytes.Buffer
+
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	data, err := fetchAdvisorData(cancelled, true)
+	require.NoError(t, err)
+	require.NotNil(t, data)
+	assert.True(t, data.Embedded)
+	assert.NotEmpty(t, data.Regions)
+	assert.NotContains(t, logged.String(), "failed to fetch advisor data",
+		"useEmbedded must not attempt the network; the fallback warning means it did")
+}
+
+// The same context proves the pricing side has always honoured it, so the two
+// feeds now behave alike.
+func TestUseEmbeddedSkipsThePricingFetch(t *testing.T) {
+	t.Parallel()
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	data, err := fetchPricingData(cancelled, true)
+	require.NoError(t, err)
+	require.NotNil(t, data)
+	assert.True(t, data.Embedded)
 }

@@ -97,54 +97,97 @@ func fetchTimeout(configured time.Duration) time.Duration {
 // minRange maps interruption range max values to min values
 var minRange = map[int]int{5: 0, 11: 6, 16: 12, 22: 17, 100: 23} //nolint:mnd
 
-// fetchAdvisorData retrieves spot advisor data from AWS or falls back to embedded data.
-func fetchAdvisorData(ctx context.Context) (*advisorData, error) {
+// feed describes one AWS document this package can fetch, and how to fall back
+// when it cannot.
+type feed[T any] struct {
+	// embedded is the committed copy, used when the caller asked for it and
+	// whenever a fetch cannot produce something usable.
+	embedded func() (*T, error)
+	parse    func([]byte) (*T, error)
+	// validate rejects a document that parsed but lost coverage, so a truncated
+	// live feed cannot replace a complete snapshot.
+	validate func(*T) error
+	// name appears in the log lines, so "advisor" and "pricing" read as before.
+	name string
+	url  string
+}
+
+// fetchFeed retrieves one AWS feed, or answers from the committed snapshot.
+//
+// Every failure falls back rather than erroring: the embedded copy is always
+// usable, so a transient upstream problem must not fail the command. The one
+// path that does not fetch at all is useEmbedded, which is what makes --offline
+// offline.
+//
+// The two feeds shared this shape verbatim before it was extracted; adding the
+// useEmbedded arm to both is what made them identical.
+func fetchFeed[T any](ctx context.Context, useEmbedded bool, source feed[T]) (*T, error) {
+	if useEmbedded {
+		return source.embedded()
+	}
+
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
 
 	client := &http.Client{}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, spotAdvisorJSONURL, http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source.url, http.NoBody)
 	if err != nil {
 		// If request creation fails, try embedded data
-		return loadEmbeddedAdvisorData()
+		return source.embedded()
 	}
 
-	resp, err := client.Do(req) //nolint:gosec // G704: spotAdvisorJSONURL is a package-level constant, not user input
+	resp, err := client.Do(req) //nolint:gosec // G704: every url is a package-level constant, not user input
 	if err != nil {
-		slog.Warn("failed to fetch advisor data from AWS, using embedded data",
-			slog.String("url", spotAdvisorJSONURL),
+		slog.Warn("failed to fetch "+source.name+" data from AWS, using embedded data",
+			slog.String("url", source.url),
 			slog.Any("error", err))
-		return loadEmbeddedAdvisorData()
+
+		return source.embedded()
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		slog.Warn("non-200 response from AWS advisor API, using embedded data", //nolint:gosec // G706: status_code is integer from HTTP response, not user-controlled input
+		slog.Warn("non-200 response from AWS "+source.name+" API, using embedded data", //nolint:gosec // G706: status_code is an integer from the HTTP response, not user-controlled input
 			slog.Int("status_code", resp.StatusCode))
-		return loadEmbeddedAdvisorData()
+
+		return source.embedded()
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		slog.Warn("failed to read advisor response body, using embedded data",
+		slog.Warn("failed to read "+source.name+" response body, using embedded data",
 			slog.Any("error", err))
-		return loadEmbeddedAdvisorData()
+
+		return source.embedded()
 	}
 
-	result, err := parseAdvisorResponse(body)
+	result, err := source.parse(body)
 	if err == nil {
-		err = validateAdvisorCoverage(result)
+		err = source.validate(result)
 	}
 
 	if err != nil {
-		slog.Warn("unusable advisor data from AWS, using embedded data",
+		slog.Warn("unusable "+source.name+" data from AWS, using embedded data",
 			slog.Any("error", err))
-		return loadEmbeddedAdvisorData()
+
+		return source.embedded()
 	}
 
-	slog.Debug("successfully fetched advisor data from AWS")
+	slog.Debug("successfully fetched " + source.name + " data from AWS")
+
 	return result, nil
+}
+
+// fetchAdvisorData retrieves spot advisor data from AWS or falls back to embedded data.
+func fetchAdvisorData(ctx context.Context, useEmbedded bool) (*advisorData, error) {
+	return fetchFeed(ctx, useEmbedded, feed[advisorData]{
+		name:     "advisor",
+		url:      spotAdvisorJSONURL,
+		embedded: loadEmbeddedAdvisorData,
+		parse:    parseAdvisorResponse,
+		validate: validateAdvisorCoverage,
+	})
 }
 
 // parseAdvisorResponse decodes an advisor feed body and rejects unusable payloads.
@@ -216,56 +259,13 @@ func loadEmbeddedAdvisorData() (*advisorData, error) {
 
 // fetchPricingData retrieves spot pricing data from AWS or falls back to embedded data.
 func fetchPricingData(ctx context.Context, useEmbedded bool) (*rawPriceData, error) {
-	if useEmbedded {
-		return loadEmbeddedPricingData()
-	}
-
-	ctx, cancel := withDefaultTimeout(ctx)
-	defer cancel()
-
-	client := &http.Client{}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, spotPriceJSURL, http.NoBody)
-	if err != nil {
-		// If request creation fails, try embedded data
-		return loadEmbeddedPricingData()
-	}
-
-	resp, err := client.Do(req) //nolint:gosec // G704: spotPriceJSURL is a package-level constant, not user input
-	if err != nil {
-		slog.Warn("failed to fetch pricing data from AWS, using embedded data",
-			slog.String("url", spotPriceJSURL),
-			slog.Any("error", err))
-		return loadEmbeddedPricingData()
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		slog.Warn("non-200 response from AWS pricing API, using embedded data", //nolint:gosec // G706: status_code is integer from HTTP response, not user-controlled input
-			slog.Int("status_code", resp.StatusCode))
-		return loadEmbeddedPricingData()
-	}
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		slog.Warn("failed to read pricing response body, using embedded data",
-			slog.Any("error", err))
-		return loadEmbeddedPricingData()
-	}
-
-	result, err := parsePricingResponse(bodyBytes)
-	if err == nil {
-		err = validatePriceCoverage(result)
-	}
-
-	if err != nil {
-		slog.Warn("unusable pricing data from AWS, using embedded data",
-			slog.Any("error", err))
-		return loadEmbeddedPricingData()
-	}
-
-	slog.Debug("successfully fetched pricing data from AWS")
-	return result, nil
+	return fetchFeed(ctx, useEmbedded, feed[rawPriceData]{
+		name:     "pricing",
+		url:      spotPriceJSURL,
+		embedded: loadEmbeddedPricingData,
+		parse:    parsePricingResponse,
+		validate: validatePriceCoverage,
+	})
 }
 
 // parsePricingResponse decodes a pricing feed body and rejects unusable payloads.

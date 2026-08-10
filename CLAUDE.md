@@ -98,6 +98,17 @@ AWS (three sources):
 
 Sources 1-2 are embedded in the binary during build for offline capability.
 
+`--offline` answers from those embedded snapshots and makes no request at all —
+including no DescribeSpotPriceHistory, which is why the flag also clears the live-price
+provider. Without that it was *slower* than the live path, because every instance the
+snapshot does not price fell through to an AWS API call that blocks for the live-price
+timeout. It is worth having because the feeds dominate an invocation: the advisor
+document alone takes over a second, against roughly 40 ms to answer from embedded data.
+
+The default is unchanged — live feeds, with the snapshot as fallback. `useEmbedded` now
+governs both feeds; it used to apply to pricing only, so an "embedded" client still
+downloaded the advisor document and no caller could actually avoid the network.
+
 GCP: Google's public server-rendered Spot and Compute pricing pages, `us-central1` only.
 Azure: the anonymous Azure Retail Prices API for amounts, joined to Microsoft Learn VM size
 pages for vCPU, memory and processor architecture; eight reviewed regions, 26 machine series.

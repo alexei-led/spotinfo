@@ -109,6 +109,7 @@ const (
 	flagSort         = "sort"
 	flagOrder        = "order"
 	flagWithScore    = "with-score"
+	flagOffline      = "offline"
 	flagMinScore     = "min-score"
 	flagAZ           = "az"
 	flagScoreTimeout = "score-timeout"
@@ -142,7 +143,7 @@ func mainCmd(ctx *cli.Context) error {
 		return runMCPServer(ctx, mainCtx)
 	}
 
-	client := spot.New()
+	client := newSpotClient(ctx)
 
 	registry, err := newProviderRegistry(client)
 	if err != nil {
@@ -150,6 +151,33 @@ func mainCmd(ctx *cli.Context) error {
 	}
 
 	return execMainCmd(ctx, mainCtx, registry, client, os.Stdout)
+}
+
+// newSpotClient builds the AWS client for this invocation.
+//
+// --offline answers from the committed snapshot instead of the live feeds. It is
+// worth a flag because the feeds are most of an invocation: the advisor document
+// alone takes over a second, against roughly a tenth of a second to answer from
+// embedded data. GCP and Azure are already offline-only, so this is what makes
+// the AWS surface consistent with them for a caller that wants it.
+//
+// The default is unchanged: without the flag, live data is still fetched and the
+// snapshot remains a fallback.
+func newSpotClient(ctx *cli.Context) *spot.Client {
+	if !lineageBool(ctx, flagOffline) {
+		return spot.New()
+	}
+
+	client := spot.NewWithOptions(spot.DefaultTimeoutSeconds*time.Second, true)
+
+	// Offline has to mean offline. The embedded feeds price most instances but
+	// not all, and an unpriced one otherwise falls through to
+	// DescribeSpotPriceHistory — an AWS API call that, without credentials,
+	// blocks for the live-price timeout per region and made `--offline` slower
+	// than the live path rather than faster.
+	client.SetLivePriceProvider(nil)
+
+	return client
 }
 
 // newProviderRegistry composes the providers this binary serves. The AWS
@@ -225,7 +253,7 @@ func isMCPMode(ctx *cli.Context) bool {
 }
 
 // runMCPServer starts the MCP server
-func runMCPServer(_ *cli.Context, execCtx context.Context) error {
+func runMCPServer(ctx *cli.Context, execCtx context.Context) error {
 	log.Info("starting MCP server mode")
 
 	// Get transport mode
@@ -236,7 +264,7 @@ func runMCPServer(_ *cli.Context, execCtx context.Context) error {
 		slog.String("transport", transport),
 		slog.String("port", port))
 
-	client := spot.New()
+	client := newSpotClient(ctx)
 
 	registry, err := newProviderRegistry(client)
 	if err != nil {
@@ -310,6 +338,10 @@ func lineageString(ctx *cli.Context, name string) string {
 
 func lineageStringSlice(ctx *cli.Context, name string) []string {
 	return flagLineageContext(ctx, name).StringSlice(name)
+}
+
+func lineageBool(ctx *cli.Context, name string) bool {
+	return flagLineageContext(ctx, name).Bool(name)
 }
 
 // lineageIsSet reports whether a flag was given on any context in the lineage,
@@ -771,7 +803,7 @@ func handleSignals() context.Context {
 }
 
 func defaultRecommendAction(ctx *cli.Context) error {
-	client := spot.New()
+	client := newSpotClient(ctx)
 
 	registry, err := newProviderRegistry(client)
 	if err != nil {
@@ -809,6 +841,10 @@ func recommendCommand(action cli.ActionFunc) *cli.Command {
 				Usage: "ranking policy: cost|web|ci|batch (default: web on a cloud with interruption data, otherwise cost)",
 			},
 			&cli.IntFlag{Name: flagTop, Usage: "maximum recommendations to return", Value: spot.DefaultRecommendationTop},
+			&cli.BoolFlag{
+				Name:  flagOffline,
+				Usage: "answer from the embedded snapshot instead of fetching the live AWS feeds",
+			},
 			&cli.StringFlag{Name: flagOutput, Usage: "format output: table|json", Value: outputTable},
 		},
 	}
@@ -902,6 +938,10 @@ func newSpotinfoApp(rootAction, recommendationAction cli.ActionFunc) *cli.App {
 			&cli.BoolFlag{
 				Name:  flagWithScore,
 				Usage: "include AWS spot placement scores (experimental)",
+			},
+			&cli.BoolFlag{
+				Name:  flagOffline,
+				Usage: "answer from the embedded AWS snapshot instead of fetching the live feeds",
 			},
 			&cli.IntFlag{
 				Name:  flagMinScore,

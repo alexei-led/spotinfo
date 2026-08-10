@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"runtime"
@@ -1187,9 +1188,12 @@ func TestRunMCPServer(t *testing.T) {
 				ctx = timeoutCtx
 			}
 
-			// Create empty CLI context (not used in runMCPServer)
+			// runMCPServer reads --offline from the flag lineage, so the context
+			// needs a real flag set; a nil one panics on LocalFlagNames.
 			app := &cli.App{}
-			cliCtx := cli.NewContext(app, nil, nil)
+			flags := flag.NewFlagSet(appName, flag.ContinueOnError)
+			flags.Bool(flagOffline, false, "")
+			cliCtx := cli.NewContext(app, flags, nil)
 
 			// Test the function
 			err := runMCPServer(cliCtx, ctx)
@@ -1564,4 +1568,30 @@ func TestMainCmd_ErrorHandling(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --offline must mean offline: answer from the embedded snapshot without any
+// network, including the AWS API the live-price fallback would otherwise call.
+//
+// Without dropping the live-price provider the flag was slower than the live
+// path, not faster — every instance the snapshot does not price fell through to
+// DescribeSpotPriceHistory and blocked for the live-price timeout. The context
+// here is already cancelled, so any network attempt fails; returning advice
+// proves none was made.
+func TestOfflineClientAnswersWithoutTheNetwork(t *testing.T) {
+	app := newSpotinfoApp(
+		func(ctx *cli.Context) error {
+			cancelled, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			advices, err := newSpotClient(ctx).GetSpotSavings(cancelled,
+				spot.WithRegions([]string{"us-east-1"}), spot.WithPattern("t3.micro"))
+			require.NoError(t, err)
+			assert.NotEmpty(t, advices, "the committed snapshot must answer on its own")
+
+			return nil
+		},
+		func(*cli.Context) error { return nil },
+	)
+	require.NoError(t, app.Run([]string{appName, "--offline", "--type", "t3.micro"}))
 }

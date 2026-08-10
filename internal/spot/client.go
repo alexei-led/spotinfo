@@ -168,7 +168,7 @@ func New() *Client {
 //nolint:contextcheck // Initialization function appropriately uses context.Background() for AWS config
 func NewWithOptions(timeout time.Duration, useEmbedded bool) *Client {
 	return &Client{
-		advisorProvider:   newDefaultAdvisorProvider(timeout),
+		advisorProvider:   newDefaultAdvisorProvider(timeout, useEmbedded),
 		pricingProvider:   newDefaultPricingProvider(timeout, useEmbedded),
 		scoreProvider:     newScoreCache(),
 		livePriceProvider: createLivePriceProvider(),
@@ -331,10 +331,15 @@ type defaultAdvisorProvider struct {
 	err     error
 	timeout time.Duration
 	once    sync.Once
+	// useEmbedded skips the network entirely, exactly as it does for pricing.
+	// It used to be absent here, so "embedded" still downloaded the advisor feed
+	// — the slower of the two by an order of magnitude — and no caller could
+	// actually avoid the network.
+	useEmbedded bool
 }
 
-func newDefaultAdvisorProvider(timeout time.Duration) *defaultAdvisorProvider {
-	return &defaultAdvisorProvider{timeout: timeout}
+func newDefaultAdvisorProvider(timeout time.Duration, useEmbedded bool) *defaultAdvisorProvider {
+	return &defaultAdvisorProvider{timeout: timeout, useEmbedded: useEmbedded}
 }
 
 func (p *defaultAdvisorProvider) loadData() error {
@@ -342,7 +347,7 @@ func (p *defaultAdvisorProvider) loadData() error {
 		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout(p.timeout))
 		defer cancel()
 
-		p.data, p.err = fetchAdvisorData(ctx)
+		p.data, p.err = fetchAdvisorData(ctx, p.useEmbedded)
 	})
 
 	return p.err
