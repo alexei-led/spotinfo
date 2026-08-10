@@ -60,11 +60,30 @@ func (m *CatalogMachine) SavingsPercent() *int {
 	return &saved
 }
 
+// ExcludedMachine is a machine the join refused to publish, with the reason.
+// The caller reports these for review, and the coverage floor decides whether
+// what remains is still a snapshot worth committing.
+type ExcludedMachine struct {
+	ID     cloud.MachineID
+	Reason string
+}
+
 // BuildCatalog joins Spot rows with their On-Demand prices. It returns the
-// machines priced in both classes plus the identifiers that had a Spot price but
-// no On-Demand pair; those are left out rather than published with a missing
-// denominator, and the caller reports them for review.
-func BuildCatalog(region cloud.Region, spotRows, onDemandRows []MachineRow) (*Catalog, []cloud.MachineID, error) {
+// machines priced in both classes plus the ones it refused to publish.
+//
+// Two refusals, treated alike: a Spot price with no On-Demand pair has no
+// denominator for its savings figure, and a machine whose two pages disagree
+// about its vCPU or memory has no defensible specification. Neither can be
+// published, and neither is grounds for discarding the other 300 machines that
+// parsed cleanly — that is what the per-snapshot coverage floor is for.
+//
+// The contradiction used to abort the whole refresh. On 2026-08-10 Google's
+// general-purpose page listed c3d-standard-8 as 8 vCPU / 16 GiB while its Spot
+// page said 32 GiB — a single wrong cell, confirmed against
+// compute.machineTypes.list, in a row whose own price is exactly twice
+// c3d-standard-4's. One typo in one cell froze every GCP price in the binary,
+// and they drifted 5-10% below the published rates before anyone noticed.
+func BuildCatalog(region cloud.Region, spotRows, onDemandRows []MachineRow) (*Catalog, []ExcludedMachine, error) {
 	onDemand, err := indexRows(onDemandRows, cloud.PriceClassOnDemand)
 	if err != nil {
 		return nil, nil, err
@@ -77,7 +96,7 @@ func BuildCatalog(region cloud.Region, spotRows, onDemandRows []MachineRow) (*Ca
 
 	var (
 		machines = make([]CatalogMachine, 0, len(spot))
-		unpaired []cloud.MachineID
+		excluded []ExcludedMachine
 	)
 
 	for _, id := range slices.Sorted(maps.Keys(spot)) {
@@ -85,13 +104,16 @@ func BuildCatalog(region cloud.Region, spotRows, onDemandRows []MachineRow) (*Ca
 
 		paired, found := onDemand[id]
 		if !found {
-			unpaired = append(unpaired, id)
+			excluded = append(excluded, ExcludedMachine{ID: id, Reason: "spot price with no on-demand pair"})
 
 			continue
 		}
 		if row.VCPU != paired.VCPU || row.MemoryGiB != paired.MemoryGiB {
-			return nil, nil, fmt.Errorf("%w: %s has spot specification %d vCPU/%.3f GiB but on-demand specification %d vCPU/%.3f GiB",
-				ErrSourceContract, id, row.VCPU, row.MemoryGiB, paired.VCPU, paired.MemoryGiB)
+			excluded = append(excluded, ExcludedMachine{ID: id, Reason: fmt.Sprintf(
+				"spot page says %d vCPU/%.3f GiB, on-demand page says %d vCPU/%.3f GiB",
+				row.VCPU, row.MemoryGiB, paired.VCPU, paired.MemoryGiB)})
+
+			continue
 		}
 
 		architecture, classified := ArchitectureOf(id)
@@ -117,7 +139,7 @@ func BuildCatalog(region cloud.Region, spotRows, onDemandRows []MachineRow) (*Ca
 		Currency:      cloud.CurrencyUSD,
 		BillingUnit:   cloud.BillingUnitInstanceHour,
 		Machines:      machines,
-	}, unpaired, nil
+	}, excluded, nil
 }
 
 // indexRows keys rows by machine. An exact repeat is harmless redundancy — the

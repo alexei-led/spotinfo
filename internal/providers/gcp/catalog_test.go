@@ -81,12 +81,14 @@ func TestBuildCatalogJoinsSpotWithItsOnDemandPair(t *testing.T) {
 func TestBuildCatalogLeavesOutASpotMachineWithNoOnDemandPair(t *testing.T) {
 	t.Parallel()
 
-	catalog, unpaired, err := BuildCatalog(contractedRegion,
+	catalog, excluded, err := BuildCatalog(contractedRegion,
 		[]MachineRow{row(t, "c4-standard-2", "0.058121", 2, 7), row(t, "e2-orphan-2", "0.011", 2, 8)},
 		[]MachineRow{row(t, "c4-standard-2", "0.117660", 2, 7), row(t, "m2-ondemandonly-16", "1.0", 16, 128)})
 	require.NoError(t, err)
 
-	assert.Equal(t, []cloud.MachineID{"e2-orphan-2"}, unpaired)
+	require.Len(t, excluded, 1)
+	assert.Equal(t, cloud.MachineID("e2-orphan-2"), excluded[0].ID)
+	assert.Contains(t, excluded[0].Reason, "no on-demand pair")
 	require.Len(t, catalog.Machines, 1)
 	assert.Equal(t, cloud.MachineID("c4-standard-2"), catalog.Machines[0].ID,
 		"an on-demand-only machine is never published as a spot candidate")
@@ -110,13 +112,26 @@ func TestBuildCatalogRejectsTwoDifferentSpecificationsForOneMachine(t *testing.T
 	require.ErrorIs(t, err, ErrSourceContract)
 }
 
-func TestBuildCatalogRejectsSpotAndOnDemandSpecificationMismatch(t *testing.T) {
+// A machine whose two pages disagree about its shape is excluded, not published
+// and not fatal. It used to abort the whole build, which meant one wrong cell in
+// one row of Google's page froze all 333 prices in the binary — exactly what
+// happened on 2026-08-10 with c3d-standard-8. Whether what survives is still a
+// snapshot worth committing is the coverage floor's decision, not this join's.
+func TestBuildCatalogExcludesASpecificationMismatchWithoutFailing(t *testing.T) {
 	t.Parallel()
 
-	_, _, err := BuildCatalog(contractedRegion,
-		[]MachineRow{row(t, "c4-standard-2", "0.058121", 2, 7)},
-		[]MachineRow{row(t, "c4-standard-2", "0.117660", 4, 15)})
-	require.ErrorIs(t, err, ErrSourceContract)
+	catalog, excluded, err := BuildCatalog(contractedRegion,
+		[]MachineRow{row(t, "c4-standard-2", "0.058121", 2, 7), row(t, "c4-standard-4", "0.116", 4, 15)},
+		[]MachineRow{row(t, "c4-standard-2", "0.117660", 4, 15), row(t, "c4-standard-4", "0.232", 4, 15)})
+	require.NoError(t, err, "one contradictory row must not discard the rows that parsed cleanly")
+
+	require.Len(t, excluded, 1)
+	assert.Equal(t, cloud.MachineID("c4-standard-2"), excluded[0].ID)
+	assert.Contains(t, excluded[0].Reason, "spot page says 2 vCPU")
+	assert.Contains(t, excluded[0].Reason, "on-demand page says 4 vCPU")
+
+	require.Len(t, catalog.Machines, 1)
+	assert.Equal(t, cloud.MachineID("c4-standard-4"), catalog.Machines[0].ID)
 }
 
 func TestBuildCatalogAcceptsAnExactRepeat(t *testing.T) {

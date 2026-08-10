@@ -4,6 +4,48 @@
 
 `spotinfo` combines multiple data sources to provide comprehensive AWS EC2 Spot Instance information, including pricing, interruption rates, and placement scores.
 
+## GCP source instability, observed 2026-08-10
+
+Two distinct defects were found in Google's pages on the same day. They need
+different responses, and telling them apart matters.
+
+**1. The Spot page serves two price generations at random.** Five consecutive
+requests to `https://cloud.google.com/spot-vms/pricing`, same URL and same
+User-Agent, alternated between price generations:
+
+| request | sha256 (first 12) | `n2-standard-4` |
+| --- | --- | --- |
+| 1 | `f5b4730f89b6` | $0.101336 |
+| 2 | `29dde0bdbd27` | $0.101336 |
+| 3 | `a2045bde734f` | $0.111472 |
+| 4 | `ff9a30e23b20` | $0.111472 |
+| 5 | `593091bf36fc` | $0.101336 |
+
+A refresh during a rollout like this is a coin flip, and worse: the four
+contracted pages are fetched seconds apart, so one run can mix generations
+across pages and publish a Spot price from one against an On-Demand price from
+another — a savings figure computed from two different days. **Do not refresh
+while the page is unstable.** Re-fetch the Spot page a few times and compare
+hashes before running the updater; if they differ, wait.
+
+The `general-purpose` page was stable across the same window, so instability is
+per-page and must be checked per-page.
+
+**2. `c3d-standard-8` has a genuinely wrong memory cell.** The on-demand page
+lists it as 8 vCPU / 16 GiB in every fetch, while `c3d-standard-4` is 16 GiB and
+`c3d-standard-16` is 64 GiB, its own price is exactly twice `c3d-standard-4`'s,
+and `compute.machineTypes.list` reports 32 GiB. One wrong cell, stably served.
+
+This one used to abort the entire refresh, freezing all 333 machine prices over
+a single bad row. `BuildCatalog` now excludes a machine whose two pages disagree
+about its shape — the same treatment a machine with no On-Demand pair already
+got — reports it on stderr, and leaves the coverage floor to decide whether what
+survived is still worth committing. The parser was **not** widened and no
+threshold was lowered: a contradictory machine is still never published.
+
+The committed snapshot predates both defects, carries the correct 32 GiB for
+`c3d-standard-8`, and is internally consistent. It is deliberately left in place.
+
 ## Primary Data Sources
 
 ### 1. AWS Spot Instance Advisor Data

@@ -6,7 +6,7 @@
 // floor, so a failure before that point leaves the reviewed snapshot exactly as
 // it was. The payload and manifest commit uses a rollback pair: if the second
 // file cannot be replaced, the previous payload is restored and the update
-// fails rather than leaving an unpaired snapshot.
+// fails rather than leaving a partial snapshot.
 package main
 
 import (
@@ -83,12 +83,15 @@ func run(ctx context.Context, dataDir string) error {
 		return err
 	}
 
-	catalog, unpaired, err := buildCatalog(contract, region, pages)
+	// Reported before the error check, never silent: an excluded machine is a
+	// source defect worth looking at, and a contract failure caused by dropped
+	// rows is unreadable without them.
+	catalog, excluded, err := buildCatalog(contract, region, pages)
+	for _, machine := range excluded {
+		fmt.Fprintf(os.Stderr, "skipped %s: %s\n", machine.ID, machine.Reason)
+	}
 	if err != nil {
 		return err
-	}
-	for _, id := range unpaired {
-		fmt.Fprintf(os.Stderr, "skipped %s: spot price with no on-demand pair\n", id)
 	}
 
 	payload, err := encodePayload(catalog)
@@ -259,7 +262,7 @@ func fetchOnce(ctx context.Context, client *http.Client, url string) ([]byte, er
 }
 
 func buildCatalog(contract *snapshot.SourceContract, region cloud.Region, pages []page,
-) (*gcp.Catalog, []cloud.MachineID, error) {
+) (*gcp.Catalog, []gcp.ExcludedMachine, error) {
 	var spotRows, onDemandRows []gcp.MachineRow
 
 	for i := range pages {
@@ -286,16 +289,20 @@ func buildCatalog(contract *snapshot.SourceContract, region cloud.Region, pages 
 			snapshot.ErrInvalidSourceContract)
 	}
 
-	catalog, unpaired, err := gcp.BuildCatalog(region, spotRows, onDemandRows)
+	catalog, excluded, err := gcp.BuildCatalog(region, spotRows, onDemandRows)
 	if err != nil {
-		return nil, nil, err
+		return nil, excluded, err
 	}
 
+	// Excluded machines are returned alongside a verification failure, not
+	// swallowed by it. A contract check that fails *because* rows were dropped —
+	// "no machine in approved series n4d" — is unreadable without the list of
+	// what was dropped and why.
 	if err := catalog.Verify(contract); err != nil {
-		return nil, nil, err
+		return nil, excluded, err
 	}
 
-	return catalog, unpaired, nil
+	return catalog, excluded, nil
 }
 
 // encodePayload gzips the catalogue with a zeroed header. The default header

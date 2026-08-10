@@ -301,7 +301,18 @@ contract, the manifest hash and the reviewed coverage floor **before** writing, 
 leaves the reviewed snapshot untouched. Both are normally run by their weekly workflow.
 
 A refresh failure is usually the source changing shape, not a flake. `docs/data-sources.md`
-tables every expected error and what it means. Two rules matter most:
+tables every expected error and what it means.
+
+**Before refreshing GCP, check the page is stable.** On 2026-08-10 the Spot page served
+two price generations at random — five consecutive requests to the same URL alternated
+between `n2-standard-4` at $0.101336 and $0.111472, every response a different hash.
+Fetch it two or three times and compare; if the bytes differ, wait. A run during a
+rollout can mix generations *across* the four contracted pages, publishing a Spot price
+from one day against an On-Demand price from another. A machine whose two pages disagree
+about its shape is excluded and reported, not fatal — but that is a defence against one
+stale cell, not against an unstable source.
+
+Two rules matter most:
 
 - The coverage floor is a **floor**, not a census, and for Azure it is applied **per region**.
   Never lower it to make a short refresh pass.
