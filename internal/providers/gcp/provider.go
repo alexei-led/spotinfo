@@ -68,6 +68,14 @@ func (p *Provider) Query(_ context.Context, query *cloud.Query) (cloud.Result, e
 		return cloud.Result{}, fmt.Errorf("%w: gcp does not support architecture %q",
 			cloud.ErrInvalidArgument, query.Architecture)
 	}
+	// Runs after the OS and architecture checks above, which own those two errors
+	// with their own wording. What is left is what this catalogue used to drop
+	// silently: a risk or placement sort key fell through candidateComparator's
+	// nil arm and came back as unsorted candidates with status ok, and Placement
+	// was ignored outright — a caller cannot tell either from a real answer.
+	if err := capabilities.Require(query.CapabilityNeeds()); err != nil {
+		return cloud.Result{}, fmt.Errorf("gcp: %w", err)
+	}
 
 	pattern, err := machinePattern(query.MachinePattern)
 	if err != nil {

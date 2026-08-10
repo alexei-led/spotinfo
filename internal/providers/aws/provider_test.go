@@ -70,14 +70,49 @@ func linuxQuery() *cloud.Query {
 	return &cloud.Query{Regions: []cloud.Region{"us-east-1"}, OS: cloud.OSLinux}
 }
 
-func TestNewRequiresCollaborators(t *testing.T) {
+// Only the client is required. The architecture lookup is optional and degrades
+// exactly one thing: without it the provider stops declaring architectures, so a
+// request that filters on one is refused rather than answered from an
+// unclassified catalogue. Requiring it made the v1 surfaces — which publish no
+// architecture at all — fail on a file they never read.
+func TestNewRequiresOnlyTheClient(t *testing.T) {
 	t.Parallel()
 
 	_, err := New(nil, stubArchitectures{})
-	require.Error(t, err)
+	require.Error(t, err, "a provider without a client cannot acquire anything")
 
-	_, err = New(&stubClient{}, nil)
-	require.Error(t, err)
+	provider, err := New(&stubClient{}, nil)
+	require.NoError(t, err)
+	assert.Empty(t, provider.Capabilities().Architectures,
+		"an unavailable lookup must stop the provider declaring architectures")
+	assert.False(t, provider.Capabilities().SupportsArchitecture(cloud.ArchitectureX8664))
+
+	withLookup, err := New(&stubClient{}, stubArchitectures{})
+	require.NoError(t, err)
+	assert.True(t, withLookup.Capabilities().SupportsArchitecture(cloud.ArchitectureX8664))
+}
+
+// Without a lookup an architecture-filtered query is refused, not answered with
+// an empty candidate list that looks like "no such machine exists".
+func TestQueryWithoutAnArchitectureLookupRefusesArchitectureFilters(t *testing.T) {
+	t.Parallel()
+
+	provider, err := New(&stubClient{advices: []spot.Advice{{
+		Region: "us-east-1", Instance: "m6i.large", Price: 0.04,
+		Info: spot.TypeInfo{Cores: 2, RAM: 8},
+	}}}, nil)
+	require.NoError(t, err)
+
+	query := linuxQuery()
+	query.Architecture = cloud.ArchitectureX8664
+
+	_, err = provider.Query(t.Context(), query)
+	require.ErrorIs(t, err, cloud.ErrInvalidArgument)
+
+	// A query that does not filter by architecture is still answered.
+	result, err := provider.Query(t.Context(), linuxQuery())
+	require.NoError(t, err)
+	assert.Len(t, result.Candidates, 1)
 }
 
 func TestQueryMapsAdviceToNeutralCandidate(t *testing.T) {
@@ -308,7 +343,34 @@ func TestQueryPropagatesAcquisitionFailure(t *testing.T) {
 	require.ErrorIs(t, err, failure)
 }
 
-func TestQueryFailsOnAPriceFinerThanTheFixedPointScale(t *testing.T) {
+// A price outside the fixed-point scale is a defect in one feed row. It drops
+// that candidate and leaves the rest of the answer intact; returning an error
+// turned a single bad row into an empty response for the whole catalogue, on a
+// surface whose v1 contract is golden-pinned and where v1 rendered whatever the
+// feed published.
+func TestQueryDropsOnlyThePriceFinerThanTheFixedPointScale(t *testing.T) {
+	t.Parallel()
+
+	client := &stubClient{advices: []spot.Advice{
+		{
+			Region: "us-east-1", Instance: "m6i.large", Price: 0.00000000012,
+			Info: spot.TypeInfo{Cores: 2, RAM: 8},
+		},
+		{
+			Region: "us-east-1", Instance: "m5.xlarge", Price: 0.1234,
+			Info: spot.TypeInfo{Cores: 4, RAM: 16},
+		},
+	}}
+
+	result, err := testProvider(t, client).Query(t.Context(), linuxQuery())
+	require.NoError(t, err)
+	require.Len(t, result.Candidates, 1, "the representable candidate must survive")
+	assert.Equal(t, cloud.MachineID("m5.xlarge"), result.Candidates[0].Machine.ID)
+}
+
+// Every row being unrepresentable is still an empty answer, not an error: the
+// query succeeded and found nothing it could publish.
+func TestQueryReturnsNoCandidatesWhenEveryPriceIsUnrepresentable(t *testing.T) {
 	t.Parallel()
 
 	client := &stubClient{advices: []spot.Advice{{
@@ -316,8 +378,9 @@ func TestQueryFailsOnAPriceFinerThanTheFixedPointScale(t *testing.T) {
 		Info: spot.TypeInfo{Cores: 2, RAM: 8},
 	}}}
 
-	_, err := testProvider(t, client).Query(t.Context(), linuxQuery())
-	require.ErrorIs(t, err, cloud.ErrPrecisionLoss)
+	result, err := testProvider(t, client).Query(t.Context(), linuxQuery())
+	require.NoError(t, err)
+	assert.Empty(t, result.Candidates)
 }
 
 func TestCapabilitiesDescribeTheAWSFeeds(t *testing.T) {

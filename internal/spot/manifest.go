@@ -3,6 +3,7 @@ package spot
 import (
 	"embed"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"spotinfo/internal/cloud"
@@ -27,6 +28,47 @@ var (
 	priceManifest        = sync.OnceValues(func() (*snapshot.Manifest, error) { return loadManifest(priceManifestFile) })
 	architectureManifest = sync.OnceValues(func() (*snapshot.Manifest, error) { return loadManifest(architectureManifestFile) })
 )
+
+// Committed payloads are verified against the hash their sidecar manifest
+// declares, exactly as the GCP and Azure snapshots are. Without this the
+// provenance AWS publishes in every v2 answer describes bytes nobody checked,
+// and a snapshot that drifted from its manifest is served instead of disabling
+// the provider.
+//
+// Memoized per process: the bytes are immutable and hashing them on every client
+// construction would repeat work for no gain.
+var (
+	advisorPayloadVerified = sync.OnceValue(func() error {
+		return verifyEmbeddedPayload(advisorManifest, advisorManifestFile, []byte(embeddedSpotData))
+	})
+	pricePayloadVerified = sync.OnceValue(func() error {
+		return verifyEmbeddedPayload(priceManifest, priceManifestFile, []byte(embeddedPriceData))
+	})
+)
+
+// verifyEmbeddedPayload fails closed: an unreadable manifest and a payload that
+// does not hash to it are both refusals, never a warning. Only `make
+// verify-data` catches this otherwise, and the shipped binary cannot.
+//
+// The mismatch is logged at error level because of where the refusal surfaces:
+// GetSpotSavings discards a pricing error per instance and renders $0, which is
+// also what an instance missing from the feed looks like. Without this line a
+// tampered snapshot is indistinguishable from a new instance family.
+func verifyEmbeddedPayload(load func() (*snapshot.Manifest, error), name string, payload []byte) error {
+	manifest, err := load()
+	if err != nil {
+		return err
+	}
+
+	if err := manifest.VerifyPayload(payload); err != nil {
+		slog.Error("embedded snapshot does not match its manifest; refusing to serve it",
+			slog.String("manifest", name), slog.Any("error", err))
+
+		return fmt.Errorf("embedded %s: %w", name, err)
+	}
+
+	return nil
+}
 
 // EmbeddedSourceRefs returns the provenance of every committed AWS snapshot, so
 // a result can report which document it came from and when it was fetched.

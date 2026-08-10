@@ -289,6 +289,15 @@ func recommendConstraints(args map[string]any, request *cloud.RecommendRequest) 
 		return nil, err
 	}
 
+	// The published input schema declares "maximum": 50, and the host does not
+	// validate a request against the schema for us — the same reason
+	// rejectUnknownArgs exists. The neutral request only requires a positive Top,
+	// because the CLI has no upper bound; this is the MCP surface honouring what
+	// it advertises.
+	if top > cloud.MaxTop {
+		return nil, fmt.Errorf("%w: %s must be between 1 and %d", cloud.ErrInvalidArgument, argTop, cloud.MaxTop)
+	}
+
 	request.MaxPrice = maxPrice
 	request.MinMemoryGiB = minMemoryGiB
 	request.MinVCPU = minVCPU

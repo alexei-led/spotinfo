@@ -7,6 +7,7 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"spotinfo/internal/cloud"
+	awsprovider "spotinfo/internal/providers/aws"
 )
 
 const (
@@ -63,28 +64,6 @@ func providerID(ctx *cli.Context) (cloud.ProviderID, error) {
 	return cloud.ParseProviderID(value)
 }
 
-// resolveProvider turns --cloud into a usable provider. The order is fixed and
-// every step runs before acquisition: an unrecognised value is
-// ErrInvalidArgument, a recognised but disabled provider is ErrDataUnavailable
-// carrying the registry's reason code, and the capability request is checked
-// last so the reported shortfall names a provider that actually exists.
-func resolveProvider(ctx *cli.Context, registry providerRegistry, request cloud.CapabilityRequest) (cloud.Provider, error) {
-	id, err := providerID(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	provider, err := registry.Get(id)
-	if err != nil {
-		return nil, err
-	}
-	if err := provider.Capabilities().Require(request); err != nil {
-		return nil, fmt.Errorf("%s: %w", id, err)
-	}
-
-	return provider, nil
-}
-
 // requestedOS reports the operating system as a capability question. A value
 // outside the neutral vocabulary is not one: the provider owns that error, and
 // AWS already reports it with its own wording.
@@ -138,19 +117,40 @@ func recommendCapabilityRequest(ctx *cli.Context) cloud.CapabilityRequest {
 // still acquires candidates through the legacy AWS client. Selecting any other
 // provider fails here rather than being answered with AWS data.
 //
-// The identifier check is unreachable today — the root command requires the
-// risk capability and only AWS declares it, so another cloud is already
-// rejected by resolveProvider. It stays because it is the guard that survives
-// that coincidence: the day a provider publishes risk, the capability gate
-// would let it through to an acquisition path that only speaks AWS.
+// The AWS path deliberately does not build a provider. This command never
+// queries one — it holds the legacy client — so what AWS can answer is
+// answerable from the static declaration. Building it made the command inherit
+// every input the AWS provider needs, so an unreadable architecture manifest or
+// sidecar — neither of which this command reads — failed
+// `spotinfo --type t3.micro` with SNAPSHOT_UNAVAILABLE while the advisor and
+// price data it does read were intact. A genuinely broken advisor or price
+// snapshot still fails at acquisition, where the legacy client verifies its own
+// payloads against their manifests.
+//
+// Every other cloud still resolves through the registry, so a disabled provider
+// keeps reporting DATA_UNAVAILABLE with its reason code and a shortfall keeps
+// naming the capability it lacks, before the identifier check below rejects it.
 func resolveAWSProvider(ctx *cli.Context, registry providerRegistry, request cloud.CapabilityRequest) error {
-	provider, err := resolveProvider(ctx, registry, request)
+	id, err := providerID(ctx)
 	if err != nil {
 		return err
 	}
-	if provider.ID() != cloud.ProviderAWS {
-		return fmt.Errorf("%w: %s candidates are not served by this command yet", cloud.ErrUnsupportedCapability, provider.ID())
+
+	if id == cloud.ProviderAWS {
+		if capErr := awsprovider.Capabilities().Require(request); capErr != nil {
+			return fmt.Errorf("%s: %w", id, capErr)
+		}
+
+		return nil
 	}
 
-	return nil
+	provider, err := registry.Get(id)
+	if err != nil {
+		return err
+	}
+	if err := provider.Capabilities().Require(request); err != nil {
+		return fmt.Errorf("%s: %w", id, err)
+	}
+
+	return fmt.Errorf("%w: %s candidates are not served by this command yet", cloud.ErrUnsupportedCapability, provider.ID())
 }

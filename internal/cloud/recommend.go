@@ -179,8 +179,14 @@ func (r *RecommendRequest) validateBounds() error {
 	if r.MaxPrice != nil && r.MaxPrice.IsZero() {
 		return fmt.Errorf("%w: max_price_per_hour must be positive", ErrInvalidArgument)
 	}
-	if r.Top < 1 || r.Top > MaxTop {
-		return fmt.Errorf("%w: top must be between 1 and %d", ErrInvalidArgument, MaxTop)
+	// Only the lower bound is a domain rule: a result set of nothing is not a
+	// recommendation. MaxTop is a property of the MCP surface, which publishes it
+	// in its input schema, and is enforced there. Enforcing it here made the CLI
+	// reject `--top 100` on the v2 path while the v1 path — the same flag on the
+	// same command, selected by an unrelated flag — accepted it, and `recommend`
+	// shipped without an upper bound.
+	if r.Top < 1 {
+		return fmt.Errorf("%w: top must be at least 1", ErrInvalidArgument)
 	}
 
 	return nil
@@ -236,6 +242,28 @@ func (r *RecommendRequest) CapabilityNeeds() CapabilityRequest {
 	return CapabilityRequest{OS: r.OS, Architecture: r.Architecture, Needed: needed}
 }
 
+// capabilityNeeds is everything a provider must support to answer this
+// recommendation: the policy's own needs, plus whatever the Query actually
+// issued requires.
+//
+// Neither half covers the other. The request knows the workload needs published
+// risk, which no field of the Query expresses; the Query knows which sort key
+// and placement fields are set, which the request does not carry. Gating on the
+// request alone — as this did — meant a sort or placement field added to
+// RecommendRequest would reach the provider ungated, and providers that cannot
+// honour it answer with status ok rather than refusing.
+func (r *RecommendRequest) capabilityNeeds() CapabilityRequest {
+	needs := r.CapabilityNeeds()
+
+	for _, capability := range r.Query().CapabilityNeeds().Needed {
+		if !slices.Contains(needs.Needed, capability) {
+			needs.Needed = append(needs.Needed, capability)
+		}
+	}
+
+	return needs
+}
+
 // Query is the acquisition request this recommendation needs. Ordering is left
 // to the ranker, which applies the canonical policy over every candidate.
 func (r *RecommendRequest) Query() *Query {
@@ -263,7 +291,7 @@ func Recommend(ctx context.Context, provider Provider, request *RecommendRequest
 	if request.Cloud != provider.ID() {
 		return nil, fmt.Errorf("%w: request names %q but provider is %q", ErrInvalidArgument, request.Cloud, provider.ID())
 	}
-	if err := provider.Capabilities().Require(request.CapabilityNeeds()); err != nil {
+	if err := provider.Capabilities().Require(request.capabilityNeeds()); err != nil {
 		return nil, fmt.Errorf("%s: %w", provider.ID(), err)
 	}
 
@@ -274,10 +302,21 @@ func Recommend(ctx context.Context, provider Provider, request *RecommendRequest
 	if validationErr := validateResultProvider(provider.ID(), &result); validationErr != nil {
 		return nil, validationErr
 	}
-
 	ranked, err := rank(request, result.Candidates)
 	if err != nil {
 		return nil, err
+	}
+
+	// The v2 success contract declares data_source.sources with minItems 1, so a
+	// result that cannot say where its data came from cannot be published as a
+	// recommendation. Refusing here keeps that promise without forcing a provider
+	// to fail construction over provenance its v1 surfaces never publish.
+	//
+	// After ranking, so a provider that simply matched nothing still reports the
+	// more specific NO_CANDIDATES rather than a provenance failure.
+	if len(result.Sources) == 0 {
+		return nil, fmt.Errorf("%w: %s cannot describe the provenance of this answer",
+			ErrDataUnavailable, provider.ID())
 	}
 
 	return newRecommendReport(request, &result, ranked)

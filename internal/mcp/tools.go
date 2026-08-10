@@ -210,18 +210,29 @@ type params struct { //nolint:govet
 // validate rejects arguments that parsed but cannot express a filter. cast
 // routes a quoted argument through ParseFloat, which accepts "NaN" and "Inf"
 // without an error, and neither survives the guards that consume these values:
-// query() reads a non-finite or negative ceiling as "no ceiling", and
-// filterByInterruption drops every candidate against a NaN rate. Both answer a
-// request the caller cannot distinguish from a real one, so the argument is
-// refused here, before acquisition. Zero stays the v1 "no ceiling" value.
+// query() reads a non-finite ceiling as "no ceiling", and filterByInterruption
+// drops every candidate against a NaN rate. Both answer a request the caller
+// cannot distinguish from a real one, so they are refused here, before
+// acquisition. Zero stays the v1 "no ceiling" value.
+//
+// A negative interruption rate is deliberately NOT refused. The published v1
+// input schema sets no minimum on max_interruption_rate, and v1 answered a
+// negative rate through filterByInterruption's "<= 0" arm — as "no filter",
+// returning the full result set. Rejecting it here would turn a call that
+// worked into an error, so the tolerance is preserved and the arm below is
+// what still implements it.
+//
+// max_price_per_hour is asymmetric on purpose: v1 compared every price against
+// a negative ceiling and excluded all of them, so the call already returned
+// nothing. Refusing it says so instead of publishing an empty set as an answer.
 func (p *params) validate() error {
 	if math.IsNaN(p.maxPrice) || math.IsInf(p.maxPrice, 0) || p.maxPrice < 0 {
 		return fmt.Errorf("%w: %s must be a finite, non-negative USD instance-hour price"+
 			" (zero requests no ceiling)", cloud.ErrInvalidArgument, argMaxPricePerHour)
 	}
-	if math.IsNaN(p.maxInterruption) || math.IsInf(p.maxInterruption, 0) || p.maxInterruption < 0 {
-		return fmt.Errorf("%w: %s must be a finite, non-negative percentage"+
-			" (zero or %d and above requests no filter)",
+	if math.IsNaN(p.maxInterruption) || math.IsInf(p.maxInterruption, 0) {
+		return fmt.Errorf("%w: %s must be a finite percentage"+
+			" (zero or below, or %d and above, requests no filter)",
 			cloud.ErrInvalidArgument, argMaxInterruptionRate, maxInterruption)
 	}
 
@@ -367,7 +378,7 @@ func buildResponse(candidates []cloud.Candidate, startTime time.Time, mode cloud
 		fieldResults: results,
 		fieldMetadata: map[string]any{
 			fieldTotalResults:    len(results),
-			fieldRegionsSearched: slices.Sorted(maps.Keys(regionsSearched)),
+			fieldRegionsSearched: regionNames(regionsSearched),
 			fieldQueryTimeMS:     time.Since(startTime).Milliseconds(),
 			fieldDataSource:      dataSourceFor(mode),
 			fieldDataFreshness:   freshnessFor(mode),

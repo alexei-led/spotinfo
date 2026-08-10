@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"maps"
 	"os"
 	"testing"
 
@@ -613,6 +614,28 @@ func TestRecommendValidatesBeforeAcquisition(t *testing.T) {
 	}
 
 	assert.Equal(t, 0, provider.callCount(), "no invalid request may reach the provider")
+}
+
+// The MCP tool publishes "maximum": 50 for top, and the host does not validate a
+// request against the advertised schema, so the tool enforces its own contract.
+// The neutral request deliberately does not: the CLI has no upper bound on --top
+// and must not inherit one from the MCP surface.
+func TestRecommendEnforcesItsPublishedTopCeiling(t *testing.T) {
+	provider := offlineProvider(cloud.ProviderGCP, gcpCandidates())
+	registry := newStubRegistry(provider)
+
+	base := map[string]any{"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8}
+
+	rejected := maps.Clone(base)
+	rejected["top"] = cloud.MaxTop + 1
+	result := callRecommend(t, registry, rejected)
+	require.True(t, result.IsError, "top above the published ceiling must be refused")
+	assert.Equal(t, cloud.CodeInvalidArgument, decodeError(t, result).Code)
+	assert.Equal(t, 0, provider.callCount(), "an out-of-contract request must not reach the provider")
+
+	accepted := maps.Clone(base)
+	accepted["top"] = cloud.MaxTop
+	assert.False(t, callRecommend(t, registry, accepted).IsError, "the ceiling itself is valid")
 }
 
 // A binary composed without a registry reports it rather than panicking.

@@ -67,9 +67,12 @@ const (
 	ArchitectureARM64 Architecture = "arm64"
 )
 
-// ParseArchitecture accepts only a reviewed architecture value.
+// ParseArchitecture accepts only a reviewed architecture value. Case is folded,
+// matching ParseProviderID and ParseOperatingSystem: one request carries all
+// three, and accepting --cloud AWS and --os LINUX while rejecting
+// --architecture X86_64 is an asymmetry no caller can predict.
 func ParseArchitecture(value string) (Architecture, error) {
-	switch architecture := Architecture(strings.TrimSpace(value)); architecture {
+	switch architecture := Architecture(strings.ToLower(strings.TrimSpace(value))); architecture {
 	case ArchitectureX8664, ArchitectureARM64:
 		return architecture, nil
 	default:

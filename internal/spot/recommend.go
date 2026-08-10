@@ -117,6 +117,13 @@ func LoadEmbeddedArchitectureLookup() (*ArchitectureLookup, error) {
 		return nil, fmt.Errorf("read embedded architecture snapshot: %w", err)
 	}
 
+	// Verified against its sidecar manifest first, like the advisor and price
+	// payloads: a snapshot that drifted from the hash this binary publishes as
+	// its provenance must not be parsed and served.
+	if err := verifyEmbeddedPayload(architectureManifest, architectureManifestFile, contents); err != nil {
+		return nil, err
+	}
+
 	return parseArchitectureSnapshot(contents)
 }
 

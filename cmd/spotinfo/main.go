@@ -161,9 +161,17 @@ func newProviderRegistry(client *spot.Client) (*providers.Registry, error) {
 		providers.Registration{
 			ID: cloud.ProviderAWS,
 			Build: func() (cloud.Provider, error) {
+				// An unreadable architecture snapshot disables architecture
+				// filtering, not the whole provider: the v1 surfaces publish no
+				// architecture and must keep answering. The provider stops
+				// declaring architectures, so a request that filters on one is
+				// refused instead of being answered from an unclassified catalogue.
 				lookup, err := spot.LoadEmbeddedArchitectureLookup()
 				if err != nil {
-					return nil, fmt.Errorf("load aws architecture data: %w", err)
+					log.Warn("aws architecture snapshot is unusable; architecture filtering is disabled",
+						slog.Any("error", err))
+
+					return awsprovider.New(client, nil)
 				}
 
 				return awsprovider.New(client, lookup)

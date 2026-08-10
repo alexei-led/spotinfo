@@ -187,22 +187,46 @@ func execAWSRecommendV1(ctx *cli.Context, execCtx context.Context, provider clou
 	return writeJSONReport(report, output)
 }
 
+// foldVocabulary normalises a fixed-vocabulary flag value the way the neutral
+// parsers in internal/cloud do, so the same spelling is accepted on both the v1
+// and v2 recommend paths. It normalises only; an unrecognised value is still
+// rejected downstream, with that path's own error type.
+func foldVocabulary(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+// validBudget reports whether a --budget value can act as a price ceiling.
+//
+// Both non-finite values have to be named explicitly. NaN fails every
+// comparison, so `budget <= 0` alone lets it through as a set-but-unenforceable
+// ceiling; +Inf passes that check too and would be stored raw as a ceiling no
+// price can exceed, making the filter a silent no-op. The same three terms guard
+// --price in main.go — see the comment there.
+func validBudget(budget float64) bool {
+	return !math.IsNaN(budget) && !math.IsInf(budget, 0) && budget > 0
+}
+
 // legacyRecommendationOptions builds and validates the v1 constraint set.
 func legacyRecommendationOptions(ctx *cli.Context, workload cloud.Workload) (*spot.RecommendationOptions, error) {
 	budget := ctx.Float64(flagBudget)
 	// NaN fails every comparison, so `budget <= 0` alone would let it through as
-	// a set-but-unenforceable ceiling.
-	if ctx.IsSet(flagBudget) && (math.IsNaN(budget) || budget <= 0) {
+	// a set-but-unenforceable ceiling. +Inf passes it too, and would be stored raw
+	// as a ceiling nothing can exceed, making the filter a silent no-op.
+	if ctx.IsSet(flagBudget) && !validBudget(budget) {
 		return nil, fmt.Errorf("%w: budget must be a positive USD instance-hour price", spot.ErrInvalidRecommendationInput)
 	}
 	if ctx.IsSet(flagTop) && ctx.Int(flagTop) <= 0 {
 		return nil, fmt.Errorf("%w: top must be positive", spot.ErrInvalidRecommendationInput)
 	}
 
+	// Folded here, not in the validator: the v1 vocabulary is lowercase, and the
+	// neutral parsers on the v2 path fold the same values. Casting the raw flag
+	// straight through made `--architecture X86_64` and `--os LINUX` fail on this
+	// path alone, while `--cloud AWS` was accepted on both.
 	opts := &spot.RecommendationOptions{
-		Architecture: spot.Architecture(ctx.String(flagArchitecture)),
+		Architecture: spot.Architecture(foldVocabulary(ctx.String(flagArchitecture))),
 		Instance:     machineFilter(ctx),
-		OS:           lineageString(ctx, flagOS),
+		OS:           foldVocabulary(lineageString(ctx, flagOS)),
 		CPU:          lineageInt(ctx, flagCPU, "vcpu"),
 		Memory:       lineageInt(ctx, flagMemory, "memory-gib"),
 		Budget:       budget,
@@ -269,11 +293,8 @@ func neutralRecommendRequest(ctx *cli.Context, id cloud.ProviderID, workload clo
 		return nil, err
 	}
 
-	// NaN is not caught by `budget <= 0` — every comparison against it is false,
-	// so an unchecked NaN would skip both this guard and the conversion below and
-	// silently drop the caller's price ceiling.
 	budget := ctx.Float64(flagBudget)
-	if ctx.IsSet(flagBudget) && (math.IsNaN(budget) || budget <= 0) {
+	if ctx.IsSet(flagBudget) && !validBudget(budget) {
 		return nil, fmt.Errorf("%w: budget must be a positive USD machine-hour price", cloud.ErrInvalidArgument)
 	}
 

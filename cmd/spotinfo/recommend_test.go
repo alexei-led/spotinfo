@@ -186,6 +186,13 @@ func TestRecommendCommandRejectsInvalidInputsBeforeFetching(t *testing.T) {
 		{"invalid os", recommendArgs("--os", "darwin")},
 		{"invalid output", recommendArgs("--output", "csv")},
 		{"invalid budget", recommendArgs("--budget", "0")},
+		{"negative budget", recommendArgs("--budget", "-1")},
+		// NaN and +Inf both survive a bare `budget <= 0`. Without the explicit
+		// terms they reached a downstream converter instead of this guard, and
+		// +Inf would otherwise be stored raw as a ceiling nothing can exceed.
+		{"nan budget", recommendArgs("--budget", "NaN")},
+		{"inf budget", recommendArgs("--budget", "Inf")},
+		{"negative inf budget", recommendArgs("--budget", "-Inf")},
 		{"invalid top", recommendArgs("--top", "0")},
 		{"mixed all and explicit regions", recommendArgs("--region", "all", "--region", "us-east-1")},
 		{"empty region", recommendArgs("--region", "")},

@@ -320,3 +320,28 @@ func TestQueryRejectsWhatTheProviderCannotAnswer(t *testing.T) {
 	_, err := provider.Query(context.Background(), nil)
 	require.ErrorIs(t, err, cloud.ErrInvalidArgument)
 }
+
+// GCP publishes neither interruption risk nor placement scores. Asking it to
+// order by either, or to score placements, used to come back as candidates with
+// status ok — silently unsorted and unscored — because candidateComparator
+// returned nil for those keys and Placement was never read.
+func TestQueryRefusesRiskAndPlacementInsteadOfIgnoringThem(t *testing.T) {
+	t.Parallel()
+
+	provider := newTestProvider(t)
+
+	for name, query := range map[string]*cloud.Query{
+		"sort by risk":            {OS: cloud.OSLinux, Sort: cloud.SortOrder{Key: cloud.SortByRisk}},
+		"sort by placement score": {OS: cloud.OSLinux, Sort: cloud.SortOrder{Key: cloud.SortByPlacementScore}},
+		"placement requested":     {OS: cloud.OSLinux, Placement: cloud.PlacementRequest{Enabled: true}},
+		"minimum placement score": {OS: cloud.OSLinux, Placement: cloud.PlacementRequest{MinScore: 5}},
+		"zone detail":             {OS: cloud.OSLinux, Placement: cloud.PlacementRequest{SingleZone: true}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := provider.Query(context.Background(), query)
+			require.ErrorIs(t, err, cloud.ErrUnsupportedCapability)
+		})
+	}
+}

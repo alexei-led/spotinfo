@@ -423,6 +423,12 @@ chmod +x /path/to/spotinfo
 
 **Solution:** Use `spotinfo recommend --cloud gcp` with `--workload cost` (the default on GCP). The root query command is AWS-only.
 
+`--architecture`, `--cpu` and `--memory` are required on `recommend`, so the full command is:
+
+```bash
+spotinfo recommend --cloud gcp --architecture x86_64 --cpu 2 --memory 4
+```
+
 ### "gcp: unsupported capability: os windows" (`UNSUPPORTED_CAPABILITY`)
 
 **Cause:** `--os windows` on `--cloud gcp`. GCP Spot VMs are served with Linux pricing only.
@@ -447,6 +453,12 @@ chmod +x /path/to/spotinfo
 
 **Solution:** Use `spotinfo recommend --cloud azure` with `--workload cost` (the default on Azure). The
 root query command is AWS-only.
+
+`--architecture`, `--cpu` and `--memory` are required on `recommend`, so the full command is:
+
+```bash
+spotinfo recommend --cloud azure --architecture x86_64 --cpu 2 --memory 4
+```
 
 ### "azure: unsupported capability: os windows" (`UNSUPPORTED_CAPABILITY`)
 

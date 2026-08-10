@@ -138,9 +138,14 @@ update-price: check-deps
 # here. Coverage floors and reviewed provenance stay hand-curated: regenerating
 # a floor from the data that just arrived would ratchet the gate into always
 # passing.
+#
+# REFRESH_MANIFESTS, not UPDATE_GOLDEN: this gate rewrites and passes, while the
+# CLI and MCP contract goldens rewrite and fail. One shared name meant an ambient
+# UPDATE_GOLDEN=1 turned verify-data into a rubber stamp that re-blessed whatever
+# data was on disk and exited 0.
 refresh-manifests:
 	@echo "Refreshing snapshot manifests..."
-	@UPDATE_GOLDEN=1 go test ./internal/spot/ -run TestEmbeddedSnapshotManifests -count=1
+	@REFRESH_MANIFESTS=1 go test ./internal/spot/ -run TestEmbeddedSnapshotManifests -count=1
 
 # Rebuilds the committed GCP catalogue from the pages its approved source
 # contract names. It needs no credentials, writes nothing until every gate
@@ -163,13 +168,17 @@ update-azure-data:
 # reviewed floor. The architecture snapshot additionally validates its review
 # metadata and fail-closed coverage of every Advisor family, so a feed refresh
 # surfaces families that require a manual reviewed snapshot update.
+#
+# Every line clears the regeneration switches. A gate that rewrites the thing it
+# is checking is not a gate, and inheriting either variable from the environment
+# is enough to make this target pass on data no reviewer accepted.
 verify-data:
 	@echo "Verifying embedded data, snapshot manifests and reviewed architecture coverage..."
-	@go test ./internal/snapshot/ -count=1
-	@go test ./internal/spot/ -run '$(DATA_GATE_TESTS)' -count=1
-	@go test ./internal/providers/gcp/ -count=1
-	@go test ./internal/providers/azure/ -count=1
-	@go test ./cmd/update-gcp-data/ ./cmd/update-azure-data/ -count=1
+	@REFRESH_MANIFESTS= UPDATE_GOLDEN= go test ./internal/snapshot/ -count=1
+	@REFRESH_MANIFESTS= UPDATE_GOLDEN= go test ./internal/spot/ -run '$(DATA_GATE_TESTS)' -count=1
+	@REFRESH_MANIFESTS= UPDATE_GOLDEN= go test ./internal/providers/gcp/ -count=1
+	@REFRESH_MANIFESTS= UPDATE_GOLDEN= go test ./internal/providers/azure/ -count=1
+	@REFRESH_MANIFESTS= UPDATE_GOLDEN= go test ./cmd/update-gcp-data/ ./cmd/update-azure-data/ -count=1
 
 # Package-boundary gate. Checks the declared layer direction and module
 # metadata in .archfit.yaml; it is not a data-correctness or test substitute.

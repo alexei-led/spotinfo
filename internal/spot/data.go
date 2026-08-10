@@ -152,6 +152,10 @@ func parseAdvisorResponse(body []byte) (*advisorData, error) {
 
 // loadEmbeddedAdvisorData loads embedded advisor data as fallback.
 func loadEmbeddedAdvisorData() (*advisorData, error) {
+	if err := advisorPayloadVerified(); err != nil {
+		return nil, err
+	}
+
 	var result advisorData
 	err := json.Unmarshal([]byte(embeddedSpotData), &result)
 	if err != nil {
@@ -239,6 +243,10 @@ func parsePricingResponse(body []byte) (*rawPriceData, error) {
 
 // loadEmbeddedPricingData loads embedded pricing data as fallback.
 func loadEmbeddedPricingData() (*rawPriceData, error) {
+	if err := pricePayloadVerified(); err != nil {
+		return nil, err
+	}
+
 	var result rawPriceData
 	err := json.Unmarshal([]byte(embeddedPriceData), &result)
 	if err != nil {

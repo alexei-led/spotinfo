@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -111,6 +112,39 @@ func TestStubAWSCapabilitiesMatchTheAdapter(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, provider.Capabilities(), awsCapabilities(),
 		"CLI tests must gate against the real AWS capabilities")
+}
+
+// failingRegistry fails the test if the root command asks it for anything.
+type failingRegistry struct{ t *testing.T }
+
+func (r failingRegistry) Get(id cloud.ProviderID) (cloud.Provider, error) {
+	r.t.Helper()
+	r.t.Fatalf("the root query command must not build the %s provider", id)
+
+	return nil, errRegistryConsulted
+}
+
+var errRegistryConsulted = errors.New("registry consulted")
+
+// The root query command acquires through the legacy client and never queries a
+// provider, so it must not build one. Building it made the command inherit
+// inputs it never reads — the architecture snapshot and the sidecar manifests —
+// and an unparsable one failed `spotinfo --type t3.micro` with
+// SNAPSHOT_UNAVAILABLE while the advisor and price data were intact.
+func TestRootQueryDoesNotBuildTheAWSProvider(t *testing.T) {
+	t.Parallel()
+
+	var captured *cli.Context
+	app := newSpotinfoApp(
+		func(ctx *cli.Context) error { captured = ctx; return nil },
+		func(*cli.Context) error { return nil },
+	)
+	require.NoError(t, app.Run([]string{appName, "--type", "t3.micro"}))
+	require.NotNil(t, captured)
+
+	// Production flag parsing and the production capability request, against a
+	// registry that fails the test if it is consulted.
+	require.NoError(t, resolveAWSProvider(captured, failingRegistry{t: t}, rootCapabilityRequest(captured)))
 }
 
 // runRoot and runRecommend drive the production app assembly. The mock client

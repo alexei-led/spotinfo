@@ -63,6 +63,33 @@ func TestParseArchitectureAndOperatingSystem(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidArgument)
 }
 
+// All three vocabulary parsers fold case. One request carries a cloud, an OS and
+// an architecture, so accepting "AWS" and "LINUX" while rejecting "X86_64" is an
+// asymmetry no caller can predict.
+func TestVocabularyParsersFoldCaseConsistently(t *testing.T) {
+	t.Parallel()
+
+	provider, err := ParseProviderID("AWS")
+	require.NoError(t, err)
+	assert.Equal(t, ProviderAWS, provider)
+
+	instanceOS, err := ParseOperatingSystem("LINUX")
+	require.NoError(t, err)
+	assert.Equal(t, OSLinux, instanceOS)
+
+	for input, want := range map[string]Architecture{
+		"X86_64": ArchitectureX8664,
+		"x86_64": ArchitectureX8664,
+		"ARM64":  ArchitectureARM64,
+		"Arm64":  ArchitectureARM64,
+		" arm64": ArchitectureARM64,
+	} {
+		architecture, err := ParseArchitecture(input)
+		require.NoErrorf(t, err, "architecture %q must parse like its lowercase form", input)
+		assert.Equal(t, want, architecture)
+	}
+}
+
 func TestCapabilitiesGateUnsupportedRequests(t *testing.T) {
 	t.Parallel()
 

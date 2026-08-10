@@ -77,13 +77,20 @@ func embeddedSnapshots() []embeddedSnapshot {
 // must have a valid manifest, hash to what that manifest declares, and still
 // cover its reviewed floor.
 //
-// Run with UPDATE_GOLDEN=1 after refreshing a feed to rewrite the hashes and
+// Run with REFRESH_MANIFESTS=1 after refreshing a feed to rewrite the hashes and
 // fetch times. Coverage floors stay hand-curated on purpose — regenerating them
 // from whatever just downloaded would ratchet the gate to always pass.
+//
+// The variable is deliberately NOT UPDATE_GOLDEN, which the CLI and MCP contract
+// goldens use. Those rewrite and then fail the run, so a regeneration can never
+// be reported as a pass; this gate rewrites and passes, because rewriting is the
+// point of `make refresh-manifests`. Sharing one name meant that regenerating a
+// contract golden — or any ambient UPDATE_GOLDEN=1 — silently re-blessed whatever
+// data files happened to be on disk and reported success.
 func TestEmbeddedSnapshotManifests(t *testing.T) {
 	t.Parallel()
 
-	regenerate := os.Getenv("UPDATE_GOLDEN") == "1"
+	regenerate := os.Getenv("REFRESH_MANIFESTS") == "1"
 	snapshots := embeddedSnapshots()
 	manifests := make([]*snapshot.Manifest, len(snapshots))
 
@@ -113,7 +120,7 @@ func TestEmbeddedSnapshotManifests(t *testing.T) {
 				}
 
 				require.NoError(t, manifest.VerifyPayload(payload),
-					"%s and its data file were not updated together; refresh with UPDATE_GOLDEN=1", embedded.manifest)
+					"%s and its data file were not updated together; refresh with `make refresh-manifests`", embedded.manifest)
 				require.NoError(t, snapshot.ValidateCoverage(embedded.coverage(t), manifest.MinRecords))
 
 				manifests[i] = manifest
@@ -128,6 +135,60 @@ func TestEmbeddedSnapshotManifests(t *testing.T) {
 	for i, embedded := range snapshots {
 		require.NoError(t, snapshot.WriteManifest(filepath.Join("data", embedded.manifest), manifests[i]))
 	}
+}
+
+// The shipped binary must refuse a payload that drifted from its manifest, not
+// just `make verify-data`. GCP and Azure disable themselves on this; AWS used to
+// serve the bytes anyway while publishing the manifest hash as their provenance.
+func TestVerifyEmbeddedPayloadFailsClosedOnDrift(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		load     func() (*snapshot.Manifest, error)
+		file     string
+		payload  []byte
+		tampered bool
+	}{
+		{name: "advisor matches", load: advisorManifest, file: advisorManifestFile, payload: []byte(embeddedSpotData)},
+		{name: "price matches", load: priceManifest, file: priceManifestFile, payload: []byte(embeddedPriceData)},
+		{
+			name: "advisor drifted", load: advisorManifest, file: advisorManifestFile,
+			payload: append([]byte(embeddedSpotData), ' '), tampered: true,
+		},
+		{
+			name: "price drifted", load: priceManifest, file: priceManifestFile,
+			payload: append([]byte(embeddedPriceData), ' '), tampered: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := verifyEmbeddedPayload(tc.load, tc.file, tc.payload)
+			if tc.tampered {
+				require.Error(t, err, "a payload that does not hash to its manifest must be refused")
+				assert.Contains(t, err.Error(), tc.file)
+
+				return
+			}
+
+			require.NoError(t, err)
+		})
+	}
+}
+
+// Every committed AWS payload is verified on the path that loads it, so a drift
+// cannot reach a caller.
+func TestEmbeddedLoadersVerifyTheirPayloads(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, advisorPayloadVerified())
+	require.NoError(t, pricePayloadVerified())
+
+	_, err := LoadEmbeddedArchitectureLookup()
+	require.NoError(t, err)
 }
 
 func TestEmbeddedManifestsDescribeTheirOwnFiles(t *testing.T) {

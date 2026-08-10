@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"math"
 	"slices"
@@ -54,24 +55,36 @@ type Provider struct {
 	sources       []cloud.SourceRef
 }
 
-// New builds the AWS provider. Both collaborators are required: without the
-// architecture lookup the provider would have to guess architectures, and
-// guessing is what the reviewed snapshot exists to prevent.
+// New builds the AWS provider. Only the client is required.
 //
-// Provenance is read once, from the committed sidecar manifests. A build that
-// cannot describe where its data came from fails here, so the registry disables
-// AWS rather than serving answers with invented provenance.
+// The architecture lookup and the sidecar provenance are optional, and each
+// degrades exactly the one thing it feeds rather than disabling the provider.
+// Requiring them meant the v1 surfaces — the root query command and the two
+// golden-pinned MCP tools, none of which publish an architecture or a source
+// list — failed with SNAPSHOT_UNAVAILABLE because a file they never read could
+// not be parsed.
+//
+// Nothing is guessed when either is missing, which is the promise that matters:
+// without the lookup the provider stops declaring CapabilityMachineArchitecture,
+// so an architecture-filtering request is refused with UNSUPPORTED_CAPABILITY
+// instead of being answered from instance names; without provenance the v2
+// report is refused by the recommender, whose contract requires at least one
+// source, rather than published with an invented one.
 func New(client savingsClient, architectures architectureLookup) (*Provider, error) {
 	if client == nil {
 		return nil, errors.New("aws provider requires a spot client")
 	}
-	if architectures == nil {
-		return nil, errors.New("aws provider requires an architecture lookup")
-	}
 
 	sources, err := spot.EmbeddedSourceRefs()
 	if err != nil {
-		return nil, fmt.Errorf("aws snapshot provenance: %w", err)
+		slog.Warn("aws snapshot provenance is unreadable; v2 recommendations are disabled",
+			slog.Any("error", err))
+
+		sources = nil
+	}
+
+	if architectures == nil {
+		slog.Warn("aws architecture snapshot is unavailable; architecture filtering is disabled")
 	}
 
 	return &Provider{client: client, architectures: architectures, sources: sources}, nil
@@ -80,11 +93,27 @@ func New(client savingsClient, architectures architectureLookup) (*Provider, err
 // ID identifies this provider.
 func (p *Provider) ID() cloud.ProviderID { return cloud.ProviderAWS }
 
-// Capabilities reports what the AWS feeds can answer. OnDemandPrice is false:
-// the feeds publish a savings percentage against on-demand, not the on-demand
-// price itself, and deriving one from the other would invent a figure AWS never
-// published.
+// Capabilities reports what this provider can answer. It is the package
+// declaration minus anything its optional inputs did not supply: with no
+// architecture snapshot the architecture list is dropped, so a request that
+// filters by architecture is refused with UNSUPPORTED_CAPABILITY rather than
+// answered from an unclassified catalogue, which would silently match nothing.
 func (p *Provider) Capabilities() cloud.Capabilities {
+	capabilities := Capabilities()
+	if p.architectures == nil {
+		capabilities.Architectures = nil
+	}
+
+	return capabilities
+}
+
+// Capabilities is the same declaration without a constructed provider. What AWS
+// can answer is a property of the feeds, not of one instance, and the root query
+// command needs the answer before — and without — building a provider it never
+// queries: it acquires through the legacy client. Gating that command on a full
+// build made an unreadable architecture manifest, which it never reads, fail
+// `spotinfo --type t3.micro`.
+func Capabilities() cloud.Capabilities {
 	return cloud.Capabilities{
 		OperatingSystems: []cloud.OperatingSystem{cloud.OSLinux, cloud.OSWindows},
 		Architectures:    []cloud.Architecture{cloud.ArchitectureX8664, cloud.ArchitectureARM64},
@@ -118,16 +147,36 @@ func (p *Provider) Query(ctx context.Context, query *cloud.Query) (cloud.Result,
 		return cloud.Result{}, fmt.Errorf("aws candidate acquisition: %w", err)
 	}
 
+	// A row that cannot be converted is dropped, not fatal. The only conversion
+	// that fails is a price outside the fixed-point scale, which is a defect in
+	// one feed row; returning an error here turned that into an empty response for
+	// the whole catalogue, on a surface whose v1 contract is golden-pinned and
+	// where v1 simply rendered whatever the feed published. The count is logged
+	// because a silent drop and a genuinely absent instance look identical.
 	candidates := make([]cloud.Candidate, 0, len(advices))
+	dropped := 0
+
 	for i := range advices {
 		candidate, err := p.toCandidate(&advices[i], query.OS)
 		if err != nil {
-			return cloud.Result{}, err
+			dropped++
+
+			slog.Warn("dropping an AWS candidate that cannot be represented",
+				slog.String("instance", advices[i].Instance),
+				slog.String("region", advices[i].Region),
+				slog.Any("error", err))
+
+			continue
 		}
 		if !accepts(&candidate, query) {
 			continue
 		}
 		candidates = append(candidates, candidate)
+	}
+
+	if dropped > 0 {
+		slog.Warn("some AWS candidates were unrepresentable and are missing from this answer",
+			slog.Int("dropped", dropped), slog.Int("returned", len(candidates)))
 	}
 
 	return cloud.Result{
@@ -221,8 +270,12 @@ func (p *Provider) toCandidate(advice *spot.Advice, instanceOS cloud.OperatingSy
 		VCPU:      advice.Info.Cores,
 		MemoryGiB: memoryGiB(advice.Info.RAM),
 	}
-	if architecture, known := p.architectures.ArchitectureForInstance(advice.Instance); known {
-		machine.Architecture = cloud.Architecture(architecture)
+	// Left unclassified without a lookup. Capabilities() drops the architecture
+	// list in that state, so no request that filters on it reaches here.
+	if p.architectures != nil {
+		if architecture, known := p.architectures.ArchitectureForInstance(advice.Instance); known {
+			machine.Architecture = cloud.Architecture(architecture)
+		}
 	}
 
 	spotPrice, err := priceObservation(advice.Price, location, advice.LivePrice)

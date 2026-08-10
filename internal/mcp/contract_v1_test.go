@@ -61,6 +61,79 @@ func TestFindSpotInstancesResponseMatchesRecordedV1Contract(t *testing.T) {
 	assertGolden(t, "find-spot-instances-v1-response.json", append(encoded, '\n'))
 }
 
+// A zero-result query is part of the v1 contract too. regions_searched is built
+// from a map, and the obvious spelling — slices.Sorted(maps.Keys(...)) — returns
+// a nil slice for an empty map, which marshals as null rather than []. The
+// recorded response golden only covers a non-empty search, so this pins the
+// empty case directly against the raw JSON.
+func TestFindSpotInstancesEmptyResultKeepsV1ArrayShape(t *testing.T) {
+	t.Parallel()
+
+	_, registry := awsStub()
+
+	result, err := NewFindSpotInstancesTool(registry, slog.Default()).
+		Handle(t.Context(), mcp.CallToolRequest{})
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+	require.Len(t, result.Content, 1)
+
+	text, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+
+	assert.Contains(t, text.Text, `"regions_searched":[]`,
+		"an empty search must publish [], not null, as v1 did")
+	assert.NotContains(t, text.Text, `"regions_searched":null`)
+
+	var response map[string]any
+	require.NoError(t, json.Unmarshal([]byte(text.Text), &response))
+
+	metadata, ok := response[fieldMetadata].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, []any{}, metadata[fieldRegionsSearched])
+	assert.InDelta(t, 0.0, metadata[fieldTotalResults], 0)
+	assert.Equal(t, []any{}, response[fieldResults], "results was already an array and must stay one")
+}
+
+// v1 answered a negative max_interruption_rate as "no filter" and returned the
+// full result set, and the published input schema sets no minimum on the field.
+// Refusing it before acquisition would turn a working call into an error.
+func TestFindSpotInstancesNegativeInterruptionRateKeepsV1NoFilter(t *testing.T) {
+	t.Parallel()
+
+	candidates := buildCandidates(
+		testCandidate{
+			Region: "us-east-1", Machine: "m6i.large", Price: 0.0416, Savings: 72,
+			RiskLabel: "<5%", RiskMin: 0, RiskMax: 5, VCPU: 2, MemoryGiB: 8,
+		},
+		testCandidate{
+			Region: "us-west-2", Machine: "m5.xlarge", Price: 0.1234, Savings: 65,
+			RiskLabel: "15-20%", RiskMin: 15, RiskMax: 20, VCPU: 4, MemoryGiB: 16,
+		},
+	)
+
+	for _, rate := range []float64{-1, 0} {
+		_, registry := awsStub(candidates...)
+
+		result, err := NewFindSpotInstancesTool(registry, slog.Default()).Handle(t.Context(),
+			mcp.CallToolRequest{Params: mcp.CallToolParams{
+				Arguments: map[string]any{argMaxInterruptionRate: rate},
+			}})
+		require.NoError(t, err)
+		require.False(t, result.IsError, "rate %v must not be refused; v1 read it as no filter", rate)
+
+		text, ok := result.Content[0].(mcp.TextContent)
+		require.True(t, ok)
+
+		var response map[string]any
+		require.NoError(t, json.Unmarshal([]byte(text.Text), &response))
+
+		results, ok := response[fieldResults].([]any)
+		require.True(t, ok)
+		assert.Len(t, results, len(candidates),
+			"rate %v must leave every candidate in the result set", rate)
+	}
+}
+
 // normalizeV1Response removes the only two sources of run-to-run variation:
 // elapsed query time, and the region list built from a map. Nothing else is
 // reordered — results carry the sort order the v1 contract promises.

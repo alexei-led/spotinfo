@@ -185,6 +185,20 @@ func baseRequest() *RecommendRequest {
 	}
 }
 
+// MaxTop is a property of the MCP surface, which publishes it in its input
+// schema, not of the neutral request. Enforcing it here made the CLI reject
+// `--top 100` on the v2 path while accepting it on the v1 path — the same flag
+// on the same command, chosen by an unrelated flag — on a command that shipped
+// with no upper bound.
+func TestValidateAcceptsATopAboveTheMCPCeiling(t *testing.T) {
+	t.Parallel()
+
+	request := baseRequest()
+	request.Top = MaxTop + 1
+
+	require.NoError(t, request.Validate())
+}
+
 func machines(report *RecommendReport) []string {
 	names := make([]string, 0, len(report.Recommendations))
 	for _, recommendation := range report.Recommendations {
@@ -209,7 +223,7 @@ func TestValidateRejectsEveryInputOutsideTheContract(t *testing.T) {
 		{name: "zero vcpu", mutate: func(r *RecommendRequest) { r.MinVCPU = 0 }, want: "min_vcpu"},
 		{name: "zero memory", mutate: func(r *RecommendRequest) { r.MinMemoryGiB = 0 }, want: "min_memory_gib"},
 		{name: "zero top", mutate: func(r *RecommendRequest) { r.Top = 0 }, want: "top must be"},
-		{name: "top above the ceiling", mutate: func(r *RecommendRequest) { r.Top = MaxTop + 1 }, want: "top must be"},
+		{name: "negative top", mutate: func(r *RecommendRequest) { r.Top = -1 }, want: "top must be"},
 		{name: "zero budget", mutate: func(r *RecommendRequest) { r.MaxPrice = &Money{} }, want: "max_price_per_hour"},
 		{name: "no regions", mutate: func(r *RecommendRequest) { r.Regions = nil }, want: "at least one region"},
 		{name: "empty region", mutate: func(r *RecommendRequest) { r.Regions = []Region{" "} }, want: "region must not be empty"},
