@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -201,4 +202,49 @@ func stageManifestWithFloor(t *testing.T, sourceDir string, floor snapshot.Cover
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, manifestFile), staged, 0o600))
 
 	return dataDir
+}
+
+// Google's CDN can hold two price generations at once and alternate between
+// them: on 2026-08-10 five consecutive requests to the Spot page returned
+// n2-standard-4 at $0.101336 three times and $0.111472 twice. A single read
+// cannot tell which generation it got, and the four contracted pages are read
+// seconds apart, so a run could pair a Spot price from one generation with an
+// On-Demand price from another. Reading twice is what makes that visible.
+func TestFetchRefusesAPageThatChangesBetweenTwoReads(t *testing.T) {
+	t.Parallel()
+
+	var reads atomic.Int32
+	unstable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Alternates, exactly as the live page did.
+		if reads.Add(1)%2 == 1 {
+			_, _ = io.WriteString(w, "n2-standard-4 $0.101336")
+
+			return
+		}
+		_, _ = io.WriteString(w, "n2-standard-4 $0.111472")
+	}))
+	defer unstable.Close()
+
+	_, err := fetch(t.Context(), contractedHostClient(), unstable.URL)
+	require.ErrorIs(t, err, ErrSourceUnstable)
+	assert.Contains(t, err.Error(), "mid-rollout")
+	assert.Equal(t, int32(2), reads.Load(), "the page must be read twice, not once")
+}
+
+// A stable page still costs two reads and returns the body unchanged, so the
+// gate above cannot be satisfied by never reading twice.
+func TestFetchAcceptsAPageThatIsStableAcrossTwoReads(t *testing.T) {
+	t.Parallel()
+
+	var reads atomic.Int32
+	stable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reads.Add(1)
+		_, _ = io.WriteString(w, "n2-standard-4 $0.111472")
+	}))
+	defer stable.Close()
+
+	body, err := fetch(t.Context(), contractedHostClient(), stable.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "n2-standard-4 $0.111472", string(body))
+	assert.Equal(t, int32(2), reads.Load())
 }

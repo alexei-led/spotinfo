@@ -24,12 +24,35 @@ User-Agent, alternated between price generations:
 A refresh during a rollout like this is a coin flip, and worse: the four
 contracted pages are fetched seconds apart, so one run can mix generations
 across pages and publish a Spot price from one against an On-Demand price from
-another — a savings figure computed from two different days. **Do not refresh
-while the page is unstable.** Re-fetch the Spot page a few times and compare
-hashes before running the updater; if they differ, wait.
+another — a savings figure computed from two different days. Nothing downstream
+can catch that: both numbers are well-formed, in range, and from the contracted
+URL.
 
-The `general-purpose` page was stable across the same window, so instability is
-per-page and must be checked per-page.
+**The updater now reads every contracted page twice and refuses when the copies
+differ**, reporting both hashes:
+
+```
+update-gcp-data: gcp pricing page is not serving a stable document:
+https://cloud.google.com/spot-vms/pricing returned 8ab59daf3daf... then
+5bd608f1d6c6.... The source is mid-rollout; a snapshot taken now can mix price
+generations across pages. Retry when the hashes agree
+```
+
+That is a wait-and-retry condition, not a parser problem. Two identical reads do
+not prove the source is stable; two different ones prove it is not, which is the
+case worth refusing. The `general-purpose` page was stable across the same
+window, so instability is per-page and every page is checked.
+
+**Why the Azure updater does not do the same.** Azure's prices come from the
+Retail Prices API, a versioned endpoint whose rows carry `effectiveStartDate`
+and `effectiveEndDate`, and the parser already resolves all 55 regions against
+one instant so a sweep cannot mix an expiring rate with its replacement. Its
+Learn size pages supply vCPU, memory and architecture — values that change when
+a size is introduced, not on a pricing rollout, and a page that came back short
+trips the per-region coverage floor. Doubling 26 page fetches to guard a risk
+that has not been observed there would be machinery without evidence. If an
+Azure refresh ever produces a spec contradiction or an unexplained price jump,
+this is the first thing to add.
 
 **2. `c3d-standard-8` has a genuinely wrong memory cell.** The on-demand page
 lists it as 8 vCPU / 16 GiB in every fetch, while `c3d-standard-4` is 16 GiB and

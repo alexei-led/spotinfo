@@ -208,7 +208,51 @@ func fetchSources(ctx context.Context, contract *snapshot.SourceContract) ([]pag
 	return pages, nil
 }
 
+// ErrSourceUnstable reports a page that served different bytes to two requests
+// made moments apart.
+var ErrSourceUnstable = errors.New("gcp pricing page is not serving a stable document")
+
+// fetch reads a contracted page, then reads it again and refuses to proceed if
+// the two copies differ.
+//
+// Google serves these pages from a CDN that can hold more than one generation at
+// once. On 2026-08-10 five consecutive requests to the Spot page — same URL, same
+// User-Agent, seconds apart — alternated between two price generations:
+// n2-standard-4 came back at $0.101336 three times and $0.111472 twice, and every
+// response had a different hash. The general-purpose page was stable in the same
+// window, so this is per-page and cannot be assumed away for any of them.
+//
+// A single read cannot tell which generation it got, and the four contracted
+// pages are read seconds apart, so one run can pair a Spot price from one
+// generation with an On-Demand price from another and publish a savings figure
+// computed across two different days. Nothing downstream can detect that: both
+// numbers are well-formed, in range, and from the contracted URL.
+//
+// So the second read is the gate. Two identical copies do not prove the source is
+// stable, but two different ones prove it is not, and that is the case worth
+// refusing. It costs one extra download per page on a weekly build-time job and
+// nothing at all at runtime.
 func fetch(ctx context.Context, client *http.Client, url string) ([]byte, error) {
+	first, err := fetchWithRetry(ctx, client, url)
+	if err != nil {
+		return nil, err
+	}
+
+	second, err := fetchWithRetry(ctx, client, url)
+	if err != nil {
+		return nil, err
+	}
+
+	if firstSum, secondSum := snapshot.SHA256Hex(first), snapshot.SHA256Hex(second); firstSum != secondSum {
+		return nil, fmt.Errorf("%w: %s returned %s then %s. The source is mid-rollout; "+
+			"a snapshot taken now can mix price generations across pages. Retry when the hashes agree",
+			ErrSourceUnstable, url, firstSum, secondSum)
+	}
+
+	return first, nil
+}
+
+func fetchWithRetry(ctx context.Context, client *http.Client, url string) ([]byte, error) {
 	var lastErr error
 
 	for attempt := 1; attempt <= fetchAttempts; attempt++ {

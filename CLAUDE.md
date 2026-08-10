@@ -303,14 +303,23 @@ leaves the reviewed snapshot untouched. Both are normally run by their weekly wo
 A refresh failure is usually the source changing shape, not a flake. `docs/data-sources.md`
 tables every expected error and what it means.
 
-**Before refreshing GCP, check the page is stable.** On 2026-08-10 the Spot page served
-two price generations at random — five consecutive requests to the same URL alternated
-between `n2-standard-4` at $0.101336 and $0.111472, every response a different hash.
-Fetch it two or three times and compare; if the bytes differ, wait. A run during a
-rollout can mix generations *across* the four contracted pages, publishing a Spot price
-from one day against an On-Demand price from another. A machine whose two pages disagree
-about its shape is excluded and reported, not fatal — but that is a defence against one
-stale cell, not against an unstable source.
+**The GCP updater reads every contracted page twice and refuses when the two copies
+differ.** Google serves these pages from a CDN that can hold more than one generation at
+once: on 2026-08-10 five consecutive requests to the Spot page — same URL, same
+User-Agent, seconds apart — alternated between `n2-standard-4` at $0.101336 and
+$0.111472, every response a different hash, while the general-purpose page was stable in
+the same window. A single read cannot tell which generation it got, and the four pages
+are read seconds apart, so one run could pair a Spot price from one generation with an
+On-Demand price from another and publish a savings figure spanning two days. Nothing
+downstream can catch that — both numbers are well-formed, in range, and from the
+contracted URL. Two identical reads do not prove stability; two different ones disprove
+it, and that is the case worth refusing (`ErrSourceUnstable`). It costs one extra
+download per page on a weekly build-time job and nothing at runtime.
+
+`update-gcp-data: gcp pricing page is not serving a stable document` therefore means
+wait and retry, not investigate the parser. A machine whose two pages disagree about its
+*shape* is a different failure — excluded and reported, not fatal — and that is a
+defence against one stale cell, not against an unstable source.
 
 Two rules matter most:
 

@@ -15,27 +15,38 @@
     {
       "url": "https://cloud.google.com/spot-vms/pricing",
       "source_type": "official-server-rendered-html",
-      "data_kinds": ["spot-price", "machine-spec"]
+      "data_kinds": [
+        "spot-price",
+        "machine-spec"
+      ]
     },
     {
       "url": "https://cloud.google.com/products/compute/pricing/general-purpose",
       "source_type": "official-server-rendered-html",
-      "data_kinds": ["on-demand-price"]
+      "data_kinds": [
+        "on-demand-price"
+      ]
     },
     {
       "url": "https://cloud.google.com/products/compute/pricing/compute-optimized",
       "source_type": "official-server-rendered-html",
-      "data_kinds": ["on-demand-price"]
+      "data_kinds": [
+        "on-demand-price"
+      ]
     },
     {
       "url": "https://cloud.google.com/products/compute/pricing/memory-optimized",
       "source_type": "official-server-rendered-html",
-      "data_kinds": ["on-demand-price"]
+      "data_kinds": [
+        "on-demand-price"
+      ]
     },
     {
       "url": "https://docs.cloud.google.com/compute/docs/machine-resource",
       "source_type": "official-server-rendered-html",
-      "data_kinds": ["architecture"]
+      "data_kinds": [
+        "architecture"
+      ]
     }
   ],
   "expected_fields": [
@@ -51,10 +62,20 @@
   ],
   "support": {
     "risk_status": "unavailable",
-    "operating_systems": ["linux"],
-    "architectures": ["x86_64", "arm64"],
-    "price_classes": ["spot", "on-demand"],
-    "regions": ["us-central1"],
+    "operating_systems": [
+      "linux"
+    ],
+    "architectures": [
+      "x86_64",
+      "arm64"
+    ],
+    "price_classes": [
+      "spot",
+      "on-demand"
+    ],
+    "regions": [
+      "us-central1"
+    ],
     "machine_series": [
       "c2",
       "c3",
@@ -88,6 +109,7 @@
     "A contracted header cell is renamed, which empties the parse and trips the coverage floor.",
     "A published price needs more fractional digits than the contracted maximum.",
     "A Spot machine has no paired On-Demand price, leaving a savings figure with no denominator.",
-    "Redistribution of the factual pricing figures can no longer be approved."
+    "Redistribution of the factual pricing figures can no longer be approved.",
+    "The pages stop serving a stable document: two reads moments apart return different bytes, which means a rollout is in flight and a snapshot could mix price generations across pages."
   ]
 }

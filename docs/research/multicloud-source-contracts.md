@@ -390,6 +390,12 @@ when any of these hold:
 - Redistribution cannot be approved, or the terms are unclear.
 - The source stops rendering its data without JavaScript, or moves to an
   authenticated endpoint.
+- The source stops serving a stable document. Two reads moments apart returning
+  different bytes means a rollout is in flight, and the contracted pages are
+  fetched seconds apart, so a snapshot taken then can pair a Spot price from one
+  generation with an On-Demand price from another. Observed on the GCP Spot page
+  on 2026-08-10; the updater now reads every page twice and refuses on a
+  mismatch.
 - Coverage, size, or precision falls outside the contracted thresholds.
 - A price row cannot be resolved to exactly one machine, region, OS, and class.
 - Risk data would have to be inferred rather than published.
