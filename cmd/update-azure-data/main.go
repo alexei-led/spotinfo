@@ -13,7 +13,6 @@ package main
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"errors"
 	"flag"
@@ -29,6 +28,7 @@ import (
 
 	"spotinfo/internal/cloud"
 	"spotinfo/internal/providers/azure"
+	"spotinfo/internal/reproducible"
 	"spotinfo/internal/snapshot"
 )
 
@@ -56,15 +56,6 @@ const (
 	fetchAttempts = 3
 	// retryPause is the wait between attempts.
 	retryPause = 3 * time.Second
-
-	// gzipLevel is maximum compression: the payload is committed once a week and
-	// read on every process start.
-	gzipLevel = gzip.BestCompression
-	// gzipOSUnknown is the only gzip OS byte that does not depend on the host
-	// that produced the file. Go's writer already defaults to it and to a zero
-	// modification time, so setting the header changes no byte today; it is
-	// written explicitly so reproducibility does not rest on that default.
-	gzipOSUnknown = 255
 
 	// pricesPerMachine is the two classes every catalogue row publishes.
 	pricesPerMachine = 2
@@ -437,22 +428,7 @@ func encodePayload(catalog *azure.Catalog) ([]byte, error) {
 		return nil, err
 	}
 
-	var buffer bytes.Buffer
-
-	writer, err := gzip.NewWriterLevel(&buffer, gzipLevel)
-	if err != nil {
-		return nil, fmt.Errorf("create gzip writer: %w", err)
-	}
-	writer.Header = gzip.Header{OS: gzipOSUnknown}
-
-	if _, err := writer.Write(data); err != nil {
-		return nil, fmt.Errorf("compress catalogue: %w", err)
-	}
-	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("finish catalogue: %w", err)
-	}
-
-	return buffer.Bytes(), nil
+	return reproducible.Compress(data)
 }
 
 func newManifest(contract *snapshot.SourceContract, catalog *azure.Catalog, payload []byte,

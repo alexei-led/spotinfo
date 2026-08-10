@@ -74,6 +74,19 @@ modules:
     subdomain: core
     # high: it tracks two AWS feeds that a weekly workflow refreshes.
     volatility: high
+  reproducible:
+    paths:
+      - internal/reproducible/**
+    public:
+      - internal/reproducible
+    layer: domain
+    owner: spotinfo
+    role: core
+    subdomain: generic
+    # low: it encodes a committed payload reproducibly. Build-time only — the
+    # shipped binary does not link it — and its shape changes only if the gzip
+    # reproducibility rule does.
+    volatility: low
   providers:
     paths:
       - internal/providers/*.go
