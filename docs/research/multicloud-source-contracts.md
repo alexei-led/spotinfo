@@ -174,7 +174,7 @@ Binary-size delta for the whole GCP slice: **+127,056 bytes** (parser, provider,
 `advice.capacityHistory` is authenticated and beta. It is deferred to optional
 live enrichment and is not part of the offline contract.
 
-### Azure — approved, eight regions
+### Azure — approved, 55 regions
 
 Two sources, because neither answers the whole question:
 
@@ -236,7 +236,7 @@ The rule: a price is the interval where `effectiveStartDate <= at` and
 `effectiveEndDate` is absent or not before `at`.
 
 - `at` is an **argument**, set once per run, not `time.Now()` inside the parser. All
-  eight regions resolve against the same instant, so a sweep cannot mix an expiring
+  all 55 regions resolve against the same instant, so a sweep cannot mix an expiring
   price with its replacement, and a rebuild is reproducible from its inputs.
 - No interval in effect: the machine is dropped and reported. An expired price is
   worse than a missing one.
@@ -282,10 +282,65 @@ not two units. Both are accepted as gibibytes; a third label fails.
   | x86_64 (21) | `basv2` `bsv2` `dadsv5` `dalsv6` `dasv5` `dasv6` `ddsv5` `ddv5` `dsv5` `dsv6` `dv5` `easv5` `easv6` `edsv5` `edv5` `esv5` `esv6` `ev5` `falsv6` `fasv6` `fsv2` |
   | arm64 (5) | `bpsv2` `dpdsv5` `dpsv5` `dpsv6` `epsv5` |
 
-- **Sizes**: 224 priced in all eight regions (37 arm64). 225 sizes are documented by
+- **Sizes**: 224 priced in all 55 regions (37 arm64). 225 sizes are documented by
   the contracted pages; one is not offered as Spot.
 - **OS**: Linux only. **Classes**: Spot and On-Demand, always paired.
 - **Risk**: `unavailable`, permanently for the offline path.
+
+#### 5a. Widening from eight regions to 55 (2026-08-10)
+
+The Retail Prices API is anonymous and publishes every region, so the original
+eight were a review decision, not a limit of the source. Widening cost nothing
+but a rebuild.
+
+The region list is **derived from the coverage floor, not chosen**. 67 regions
+publish Spot meters for the 26 contracted series; the join against the Learn size
+pages — which is what actually decides whether a machine can be published, since
+vCPU, memory and architecture come from there — leaves 59 candidates, of which 55
+carry at least `min_machines`. The four that fall short are excluded rather than
+accommodated:
+
+| region | machines after the join | |
+| --- | --- | --- |
+| `chilecentral` | 177 | below the floor |
+| `malaysiawest` | 166 | below the floor |
+| `indiasouthcentral` | 157 | below the floor |
+| `denmarkeast` | 157 | below the floor |
+
+`min_machines` stays **180**. Lowering it to 157 would have admitted all four and
+is exactly the move the per-region floor exists to prevent: a floor is a floor,
+and a short region is a signal, not a rounding error.
+
+Also excluded, deliberately:
+
+- **`usgov*`** (`usgovvirginia` 194, `usgovarizona` 194, `usgovtexas` 185) clear
+  the floor. Azure Government is a separate sovereign cloud with its own endpoints
+  and access rules, and quoting its rates beside commercial ones invites a
+  comparison that does not hold. A reviewer can add them as a deliberate act.
+- **AT&T edge zones** (`attatlanta1`, `attdallas1`, 60 each), `southwestus` (54),
+  `eastus3` (8), `portland` (1) — all far below the floor.
+- **`Global`**, which carries no machine of a contracted series.
+
+Two thresholds moved with the surface:
+
+| threshold | before | after | basis |
+| --- | --- | --- | --- |
+| `min_regions` | 8 | 55 | every approved region must be present |
+| `max_compressed_bytes` | 65536 | 131072 | 88,272 observed; ~1.5x headroom |
+| `min_machines` | 180 | **180** | unchanged |
+
+The manifest's reviewed coverage floor was raised from 8 to 55 regions in the same
+act. The updater refuses a manifest floor below the contract minimum, which is why
+this cannot happen by accident — and raising a floor is safe in a way lowering one
+is not.
+
+Snapshot cost: 16,515 → **88,272 compressed bytes** (+71,757, 0.17% of the binary)
+for 6.9x the regions. The immediate payoff is that the cheapest 4 vCPU / 16 GiB
+x86_64 machine is `centralindia` at 0.020513 USD/hour, against `uksouth` at
+0.027894 — 26% cheaper, and invisible before this change.
+
+`parser_version` is **not** bumped: no parser was widened, and no source contract
+gained a URL. Only the region list the same parser is asked for changed.
 
 #### 6. Redistribution
 
@@ -308,7 +363,7 @@ owner must confirm it before release, exactly as for the GCP contract.
 | `min_regions` | 8 | Every approved region must be present |
 | `min_machines` | 180 | ~80% of the 224 observed. Applied **per region**, so one region returning short fails instead of being absorbed by seven healthy ones |
 | `max_compressed_bytes` | 65536 | 16,515 observed; ~4x headroom |
-| `max_fractional_digits` | 6 | Maximum observed across all eight regions. `cloud.MoneyScale` is 9, so there are three digits of real headroom before `ErrPrecisionLoss` |
+| `max_fractional_digits` | 6 | Maximum observed across all 55 regions. `cloud.MoneyScale` is 9, so there are three digits of real headroom before `ErrPrecisionLoss` |
 
 Binary-size delta: **+119,536 bytes** (0.20%). `golang.org/x/net/html` was already a
 dependency from the GCP slice.

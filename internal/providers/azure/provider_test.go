@@ -139,7 +139,10 @@ func TestQueryFiltersTheCommittedCatalogue(t *testing.T) {
 	t.Run("uncovered region yields no candidates", func(t *testing.T) {
 		t.Parallel()
 
-		result, err := provider.Query(ctx, &cloud.Query{OS: cloud.OSLinux, Regions: []cloud.Region{"francecentral"}})
+		// A name Azure does not publish, deliberately. This used to be a real
+		// region the snapshot merely did not carry, and it broke the day that
+		// region was added — testing the roster instead of the behaviour.
+		result, err := provider.Query(ctx, &cloud.Query{OS: cloud.OSLinux, Regions: []cloud.Region{"nowhere-north-1"}})
 
 		require.NoError(t, err, "a region outside the snapshot is an empty answer, not a malformed request")
 		assert.Empty(t, result.Candidates)

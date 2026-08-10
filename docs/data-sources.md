@@ -113,7 +113,7 @@
 - **Approved contract**: `internal/providers/azure/data/source-contract.json`. All 27 source
   URLs are enumerated there; no other document is read.
 - **Embedded snapshot**: `internal/providers/azure/data/catalog.json.gz` plus its sidecar
-  `manifest.json`. 224 VM sizes across 26 series in 8 regions, 3,584 prices, 16,515 compressed
+  `manifest.json`. 224 VM sizes across 26 series in 55 regions, 11,204 prices, 88,272 compressed
   bytes.
 - **Update frequency**: weekly, through the `update-azure-data` workflow.
 - **Region coverage**: `australiaeast`, `eastus`, `eastus2`, `northeurope`, `southeastasia`,
@@ -143,7 +143,7 @@
 
 **Effective-date rule.** The API returns every interval it knows about, including expired ones
 and ones not yet in force. A price is the interval where `effectiveStartDate <= now` and
-`effectiveEndDate` is absent or in the future. All eight regions resolve against one instant, so
+`effectiveEndDate` is absent or in the future. All 55 regions resolve against one instant, so
 a sweep cannot mix an expiring price with its replacement. A machine with no interval in effect
 is dropped and reported; a machine with two different prices in effect fails the refresh.
 

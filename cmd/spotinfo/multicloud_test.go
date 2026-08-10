@@ -249,7 +249,7 @@ func TestAzureRecommendationHonoursAnExplicitRegion(t *testing.T) {
 func TestAzureRecommendationNeverSubstitutesAnUncoveredRegion(t *testing.T) {
 	_, err := runMulticloudRecommend(t,
 		"--cloud", "azure", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
-		"--region", "francecentral", "--output", "json")
+		"--region", "nowhere-north-1", "--output", "json")
 
 	require.ErrorIs(t, err, cloud.ErrNoCandidates)
 }
@@ -430,7 +430,7 @@ func TestMCPRecommendReportsTheDocumentedAzureRefusals(t *testing.T) {
 		"uncovered region": {
 			args: map[string]any{
 				"cloud": "azure", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
-				"regions": []any{"francecentral"},
+				"regions": []any{"nowhere-north-1"},
 			},
 			code: "NO_CANDIDATES",
 		},

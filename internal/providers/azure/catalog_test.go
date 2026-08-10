@@ -214,7 +214,7 @@ func TestVerifyRejectsEveryOutOfContractCatalogue(t *testing.T) {
 			contract.Support.Architectures = []cloud.Architecture{cloud.ArchitectureX8664}
 		},
 		"unapproved region": func(c *Catalog, _ *snapshot.SourceContract) {
-			c.Regions[0].ID = "francecentral"
+			c.Regions[0].ID = "nowhere-north-1"
 		},
 		"missing specification": func(c *Catalog, _ *snapshot.SourceContract) {
 			c.Machines = c.Machines[1:]

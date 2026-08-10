@@ -29,7 +29,7 @@ AWS is the full surface. GCP and Azure are served offline from committed price s
 - AWS v1 ranks by price, interruption, and right-sizing excess. v2 ranks by price and right-sizing excess, then region and machine; unavailable risk is never compared. Savings is displayed but never used to rank
 - Repeated recommendation regions are deduplicated; `all` cannot be mixed with explicit regions
 - **GCP support** (offline, no credentials): `spotinfo recommend --cloud gcp` serves `us-central1`, Linux, x86\_64 and arm64; risk is `unavailable` unless `--live-risk` fetches it, and only `--workload cost` applies either way. The root query command is AWS-only.
-- **Azure support** (offline, no credentials): `spotinfo recommend --cloud azure` serves eight regions,
+- **Azure support** (offline, no credentials): `spotinfo recommend --cloud azure` serves 55 regions,
   Linux, x86\_64 and arm64; risk is always `unavailable`, so only `--workload cost` applies. The root
   query command is AWS-only.
 
@@ -156,7 +156,7 @@ spotinfo recommend --architecture x86_64 --cpu 2 --memory 8 --os windows --outpu
 # GCP Spot VMs (offline, no credentials, us-central1, cost workload)
 spotinfo recommend --cloud gcp --architecture x86_64 --cpu 2 --memory 8 --top 3
 
-# Azure Spot VMs (offline, no credentials, eight regions, cost workload)
+# Azure Spot VMs (offline, no credentials, 55 regions, cost workload)
 spotinfo recommend --cloud azure --architecture arm64 --cpu 2 --memory 8 --top 3
 ```
 
