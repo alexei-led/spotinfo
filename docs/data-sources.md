@@ -38,7 +38,16 @@ https://cloud.google.com/spot-vms/pricing returned 8ab59daf3daf... then
 generations across pages. Retry when the hashes agree
 ```
 
-That is a wait-and-retry condition, not a parser problem. Two identical reads do
+That is a wait-and-retry condition, not a parser problem, and the updater says
+so with its exit code: **75** (`EX_TEMPFAIL`) for an unstable source, 1 for
+everything else. The weekly workflow branches on it and reports the run as a
+notice rather than a failure, skipping the verify, test and pull-request steps.
+Collapsing the two would turn this job red most weeks for a reason nobody must
+act on, and the one week it goes red for a real reason is the week it is ignored.
+
+Neither `go run` nor `make` preserves that code — the first collapses every
+non-zero exit to 1, the second reports its own 2 — so the workflow builds the
+binary and invokes it directly. Two identical reads do
 not prove the source is stable; two different ones prove it is not, which is the
 case worth refusing. The `general-purpose` page was stable across the same
 window, so instability is per-page and every page is checked.

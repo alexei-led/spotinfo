@@ -52,11 +52,31 @@ const (
 	retryPause = 3 * time.Second
 )
 
+// exitSourceUnstable is returned when the source served two different documents
+// moments apart. It is separated from the ordinary failure code so the weekly
+// workflow can report "waited" rather than "broke".
+//
+// Both are refusals to write, and both are correct. But they ask for opposite
+// things from whoever reads the run: an unstable source needs nothing but time,
+// while a renamed header or a coverage shortfall needs a person. A scheduled job
+// that goes red every week for a reason nobody must act on is a job people stop
+// reading, and the one week it goes red for a real reason is the week it is
+// ignored.
+const exitSourceUnstable = 75
+
 func main() {
-	if err := refresh(); err != nil {
-		fmt.Fprintf(os.Stderr, "update-gcp-data: %v\n", err)
-		os.Exit(1)
+	err := refresh()
+	if err == nil {
+		return
 	}
+
+	fmt.Fprintf(os.Stderr, "update-gcp-data: %v\n", err)
+
+	if errors.Is(err, ErrSourceUnstable) {
+		os.Exit(exitSourceUnstable)
+	}
+
+	os.Exit(1)
 }
 
 func refresh() error {
@@ -83,6 +103,18 @@ func run(ctx context.Context, dataDir string) error {
 		return err
 	}
 
+	return assemble(dataDir, contract, region, pages)
+}
+
+// assemble turns fetched pages into a committed snapshot: join, encode, read the
+// reviewed floor, build the manifest, verify, and only then write.
+//
+// Split from run so the ordering can be tested without reaching Google. The
+// order is the whole point — the manifest must hash the payload that is actually
+// written, the floor must come from the manifest on disk rather than the
+// contract minimum, and nothing may be written before verification passes. None
+// of that is visible to a unit test of any single step.
+func assemble(dataDir string, contract *snapshot.SourceContract, region cloud.Region, pages []page) error {
 	// Reported before the error check, never silent: an excluded machine is a
 	// source defect worth looking at, and a contract failure caused by dropped
 	// rows is unreadable without them.

@@ -376,3 +376,102 @@ func TestPriceAPIBaseIsTheContractedRESTSource(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://prices.azure.com/api/retail/prices", base)
 }
+
+// assembleFixture is the smallest input that satisfies minimalContract: one
+// series, one region, one size priced in both classes, plus the provenance the
+// manifest gate demands of every source.
+func assembleFixture(t *testing.T) (*snapshot.SourceContract, []azure.RetailItem, []snapshot.Source, time.Time) {
+	t.Helper()
+
+	at := time.Date(2026, time.August, 10, 7, 0, 0, 0, time.UTC)
+	opened := time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC)
+
+	contract := minimalContract()
+	contract.Thresholds.MaxCompressedBytes = 65536
+	contract.Sources = []snapshot.ContractSource{{
+		URL:       "https://prices.azure.com/api/retail/prices",
+		DataKinds: []snapshot.DataKind{snapshot.DataKindSpotPrice, snapshot.DataKindOnDemandPrice},
+	}}
+
+	items := []azure.RetailItem{
+		retailItem("D2s v5 Spot", "0.041200", opened, nil),
+		retailItem("D2s v5", "0.096000", opened, nil),
+	}
+
+	sources := []snapshot.Source{{
+		URL:       contract.Sources[0].URL,
+		FetchedAt: at,
+		SHA256:    snapshot.SHA256Hex([]byte("retail prices response")),
+	}}
+
+	return contract, items, sources, at
+}
+
+// The write path end to end: join, encode, read the floor, build the manifest,
+// verify, write. A wiring mistake no single-step test can see — a manifest built
+// from a different payload than the one written, a floor read from the contract
+// when a manifest exists, a write before verification — fails here.
+func TestAssembleWritesASnapshotAndItsManifest(t *testing.T) {
+	t.Parallel()
+
+	contract, items, sources, at := assembleFixture(t)
+	dir := t.TempDir()
+
+	require.NoError(t, assemble(dir, contract, testSeries(), items, sources, at))
+
+	payload, err := os.ReadFile(filepath.Join(dir, payloadFile))
+	require.NoError(t, err)
+	require.NotEmpty(t, payload)
+
+	raw, err := os.ReadFile(filepath.Join(dir, manifestFile))
+	require.NoError(t, err)
+
+	manifest, err := snapshot.ParseManifest(raw)
+	require.NoError(t, err)
+	assert.Equal(t, snapshot.SHA256Hex(payload), manifest.Payload.SHA256,
+		"the manifest must hash the payload that was actually written")
+	assert.NotEmpty(t, manifest.Sources)
+}
+
+// A refresh that fails a gate leaves the previous snapshot untouched. This is
+// the property the whole design rests on: a bad refresh costs a red run, never
+// the committed data.
+func TestAssembleWritesNothingWhenAGateFails(t *testing.T) {
+	t.Parallel()
+
+	contract, items, sources, at := assembleFixture(t)
+	contract.Thresholds.MinMachines = 10_000 // more than the fixture carries
+	dir := t.TempDir()
+
+	require.Error(t, assemble(dir, contract, testSeries(), items, sources, at))
+
+	for _, name := range []string{payloadFile, manifestFile} {
+		_, err := os.Stat(filepath.Join(dir, name))
+		assert.ErrorIs(t, err, os.ErrNotExist, "%s must not exist: a failed refresh writes nothing", name)
+	}
+}
+
+// The reviewed floor comes from the manifest on disk, not the contract minimum.
+// Seeding from the contract whenever the manifest is merely unreadable would let
+// a reviewer's raised floor be discarded by a green run.
+func TestAssembleKeepsTheReviewedFloorFromTheManifest(t *testing.T) {
+	t.Parallel()
+
+	contract, items, sources, at := assembleFixture(t)
+	dir := t.TempDir()
+
+	require.NoError(t, assemble(dir, contract, testSeries(), items, sources, at))
+
+	raw, err := os.ReadFile(filepath.Join(dir, manifestFile))
+	require.NoError(t, err)
+	manifest, err := snapshot.ParseManifest(raw)
+	require.NoError(t, err)
+
+	manifest.MinRecords.Machines = 10_000
+	encoded, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, manifestFile), encoded, 0o600))
+
+	require.Error(t, assemble(dir, contract, testSeries(), items, sources, at),
+		"a raised floor must survive the next refresh")
+}

@@ -102,6 +102,21 @@ func run(ctx context.Context, dataDir string) error {
 		return err
 	}
 
+	return assemble(dataDir, contract, series, items, append(priceSources, specSources...), at) //nolint:gocritic // a new slice is intended.
+}
+
+// assemble turns fetched sources into a committed snapshot: join, encode, read
+// the reviewed floor, build the manifest, verify, and only then write.
+//
+// Split from run so the ordering can be tested without reaching the Retail
+// Prices API or Microsoft Learn. The order is the whole point — the manifest
+// must hash the payload that is actually written, the floor must come from the
+// manifest on disk rather than the contract minimum, and nothing may be written
+// before verification passes. None of that is visible to a unit test of any
+// single step.
+func assemble(dataDir string, contract *snapshot.SourceContract, series []azure.SeriesSpec,
+	items []azure.RetailItem, sources []snapshot.Source, at time.Time,
+) error {
 	catalog, err := buildCatalog(contract, series, items, at)
 	if err != nil {
 		return err
@@ -117,7 +132,6 @@ func run(ctx context.Context, dataDir string) error {
 		return err
 	}
 
-	sources := append(priceSources, specSources...) //nolint:gocritic // a new slice is intended.
 	manifest := newManifest(contract, catalog, payload, sources, floor)
 
 	if err := verify(contract, catalog, manifest, payload); err != nil {

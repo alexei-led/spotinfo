@@ -34,13 +34,39 @@ jobs:
       # reviewed floor. Google occasionally serves a partially rendered page;
       # the coverage floor is what turns that into a failed run rather than a
       # silently shrunken catalogue.
+      # Two refusals to write, both correct, asking opposite things of whoever
+      # reads the run. Exit 75 means Google is mid-rollout and served two
+      # different documents moments apart: nothing to fix, retry next week. Any
+      # other non-zero exit means a renamed header, a moved region selector, a
+      # price needing more precision than the contract allows, or coverage below
+      # the reviewed floor — all of which need a person. Collapsing the two would
+      # make this job red most weeks for a reason nobody must act on, and the one
+      # week it goes red for a real reason is the week it gets ignored.
       - name: Refresh catalogue
-        run: make update-gcp-data
+        id: refresh
+        run: |
+          # The binary directly, not `make`: `go run` collapses every non-zero
+          # exit to 1 and make reports its own 2, so exit 75 would never survive
+          # either wrapper.
+          go build -o .bin/update-gcp-data ./cmd/update-gcp-data
+          set +e
+          .bin/update-gcp-data
+          status=$?
+          set -e
+          if [ "$status" -eq 75 ]; then
+            echo "unstable=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::GCP pricing pages are mid-rollout and served different bytes to two reads. Nothing was written; the next scheduled run will retry."
+            exit 0
+          fi
+          exit "$status"
       - name: Verify embedded data, manifests and parser contracts
+        if: steps.refresh.outputs.unstable != 'true'
         run: make verify-data
       - name: Run tests
+        if: steps.refresh.outputs.unstable != 'true'
         run: go test ./... -count=1
       - name: Open or update pull request
+        if: steps.refresh.outputs.unstable != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

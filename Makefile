@@ -166,9 +166,17 @@ refresh-manifests:
 # contract names. It needs no credentials, writes nothing until every gate
 # passes, and leaves the reviewed snapshot untouched on failure. Not part of
 # build: refreshing data is always an explicit, reviewable step.
+# Built, not `go run`, so the binary exists for a caller that needs its exit
+# code. The updater exits 75 when Google is serving two different documents
+# moments apart, and the weekly workflow branches on that to report a wait
+# rather than a break. Neither `go run` nor make preserves that: `go run`
+# collapses every non-zero exit to 1, and make reports its own 2. The workflow
+# therefore invokes $(BIN_DIR)/update-gcp-data directly — see
+# .github/workflows/update-gcp-data.yaml.
 update-gcp-data:
 	@echo "Updating GCP catalogue from the contracted pricing pages..."
-	@go run ./cmd/update-gcp-data
+	@go build -o $(BIN_DIR)/update-gcp-data ./cmd/update-gcp-data
+	@$(BIN_DIR)/update-gcp-data
 
 # Rebuilds the committed Azure catalogue from the anonymous Retail Prices API
 # and the contracted Microsoft Learn size pages. Same rules as the GCP target:

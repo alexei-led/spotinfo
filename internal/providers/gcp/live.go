@@ -35,6 +35,10 @@ const (
 	// is the only channel that serves capacityHistory; there is no v1 form.
 	capacityHistoryEndpoint = "https://compute.googleapis.com/compute/beta/projects/%s/regions/%s/advice/capacityHistory"
 
+	// historyTypePreemption is the only history this tool asks for; the
+	// snapshot already carries prices.
+	historyTypePreemption = "PREEMPTION"
+
 	// riskSourceURL is what the published answer cites as its provenance.
 	riskSourceURL = "https://cloud.google.com/compute/docs/instances/spot#preemption-rate"
 
@@ -73,7 +77,33 @@ type LiveRiskConfig struct {
 	// ProjectID is required. It is never guessed from gcloud's active config:
 	// the call is billed to whatever project it names, and a tool that picks
 	// one silently can bill a project its user never mentioned.
+	// Endpoint overrides the advice API base, and Client overrides the
+	// authenticated transport. Both are injection points for tests, which is
+	// the only way the request shape and the response handling below get
+	// exercised without credentials and without reaching Google; production
+	// leaves them zero and gets the contracted endpoint over ADC. The AWS
+	// live-price and score providers carry the same seam for the same reason.
+	Client    *http.Client
 	ProjectID string
+	Endpoint  string
+}
+
+// endpoint returns the advice API URL template for this configuration.
+func (c *LiveRiskConfig) endpoint() string {
+	if c.Endpoint != "" {
+		return c.Endpoint
+	}
+
+	return capacityHistoryEndpoint
+}
+
+// transport returns the injected client, or the ADC one resolved on first use.
+func (c *LiveRiskConfig) transport() (*http.Client, error) {
+	if c.Client != nil {
+		return c.Client, nil
+	}
+
+	return httpClient()
 }
 
 // WithLiveRisk returns a provider that fetches preemption rates for the ranked
@@ -144,7 +174,7 @@ func (p *Provider) EnrichRisk(ctx context.Context, candidates []*cloud.Candidate
 		return ErrNoProject
 	}
 
-	client, err := httpClient()
+	client, err := p.liveRisk.transport()
 	if err != nil {
 		return err
 	}
@@ -208,14 +238,14 @@ func (p *Provider) preemptionRisk(ctx context.Context, client *http.Client,
 	var body capacityHistoryRequest
 	body.InstanceProperties.MachineType = machine
 	body.InstanceProperties.Scheduling.ProvisioningModel = "SPOT"
-	body.Types = []string{"PREEMPTION"}
+	body.Types = []string{historyTypePreemption}
 
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return cloud.RiskObservation{}, fmt.Errorf("encode capacity history request: %w", err)
 	}
 
-	url := fmt.Sprintf(capacityHistoryEndpoint, p.liveRisk.ProjectID, region)
+	url := fmt.Sprintf(p.liveRisk.endpoint(), p.liveRisk.ProjectID, region)
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(encoded))
 	if err != nil {

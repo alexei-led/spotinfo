@@ -317,7 +317,11 @@ it, and that is the case worth refusing (`ErrSourceUnstable`). It costs one extr
 download per page on a weekly build-time job and nothing at runtime.
 
 `update-gcp-data: gcp pricing page is not serving a stable document` therefore means
-wait and retry, not investigate the parser. A machine whose two pages disagree about its
+wait and retry, not investigate the parser — and the updater says so with **exit 75**
+(`EX_TEMPFAIL`) against 1 for every other failure. The weekly workflow branches on that
+code and reports a notice instead of a red run. Neither `go run` nor `make` preserves an
+exit code, so the workflow builds the binary and calls it directly; `make update-gcp-data`
+stays the human-facing command. A machine whose two pages disagree about its
 *shape* is a different failure — excluded and reported, not fatal — and that is a
 defence against one stale cell, not against an unstable source.
 

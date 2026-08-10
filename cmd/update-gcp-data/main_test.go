@@ -7,8 +7,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -247,4 +249,154 @@ func TestFetchAcceptsAPageThatIsStableAcrossTwoReads(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "n2-standard-4 $0.111472", string(body))
 	assert.Equal(t, int32(2), reads.Load())
+}
+
+// The weekly workflow branches on this code to report a wait rather than a
+// break, so it is part of the contract with that workflow, not an internal
+// detail. 75 is EX_TEMPFAIL from sysexits.h: a temporary failure, retry later.
+func TestUnstableSourceHasItsOwnExitCode(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, 75, exitSourceUnstable,
+		"the workflow greps for this exact code; changing it silently makes every "+
+			"mid-rollout week look like a broken parser")
+}
+
+// stageDataDir writes a data directory holding only the contract, with the
+// coverage floor lowered to what the committed fixtures carry. These tests are
+// about the order assemble does things in; each gate has its own test above.
+func stageDataDir(t *testing.T, machines int) (string, *snapshot.SourceContract) {
+	t.Helper()
+
+	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "providers", "gcp", "data", contractFile))
+	require.NoError(t, err)
+
+	var contract map[string]any
+	require.NoError(t, json.Unmarshal(raw, &contract))
+
+	thresholds, ok := contract["thresholds"].(map[string]any)
+	require.True(t, ok)
+	thresholds["min_machines"] = machines
+
+	// The fixtures carry three series, not the full approved set. Narrowing the
+	// contract keeps these tests about assemble's ordering; the series check
+	// itself is covered by the catalogue tests.
+	support, ok := contract["support"].(map[string]any)
+	require.True(t, ok)
+	support["machine_series"] = []string{"c4", "n1", "t2a"}
+
+	dir := t.TempDir()
+	encoded, err := json.Marshal(contract)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, contractFile), encoded, 0o600))
+
+	parsed, err := snapshot.ParseSourceContract(encoded)
+	require.NoError(t, err)
+
+	return dir, parsed
+}
+
+// fixturePages presents the committed parser fixtures as fetched pages, under
+// the contract's own approved URLs and carrying the provenance a real fetch
+// would. assemble builds the manifest from this, and refuses a source that is
+// unapproved, unhashed, or undated — so all three have to be right here.
+func fixturePages(t *testing.T, contract *snapshot.SourceContract) []page {
+	t.Helper()
+
+	fixtures := map[snapshot.DataKind]string{
+		snapshot.DataKindSpotPrice:     "spot-pricing.html",
+		snapshot.DataKindOnDemandPrice: "on-demand-pricing.html",
+	}
+
+	at := time.Date(2026, time.August, 10, 7, 0, 0, 0, time.UTC)
+
+	pages := make([]page, 0, len(contract.Sources))
+	for i := range contract.Sources {
+		source := &contract.Sources[i]
+
+		entry := page{url: source.URL, fetchedAt: at, kinds: source.DataKinds}
+		for kind, fixture := range fixtures {
+			if !slices.Contains(source.DataKinds, kind) {
+				continue
+			}
+
+			body, err := os.ReadFile(filepath.Join("testdata", fixture))
+			require.NoError(t, err)
+
+			entry.body, entry.sha256, entry.kinds = body, snapshot.SHA256Hex(body), []snapshot.DataKind{kind}
+
+			break
+		}
+
+		// A source with no fixture is the architecture reference, which the
+		// updater records as provenance without downloading: a human reads it,
+		// and a docs-site redirect must not fail a price refresh.
+		pages = append(pages, entry)
+	}
+
+	return pages
+}
+
+// The write path end to end: join, encode, read the floor, build the manifest,
+// verify, write. A wiring mistake no single-step test can see — a manifest built
+// from a different payload than the one written, a floor read from the contract
+// when a manifest exists, a write that happens before verification — fails here.
+func TestAssembleWritesASnapshotAndItsManifest(t *testing.T) {
+	t.Parallel()
+
+	dir, contract := stageDataDir(t, 1)
+	require.NoError(t, assemble(dir, contract, contract.Support.Regions[0], fixturePages(t, contract)))
+
+	payload, err := os.ReadFile(filepath.Join(dir, payloadFile))
+	require.NoError(t, err)
+	require.NotEmpty(t, payload)
+
+	raw, err := os.ReadFile(filepath.Join(dir, manifestFile))
+	require.NoError(t, err)
+
+	manifest, err := snapshot.ParseManifest(raw)
+	require.NoError(t, err)
+	assert.Equal(t, snapshot.SHA256Hex(payload), manifest.Payload.SHA256,
+		"the manifest must hash the payload that was actually written, not an earlier encoding")
+	assert.NotEmpty(t, manifest.Sources, "every answer must be able to say where it came from")
+}
+
+// A refresh that fails a gate leaves the previous snapshot untouched. This is
+// the property the whole design rests on: a bad refresh costs a red run, never
+// the committed data.
+func TestAssembleWritesNothingWhenAGateFails(t *testing.T) {
+	t.Parallel()
+
+	dir, contract := stageDataDir(t, 10_000) // more machines than the fixtures carry
+
+	require.Error(t, assemble(dir, contract, contract.Support.Regions[0], fixturePages(t, contract)))
+
+	for _, name := range []string{payloadFile, manifestFile} {
+		_, err := os.Stat(filepath.Join(dir, name))
+		assert.ErrorIs(t, err, os.ErrNotExist, "%s must not exist: a failed refresh writes nothing", name)
+	}
+}
+
+// The reviewed floor comes from the manifest on disk, not the contract minimum.
+// Seeding from the contract whenever the manifest is merely unreadable would let
+// a reviewer's raised floor be discarded by a green run.
+func TestAssembleKeepsTheReviewedFloorFromTheManifest(t *testing.T) {
+	t.Parallel()
+
+	dir, contract := stageDataDir(t, 1)
+	require.NoError(t, assemble(dir, contract, contract.Support.Regions[0], fixturePages(t, contract)))
+
+	raw, err := os.ReadFile(filepath.Join(dir, manifestFile))
+	require.NoError(t, err)
+	first, err := snapshot.ParseManifest(raw)
+	require.NoError(t, err)
+
+	// Raise the floor above what the fixtures carry, exactly as a reviewer would.
+	first.MinRecords.Machines = 10_000
+	encoded, err := json.Marshal(first)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, manifestFile), encoded, 0o600))
+
+	require.Error(t, assemble(dir, contract, contract.Support.Regions[0], fixturePages(t, contract)),
+		"a raised floor must survive the next refresh")
 }
