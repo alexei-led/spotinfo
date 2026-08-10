@@ -28,11 +28,18 @@ const (
 // of leaking a Go constant into a published payload.
 var riskKindWireNames = map[RiskKind]string{
 	RiskKindInterruptionFrequencyRange: riskKindWireInterruptionBucket,
+	RiskKindPreemptionRate:             riskKindWirePreemptionRate,
 }
 
-// riskKindWireInterruptionBucket is the published name of a bucketed
-// interruption-frequency range.
-const riskKindWireInterruptionBucket = "interruption_bucket"
+const (
+	// riskKindWireInterruptionBucket is the published name of a bucketed
+	// interruption-frequency range.
+	riskKindWireInterruptionBucket = "interruption_bucket"
+	// riskKindWirePreemptionRate is the published name of a GCP preemption
+	// rate. Both names were already in the frozen enum, which is why adding
+	// this provider needs no contract change — only a reviewed mapping.
+	riskKindWirePreemptionRate = "preemption_rate"
+)
 
 // The published payload structs below declare their fields in schema order:
 // encoding/json emits them in declaration order, so a reader can diff a payload

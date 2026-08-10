@@ -93,6 +93,10 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, registry provid
 		return err
 	}
 
+	if liveRiskErr := rejectLiveRiskOffGCP(ctx, provider.ID()); liveRiskErr != nil {
+		return liveRiskErr
+	}
+
 	workload, err := recommendWorkload(ctx, provider.Capabilities())
 	if err != nil {
 		return err
@@ -310,6 +314,11 @@ func execNeutralRecommendV2(ctx *cli.Context, execCtx context.Context, provider 
 	workload cloud.Workload, outputFormat string, output io.Writer,
 ) error {
 	request, err := neutralRecommendRequest(ctx, provider.ID(), workload)
+	if err != nil {
+		return err
+	}
+
+	provider, err = withLiveRisk(ctx, provider, request)
 	if err != nil {
 		return err
 	}

@@ -967,7 +967,7 @@ func recommendCommand(action cli.ActionFunc) *cli.Command {
 		Name:   recommendCommandName,
 		Usage:  "recommend individual Spot instances by architecture and workload",
 		Action: action,
-		Flags: []cli.Flag{
+		Flags: append([]cli.Flag{
 			cloudFlag(),
 			// Required, but checked in execRecommendCmd rather than declared to
 			// urfave/cli. Its own check prints the whole help to *stdout* before
@@ -1031,7 +1031,7 @@ func recommendCommand(action cli.ActionFunc) *cli.Command {
 				Usage: refreshFlagUsage,
 			},
 			&cli.StringFlag{Name: flagOutput, Usage: "format output: table|json", Value: outputTable},
-		},
+		}, liveRiskFlags()...),
 	}
 }
 

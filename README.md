@@ -6,7 +6,7 @@
 
 `spotinfo` is a powerful CLI tool and [Model Context Protocol (MCP) server](#mcp-integration) that provides comprehensive AWS EC2 Spot Instance information, including real-time placement scores, pricing data, and interruption rates. Perfect for DevOps engineers optimizing cloud infrastructure costs.
 
-AWS is the full surface. GCP and Azure are served offline from committed price snapshots and are reachable through `spotinfo recommend --cloud <id>`; neither publishes interruption risk, so both answer only the risk-free `cost` workload.
+AWS is the full surface. GCP and Azure are served offline from committed price snapshots and are reachable through `spotinfo recommend --cloud <id>`; neither publishes interruption risk in a redistributable form, so both answer only the risk-free `cost` workload. GCP can additionally fetch its preemption rate from an authenticated per-project API with [`--live-risk`](#-live-preemption-risk-gcp-opt-in).
 
 ## Key Features
 
@@ -28,7 +28,7 @@ AWS is the full surface. GCP and Azure are served offline from committed price s
 - The default concise table includes deterministic rationale codes; `--output json` emits a versioned request-and-results wrapper
 - AWS v1 ranks by price, interruption, and right-sizing excess. v2 ranks by price and right-sizing excess, then region and machine; unavailable risk is never compared. Savings is displayed but never used to rank
 - Repeated recommendation regions are deduplicated; `all` cannot be mixed with explicit regions
-- **GCP support** (offline, no credentials): `spotinfo recommend --cloud gcp` serves `us-central1`, Linux, x86\_64 and arm64; risk is always `unavailable`, so only `--workload cost` applies. The root query command is AWS-only.
+- **GCP support** (offline, no credentials): `spotinfo recommend --cloud gcp` serves `us-central1`, Linux, x86\_64 and arm64; risk is `unavailable` unless `--live-risk` fetches it, and only `--workload cost` applies either way. The root query command is AWS-only.
 - **Azure support** (offline, no credentials): `spotinfo recommend --cloud azure` serves eight regions,
   Linux, x86\_64 and arm64; risk is always `unavailable`, so only `--workload cost` applies. The root
   query command is AWS-only.
@@ -46,6 +46,38 @@ AWS is the full surface. GCP and Azure are served offline from committed price s
 - **Graceful degradation** — works without AWS credentials, just shows $0 for missing types.
   The credential chain is probed once per run, so a machine without credentials skips the
   live-price and placement-score calls instead of waiting for each to time out
+
+### 🔬 **Live Preemption Risk (GCP, opt-in)**
+
+GCP publishes its Spot preemption rate only through the authenticated, per-project
+`compute.advice.capacityHistory` API, so it cannot ship in the committed snapshot —
+the answer differs per caller and is not redistributable. `--live-risk` fetches it
+for one invocation:
+
+```bash
+spotinfo recommend --cloud gcp --architecture x86_64 --cpu 4 --memory 16 \
+  --live-risk --gcp-project my-project
+```
+
+```
+RANK  CLOUD  REGION       MACHINE         ... USD/HOUR  SAVINGS  RISK
+   1  gcp    us-central1  c3d-standard-4  ... 0.042496      76%  6.3% avg
+   2  gcp    us-central1  n2d-standard-4  ... 0.053824      68%  17.5% avg
+```
+
+- **Opt-in.** The default path stays offline and answers in about a tenth of a second.
+- **Project is never guessed.** Pass `--gcp-project` or set `GOOGLE_CLOUD_PROJECT`;
+  the call is billed to whichever project it names, so gcloud's ambient
+  `core/project` is deliberately not used.
+- **Credentials** come from Application Default Credentials (`gcloud auth
+  application-default login`, a service account, or the GCE metadata server).
+  Without them the command still answers, reporting `unavailable`.
+- **One call per recommendation**, on the ranked page only — never the catalogue.
+- **`kind` is `preemption_rate`, not `interruption_bucket`.** Google defines it as
+  (preempted Spots) / (Spots that stopped running); AWS publishes the fraction of
+  *running* instances interrupted. The numbers are not comparable, so
+  `--workload web|ci|batch` **still refuses on GCP** — the ceilings are AWS Advisor
+  bucket boundaries. Live risk makes the figure visible, not filterable.
 
 ### 🌐 **Network Resilience**
 - **Embedded data** for offline functionality

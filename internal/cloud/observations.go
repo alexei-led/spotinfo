@@ -80,6 +80,21 @@ type RiskKind string
 // interruption frequency, expressed as a percentage range over a trailing month.
 const RiskKindInterruptionFrequencyRange RiskKind = "interruption_frequency_range"
 
+// RiskKindPreemptionRate is the GCP Spot preemption rate, from
+// compute advice.capacityHistory.
+//
+// It is a separate kind from the AWS bucket, and deliberately so: Google
+// defines it as (total preempted Spots) / (total Spots that stopped running),
+// while the AWS figure is the fraction of *running* instances interrupted over
+// a trailing month. GCP's denominator counts instances their owner shut down
+// normally, so the same percentage means something different on each cloud and
+// the two must never be ranked against each other.
+//
+// That is also why it is absent from interruptionCappableKinds: the web, ci and
+// batch ceilings are AWS Advisor bucket boundaries, and applying them to this
+// measurement would filter one cloud's numbers against another cloud's scale.
+const RiskKindPreemptionRate RiskKind = "preemption_rate"
+
 // HistoryWindow is the trailing observation window a risk figure covers.
 type HistoryWindow struct {
 	Days int

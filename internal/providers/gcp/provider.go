@@ -16,7 +16,10 @@ import (
 // binary.
 type Provider struct {
 	catalog *Catalog
-	sources []cloud.SourceRef
+	// liveRisk is nil unless the caller opted into the authenticated preemption
+	// lookup. See live.go: it is per-project data and cannot be committed.
+	liveRisk *LiveRiskConfig
+	sources  []cloud.SourceRef
 }
 
 // New builds the GCP provider from the committed snapshot. A snapshot that

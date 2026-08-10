@@ -132,6 +132,10 @@ type RecommendRequest struct {
 	MinMemoryGiB float64
 	MinVCPU      int
 	Top          int
+	// EnrichRisk asks a provider that implements RiskEnricher to fetch risk
+	// for the ranked page. Off by default: it needs credentials and makes one
+	// call per recommendation, against a default path that answers offline.
+	EnrichRisk bool
 }
 
 // Validate rejects every input the v2 contract does not allow. It performs no
@@ -316,6 +320,10 @@ func Recommend(ctx context.Context, provider Provider, request *RecommendRequest
 
 		return nil, err
 	}
+
+	// After ranking, so a live call can neither reorder the answer nor be made
+	// for a candidate that did not survive the filters.
+	enrichRankedRisk(ctx, provider, request, ranked)
 
 	// The v2 success contract declares data_source.sources with minItems 1, so a
 	// result that cannot say where its data came from cannot be published as a

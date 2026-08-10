@@ -229,3 +229,35 @@ func TestRecommendTablesAlignRowsWiderThanTheirHeaders(t *testing.T) {
 		assert.Equal(t, header, strings.Index(line, "x86_64"), "row misaligned:\n%s", rendered.String())
 	}
 }
+
+// --live-risk names one mechanism — the authenticated GCP preemption lookup —
+// and must be refused identically on both report paths. It used to be checked
+// only on the v2 path, so AWS under the default workload accepted it and
+// silently ignored it while Azure errored on the same flag.
+func TestLiveRiskIsRefusedOffGCPOnBothReportPaths(t *testing.T) {
+	for name, args := range map[string][]string{
+		"aws v1 path": {"--architecture", "x86_64", "--cpu", "2", "--memory", "8", "--workload", "web"},
+		"aws v2 path": {"--architecture", "x86_64", "--cpu", "2", "--memory", "8", "--workload", "cost"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := runRecommend(t, awsOnlyRegistry(),
+				append([]string{recommendCommandName, "--" + flagLiveRisk}, args...)...)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, cloud.ErrUnsupportedCapability)
+			assert.Contains(t, err.Error(), "--"+flagLiveRisk)
+		})
+	}
+}
+
+// The project is never taken from ambient gcloud configuration, so asking for
+// live risk without naming one has to fail rather than bill a guess.
+func TestLiveRiskNeedsAnExplicitProject(t *testing.T) {
+	t.Setenv(gcpProjectEnv, "")
+
+	err := runRecommend(t, shippedRegistry(t), recommendCommandName,
+		"--cloud", "gcp", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
+		"--"+flagLiveRisk)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, cloud.ErrInvalidArgument)
+	assert.Contains(t, err.Error(), "--"+flagGCPProject)
+}

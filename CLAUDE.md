@@ -12,8 +12,10 @@ AWS is the original surface and stays byte-compatible: the root query command, t
 `spotinfo.recommend/v1` schema and the `find_spot_instances` MCP tool are unchanged. GCP and
 Azure are served through a provider-neutral seam (`internal/cloud`) and are reachable from
 `spotinfo recommend --cloud <id>` and the `recommend_spot_instances` MCP tool, which speak
-`spotinfo.recommend/v2`. Neither publishes interruption risk, so both serve only the risk-free
-`cost` workload; the root query command renders an interruption column and is AWS-only.
+`spotinfo.recommend/v2`. Neither publishes redistributable interruption risk, so both serve
+only the risk-free `cost` workload; the root query command renders an interruption column and
+is AWS-only. GCP can fetch a per-project preemption rate with `--live-risk` — see the note
+under Data Sources; it is visible but never filterable.
 
 ## Development Commands
 
@@ -146,6 +148,30 @@ own contract — `--top 999 --output json` produced `"top": 999`. `execRecommend
 it to both report paths so the same flag on the same command cannot mean two things, and
 `cmd/spotinfo/contract_v2_test.go` reads the maximum out of the schema file so raising one
 without the other fails a test rather than a consumer.
+
+**Live GCP preemption risk is opt-in and never enters a snapshot.** `--live-risk`
+calls `compute/beta advice.capacityHistory` with Application Default Credentials and
+attaches a `preemption_rate` risk to the *ranked page* — one request per
+recommendation, never per catalogue entry. The figure is per-project advisory data,
+so it is not redistributable and `internal/providers/gcp/data/source-contract.json`
+does not name it; the contract governs the committed snapshot, and this never
+touches it. The project comes from `--gcp-project` or `GOOGLE_CLOUD_PROJECT` and is
+never read from gcloud's ambient `core/project`: the call is billed to whatever it
+names.
+
+`RiskKindPreemptionRate` is deliberately **absent** from `interruptionCappableKinds`.
+Google measures (preempted Spots) / (Spots that stopped running); AWS measures the
+fraction of *running* instances interrupted. `acceptsRisk` rejects a kind that is not
+listed, so `--workload web|ci|batch` keeps refusing GCP even when the number is
+available. Live risk makes the figure visible, not filterable — that asymmetry is the
+whole point of the kind vocabulary.
+
+The credential resolution mirrors `awsConfigWithCredentials`: one lazy
+`sync.OnceValues`, negative result cached. **Do not pass a cancellable context to
+`google.DefaultClient`** — it is stored in the token source and reused on every
+refresh, so a `defer cancel()` in the constructor makes the first real call fail with
+`oauth2: ... context canceled` before any request is sent. Binary cost of the whole
+slice: **+240,768 bytes** (0.59%).
 
 GCP: Google's public server-rendered Spot and Compute pricing pages, `us-central1` only.
 Azure: the anonymous Azure Retail Prices API for amounts, joined to Microsoft Learn VM size

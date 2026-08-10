@@ -80,6 +80,14 @@ linters:
             # pages are the only contracted GCP source, and the standard library
             # has no HTML parser.
             - golang.org/x/net/html
+            # Application Default Credentials for the authenticated GCP
+            # preemption-rate lookup. The canonical ADC implementation: it
+            # resolves a gcloud user credential, a service account, a container
+            # role and the GCE metadata server alike, and hand-rolling that
+            # token refresh is not a thing to do by hand. Only the oauth2
+            # client is taken — not google.golang.org/api, whose generated
+            # compute surface is far larger than the one endpoint we call.
+            - golang.org/x/oauth2
             - github.com/aws/aws-sdk-go-v2
             - github.com/aws/smithy-go
             - github.com/jedib0t/go-pretty/v6/table
