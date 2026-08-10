@@ -149,7 +149,7 @@ func loadContract(dataDir string) (*snapshot.SourceContract, error) {
 		return nil, err
 	}
 	if contract.Provider != cloud.ProviderAzure {
-		return nil, fmt.Errorf("%w: %s is not an azure contract", snapshot.ErrInvalidSourceContract, contract.Provider)
+		return nil, fmt.Errorf("%w: contract is for %s, not %s", snapshot.ErrInvalidSourceContract, contract.Provider, cloud.ProviderAzure)
 	}
 	if contract.ParserVersion != azure.ParserVersion {
 		return nil, fmt.Errorf("%w: contract approves parser %q, this binary is %q",

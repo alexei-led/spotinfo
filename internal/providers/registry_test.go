@@ -60,18 +60,23 @@ func TestRegistryRecognisesOnlyTheNeutralVocabularyInStableOrder(t *testing.T) {
 	// Registration order was gcp then aws; the report is lexical regardless.
 	assert.Equal(t, []cloud.ProviderID{cloud.ProviderAWS, cloud.ProviderAzure, cloud.ProviderGCP}, ids)
 
-	// Providers are built on first use, so nothing is available until asked for.
-	assert.Empty(t, registry.Available(), "construction must not build anything")
+	// Providers are built on first use, so nothing is resolved until asked for.
+	for _, status := range registry.Status() {
+		assert.False(t, status.Enabled, "construction must not build %s", status.ID)
+	}
+
 	for _, id := range []cloud.ProviderID{cloud.ProviderAWS, cloud.ProviderGCP} {
 		_, getErr := registry.Get(id)
 		require.NoError(t, getErr)
 	}
 
-	available := make([]cloud.ProviderID, 0, len(registry.Available()))
-	for _, provider := range registry.Available() {
-		available = append(available, provider.ID())
+	enabled := make([]cloud.ProviderID, 0, 2)
+	for _, status := range registry.Status() {
+		if status.Enabled {
+			enabled = append(enabled, status.ID)
+		}
 	}
-	assert.Equal(t, []cloud.ProviderID{cloud.ProviderAWS, cloud.ProviderGCP}, available)
+	assert.Equal(t, []cloud.ProviderID{cloud.ProviderAWS, cloud.ProviderGCP}, enabled)
 }
 
 func TestRegistryRejectsWiringBugs(t *testing.T) {
@@ -169,7 +174,13 @@ func TestBrokenSnapshotDisablesOnlyItsOwnProvider(t *testing.T) {
 	served, err := registry.Get(cloud.ProviderAWS)
 	require.NoError(t, err)
 	assert.Equal(t, cloud.ProviderAWS, served.ID(), "a disabled provider must never be substituted")
-	assert.Len(t, registry.Available(), 1)
+	enabled := 0
+	for _, status := range registry.Status() {
+		if status.Enabled {
+			enabled++
+		}
+	}
+	assert.Equal(t, 1, enabled, "only the working provider is served")
 }
 
 func TestFactoryReturningNoProviderIsDisabledRatherThanServed(t *testing.T) {
@@ -188,7 +199,7 @@ func TestFactoryReturningNoProviderIsDisabledRatherThanServed(t *testing.T) {
 	status := statusFor(t, registry, cloud.ProviderAzure)
 	assert.False(t, status.Enabled)
 	assert.Equal(t, providers.ReasonSnapshotUnavailable, status.Reason)
-	assert.Empty(t, registry.Available())
+
 }
 
 func TestGetRejectsAnIdentifierOutsideTheVocabulary(t *testing.T) {

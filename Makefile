@@ -41,6 +41,7 @@ DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestEmbeddedSnapshotManifests|TestEmbedded
 DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestEmbeddedSourceRefsCoverEverySnapshot
 DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestValidateCoverageRejectsATruncatedLiveFeed
 DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestEmbeddedPricesSatisfyTheNeutralRecordContract
+DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestEveryEmbeddedAdvisorRangeIsLabelled
 
 # Go environment
 export GO111MODULE=on

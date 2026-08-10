@@ -63,10 +63,9 @@ type Status struct {
 // built at most once and a failure stays sticky rather than being retried per
 // call.
 type Registry struct {
-	resolve  map[cloud.ProviderID]func() (cloud.Provider, error)
-	loaded   map[cloud.ProviderID]*Status
-	resolved map[cloud.ProviderID]cloud.Provider
-	mu       sync.Mutex
+	resolve map[cloud.ProviderID]func() (cloud.Provider, error)
+	loaded  map[cloud.ProviderID]*Status
+	mu      sync.Mutex
 }
 
 // New validates the registrations and records how to build each provider; no
@@ -94,9 +93,8 @@ func New(registrations ...Registration) (*Registry, error) {
 	}
 
 	registry := &Registry{
-		resolve:  make(map[cloud.ProviderID]func() (cloud.Provider, error), len(byID)),
-		loaded:   make(map[cloud.ProviderID]*Status, len(byID)),
-		resolved: make(map[cloud.ProviderID]cloud.Provider, len(byID)),
+		resolve: make(map[cloud.ProviderID]func() (cloud.Provider, error), len(byID)),
+		loaded:  make(map[cloud.ProviderID]*Status, len(byID)),
 	}
 
 	for id, build := range byID {
@@ -141,7 +139,7 @@ func (r *Registry) Get(id cloud.ProviderID) (cloud.Provider, error) {
 	}
 
 	provider, err := resolve()
-	r.record(id, provider, err)
+	r.record(id, err)
 
 	if err != nil {
 		// A wiring bug keeps its own error; anything else is a snapshot this
@@ -159,7 +157,7 @@ func (r *Registry) Get(id cloud.ProviderID) (cloud.Provider, error) {
 
 // record remembers what resolving a provider produced, so Status can report it
 // without building anything itself.
-func (r *Registry) record(id cloud.ProviderID, provider cloud.Provider, err error) {
+func (r *Registry) record(id cloud.ProviderID, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -167,30 +165,9 @@ func (r *Registry) record(id cloud.ProviderID, provider cloud.Provider, err erro
 	if err != nil {
 		status.Reason = ReasonSnapshotUnavailable
 		status.Detail = err.Error()
-	} else {
-		r.resolved[id] = provider
 	}
 
 	r.loaded[id] = status
-}
-
-// Available returns the providers that are already resolved and enabled, in
-// stable lexical order.
-//
-// It deliberately does not resolve anything: building every registered provider
-// to answer "which ones work" is the cost this registry defers.
-func (r *Registry) Available() []cloud.Provider {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	available := make([]cloud.Provider, 0, len(r.resolved))
-	for _, id := range cloud.ProviderIDs() {
-		if provider, ok := r.resolved[id]; ok {
-			available = append(available, provider)
-		}
-	}
-
-	return available
 }
 
 // Registered returns the providers this binary was built to serve, in stable

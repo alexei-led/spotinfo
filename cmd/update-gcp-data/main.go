@@ -130,7 +130,7 @@ func loadContract(dataDir string) (*snapshot.SourceContract, error) {
 		return nil, err
 	}
 	if contract.Provider != cloud.ProviderGCP {
-		return nil, fmt.Errorf("%w: %s is not a gcp contract", snapshot.ErrInvalidSourceContract, contract.Provider)
+		return nil, fmt.Errorf("%w: contract is for %s, not %s", snapshot.ErrInvalidSourceContract, contract.Provider, cloud.ProviderGCP)
 	}
 	if len(contract.Support.Regions) != 1 {
 		return nil, fmt.Errorf("%w: the gcp pages render one region, contract claims %d",

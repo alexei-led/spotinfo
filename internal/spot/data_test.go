@@ -346,3 +346,25 @@ func TestDefaultPricingProvider_NetworkFallback(t *testing.T) {
 	require.NoError(t, err)
 	assert.Greater(t, price, 0.0)
 }
+
+// Every advisor range must carry a label.
+//
+// The label is what makes an AWS candidate's risk "published": the neutral
+// adapter maps an unlabelled range to RiskStatusUnavailable, and the MCP
+// interruption filter drops a candidate whose risk is unpublished rather than
+// reading its silence as 0%. Both are correct — but together they mean an
+// unlabelled range would silently remove instances from find_spot_instances
+// results that v1 returned. This gate is what keeps that from arriving with a
+// feed refresh instead of with a review.
+func TestEveryEmbeddedAdvisorRangeIsLabelled(t *testing.T) {
+	t.Parallel()
+
+	data, err := loadEmbeddedAdvisorData()
+	require.NoError(t, err)
+	require.NotEmpty(t, data.Ranges)
+
+	for i, published := range data.Ranges {
+		assert.NotEmptyf(t, published.Label,
+			"advisor range %d has no label; AWS candidates in it would report risk as unavailable", i)
+	}
+}
