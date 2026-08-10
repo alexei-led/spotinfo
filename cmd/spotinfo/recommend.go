@@ -69,9 +69,23 @@ func normalizeRecommendationRegions(regions []string) ([]string, error) {
 // the workload policy are resolved first, because together they decide which
 // published schema answers the request.
 func execRecommendCmd(ctx *cli.Context, execCtx context.Context, registry providerRegistry, client spotClient, output io.Writer) error {
+	if err := requireRecommendFlags(ctx); err != nil {
+		return err
+	}
+
 	outputFormat := lineageString(ctx, flagOutput)
 	if outputFormat != outputTable && outputFormat != outputJSON {
 		return fmt.Errorf("%w: output must be table or json", spot.ErrInvalidRecommendationInput)
+	}
+
+	// MaxTop is enforced here rather than in the neutral validator so both
+	// report paths answer the same way. It was previously enforced only on the
+	// MCP surface, on the reasoning that it bounds an MCP *input* — but the
+	// bound is also written into the v2 payload schema, which pins request.top
+	// at a maximum of 50. `--top 999 --output json` therefore emitted a
+	// spotinfo.recommend/v2 document that fails its own published contract.
+	if top := ctx.Int(flagTop); top > cloud.MaxTop {
+		return fmt.Errorf("%w: top must be between 1 and %d", cloud.ErrInvalidArgument, cloud.MaxTop)
 	}
 
 	provider, err := resolveProviderForRecommend(ctx, registry)
@@ -92,6 +106,39 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, registry provid
 	}
 
 	return execNeutralRecommendV2(ctx, execCtx, provider, workload, outputFormat, output)
+}
+
+// requireRecommendFlags rejects a request that omits one of the three
+// constraints every recommendation needs, naming the flags rather than the wire
+// fields they become.
+//
+// urfave/cli's own Required check is not used for these. It prints the entire
+// help page to stdout before returning the error, so `spotinfo recommend >
+// out.json` produced a file containing a help page and an exit code of 1, and
+// the message named only the first missing flag's declaration order rather than
+// what the caller should add.
+func requireRecommendFlags(ctx *cli.Context) error {
+	var missing []string
+	for _, name := range []string{flagArchitecture, flagCPU, flagMemory} {
+		if !lineageIsSet(ctx, name) {
+			missing = append(missing, "--"+name)
+		}
+	}
+
+	if len(missing) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("%w: %s %s required; every recommendation needs an architecture and a size floor",
+		cloud.ErrInvalidArgument, strings.Join(missing, ", "), plural(len(missing), "is", "are"))
+}
+
+func plural(count int, singular, multiple string) string {
+	if count == 1 {
+		return singular
+	}
+
+	return multiple
 }
 
 // resolveProviderForRecommend applies the fixed failure order: an unrecognised
@@ -372,13 +419,28 @@ func writeJSONReport(report any, output io.Writer) error {
 	return nil
 }
 
+// writeRecommendationTable renders the v1 report. Like the v2 renderer below,
+// the region and instance columns are sized from the rows: the fixed %-11s and
+// %-14s this used to carry were narrower than real values — ap-southeast-3 is
+// fourteen characters and m7i-flex.xlarge is fifteen — so any long row pushed
+// every later column out of alignment.
 func writeRecommendationTable(recommendations []spot.Recommendation, output io.Writer) error {
-	if _, err := fmt.Fprintln(output, "RANK  REGION       INSTANCE       ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR  SAVINGS  INTERRUPTION  WHY"); err != nil {
+	regionWidth, instanceWidth := len("REGION"), len("INSTANCE")
+	for i := range recommendations {
+		regionWidth = max(regionWidth, len(recommendations[i].Region))
+		instanceWidth = max(instanceWidth, len(recommendations[i].Instance))
+	}
+
+	header := fmt.Sprintf("RANK  %-*s  %-*s  ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR  SAVINGS  INTERRUPTION  WHY",
+		regionWidth, "REGION", instanceWidth, "INSTANCE")
+	if _, err := fmt.Fprintln(output, header); err != nil {
 		return fmt.Errorf("write recommendation output: %w", err)
 	}
+
 	for index, recommendation := range recommendations {
-		if _, err := fmt.Fprintf(output, "%4d  %-11s %-14s %-12s %4d  %10.1f  %8.4f  %6d%%  %-12s  %s\n",
-			index+1, recommendation.Region, recommendation.Instance, recommendation.Architecture,
+		if _, err := fmt.Fprintf(output, "%4d  %-*s  %-*s  %-12s  %4d  %10.1f  %8.4f  %6d%%  %-12s  %s\n",
+			index+1, regionWidth, recommendation.Region, instanceWidth, recommendation.Instance,
+			recommendation.Architecture,
 			recommendation.VCPU, recommendation.MemoryGiB, recommendation.PriceUSDPerHour,
 			recommendation.SavingsPercent, recommendation.InterruptionFrequency,
 			strings.Join(recommendation.RationaleCodes, ",")); err != nil {
@@ -403,24 +465,78 @@ func writeNeutralRecommendationTable(recommendations []cloud.RecommendationDTO, 
 		machineWidth = max(machineWidth, len(recommendations[i].Machine))
 	}
 
-	header := fmt.Sprintf("RANK  CLOUD  %-*s  %-*s  ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR       RISK          WHY",
+	header := fmt.Sprintf("RANK  CLOUD  %-*s  %-*s  ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR    SAVINGS  RISK          WHY",
 		regionWidth, "REGION", machineWidth, "MACHINE")
 	if _, err := fmt.Fprintln(output, header); err != nil {
 		return fmt.Errorf("write recommendation output: %w", err)
 	}
 
+	decimals := priceDecimals(recommendations)
 	for _, recommendation := range recommendations {
-		if _, err := fmt.Fprintf(output, "%4d  %-5s  %-*s  %-*s  %-12s  %4d  %10.1f  %-13s  %-12s  %s\n",
+		if _, err := fmt.Fprintf(output, "%4d  %-5s  %-*s  %-*s  %-12s  %4d  %10.1f  %-10s  %7s  %-12s  %s\n",
 			recommendation.Rank, recommendation.Cloud,
 			regionWidth, recommendation.Region, machineWidth, recommendation.Machine,
 			recommendation.Architecture, recommendation.VCPU, recommendation.MemoryGiB,
-			recommendation.SpotUSDPerHour, riskDisplay(&recommendation.Risk),
+			humanPrice(recommendation.SpotUSDPerHour, decimals), savingsDisplay(recommendation.SavingsPercent),
+			riskDisplay(&recommendation.Risk),
 			strings.Join(recommendation.RationaleCodes, ",")); err != nil {
 			return fmt.Errorf("write recommendation output: %w", err)
 		}
 	}
 
 	return nil
+}
+
+// savingsDisplay renders the discount against on-demand.
+//
+// The figure was computed and published in the v2 JSON from the start, but the
+// table never had a column for it: a GCP or Azure recommendation showed an
+// absolute hourly price where the AWS table showed price *and* savings, so the
+// one number people compare clouds on was the one the table dropped. Absent
+// savings prints as "-" rather than as 0% — a provider that publishes no
+// on-demand price has not measured a discount of nothing.
+func savingsDisplay(savings *float64) string {
+	if savings == nil {
+		return "-"
+	}
+
+	return fmt.Sprintf("%.0f%%", *savings)
+}
+
+// priceDecimals picks one decimal count for the whole price column: the fewest
+// that keeps every amount in the set exact, and never fewer than four.
+//
+// The v2 wire format is a nine-decimal string and stays that way — the schema
+// pins the pattern and a consumer parses it. But a person reading the table saw
+// GCP's 0.042496000 beside AWS's 0.0502 in the same column family. Trimming each
+// amount independently traded that for a ragged column (0.027894 above 0.02862),
+// so the width is decided once, from all the rows.
+func priceDecimals(recommendations []cloud.RecommendationDTO) int {
+	const minDecimals = 4
+
+	decimals := minDecimals
+	for i := range recommendations {
+		amount := recommendations[i].SpotUSDPerHour
+
+		dot := strings.IndexByte(amount, '.')
+		if dot < 0 {
+			continue
+		}
+
+		decimals = max(decimals, len(strings.TrimRight(amount, "0"))-dot-1)
+	}
+
+	return decimals
+}
+
+// humanPrice renders a fixed-point amount at the column's decimal count.
+func humanPrice(amount string, decimals int) string {
+	dot := strings.IndexByte(amount, '.')
+	if dot < 0 || len(amount) < dot+1+decimals {
+		return amount
+	}
+
+	return amount[:dot+1+decimals]
 }
 
 func riskDisplay(risk *cloud.RiskDTO) string {

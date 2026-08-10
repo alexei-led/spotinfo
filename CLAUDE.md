@@ -131,6 +131,22 @@ have been a claim about recency that nothing verified, which is the same class o
 substitution the provider seam exists to prevent. A copy the origin confirmed with a 304
 *is* `live`: it matches AWS right now.
 
+**`live_price` in the v1 root JSON lost its `omitempty`, which is a second deliberate
+contract change.** The field is now always emitted. Price provenance is carried by every
+other format — a `*` suffix in `text` and `table`, a `Price Source` column in `csv` — and
+under `omitempty` the JSON form was the only one where "this price came from the static
+feed" and "this build does not report provenance" were indistinguishable. The optional
+fields beside it (`zone_price`, `region_score`, `zone_scores`, `score_fetched_at`) keep
+`omitempty`: each is genuinely absent unless the matching flag asked for it.
+
+**`--top` is bounded at `cloud.MaxTop` on the CLI, not only on the MCP surface.** The
+bound is written into `request.top` in the published v2 payload schema, which
+`internal/mcp` validates against, so an unbounded CLI emitted documents that failed their
+own contract — `--top 999 --output json` produced `"top": 999`. `execRecommendCmd` applies
+it to both report paths so the same flag on the same command cannot mean two things, and
+`cmd/spotinfo/contract_v2_test.go` reads the maximum out of the schema file so raising one
+without the other fails a test rather than a consumer.
+
 GCP: Google's public server-rendered Spot and Compute pricing pages, `us-central1` only.
 Azure: the anonymous Azure Retail Prices API for amounts, joined to Microsoft Learn VM size
 pages for vCPU, memory and processor architecture; eight reviewed regions, 26 machine series.

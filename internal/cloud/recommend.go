@@ -3,6 +3,7 @@ package cloud
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -180,11 +181,13 @@ func (r *RecommendRequest) validateBounds() error {
 		return fmt.Errorf("%w: max_price_per_hour must be positive", ErrInvalidArgument)
 	}
 	// Only the lower bound is a domain rule: a result set of nothing is not a
-	// recommendation. MaxTop is a property of the MCP surface, which publishes it
-	// in its input schema, and is enforced there. Enforcing it here made the CLI
-	// reject `--top 100` on the v2 path while the v1 path — the same flag on the
-	// same command, selected by an unrelated flag — accepted it, and `recommend`
-	// shipped without an upper bound.
+	// recommendation. MaxTop is not enforced here because it would apply to the
+	// v2 path alone, and the CLI would then reject `--top 100` on one report and
+	// accept it on the other — the same flag on the same command, selected by an
+	// unrelated flag. Each surface applies it once, across both its paths: the
+	// MCP tool in its input schema, the CLI in execRecommendCmd. Both must, since
+	// request.top is pinned at a maximum of MaxTop in the published v2 payload
+	// schema, so an unbounded surface emits documents that fail their contract.
 	if r.Top < 1 {
 		return fmt.Errorf("%w: top must be at least 1", ErrInvalidArgument)
 	}
@@ -304,6 +307,13 @@ func Recommend(ctx context.Context, provider Provider, request *RecommendRequest
 	}
 	ranked, err := rank(request, result.Candidates)
 	if err != nil {
+		// Providers narrow before returning, so an empty set carries no evidence
+		// of which constraint emptied it. diagnoseNoCandidates asks again, wider,
+		// and names it — on this path only, where the request has already failed.
+		if errors.Is(err, ErrNoCandidates) {
+			return nil, diagnoseNoCandidates(ctx, provider, request)
+		}
+
 		return nil, err
 	}
 

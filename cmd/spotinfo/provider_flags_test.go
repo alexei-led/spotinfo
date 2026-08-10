@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -167,6 +168,16 @@ func runRoot(t *testing.T, registry providerRegistry, args ...string) error {
 func runRecommend(t *testing.T, registry providerRegistry, args ...string) error {
 	t.Helper()
 
+	_, err := runRecommendCapturing(t, registry, args...)
+
+	return err
+}
+
+// runRecommendCapturing returns the rendered report as well as the error, for
+// assertions about what was answered rather than about how it failed.
+func runRecommendCapturing(t *testing.T, registry providerRegistry, args ...string) (string, error) {
+	t.Helper()
+
 	var output bytes.Buffer
 	app := newSpotinfoApp(
 		func(*cli.Context) error { return nil },
@@ -174,8 +185,9 @@ func runRecommend(t *testing.T, registry providerRegistry, args ...string) error
 			return execRecommendCmd(ctx, context.Background(), registry, newMockspotClient(t), &output)
 		},
 	)
+	err := app.Run(append([]string{appName}, args...))
 
-	return app.Run(append([]string{appName}, args...))
+	return output.String(), err
 }
 
 // validRecommendArgs carries every required recommendation input, so a failure
@@ -279,15 +291,44 @@ func withPlacementScore(capabilities cloud.Capabilities) cloud.Capabilities {
 }
 
 // A provider that publishes no risk defaults to the cost policy rather than
-// being rejected: the request is served, and the empty stub result is reported
-// as no candidates instead of as an unsupported capability.
+// being rejected: the request is served under cost, not refused for lacking
+// risk.
+//
+// Asserted on the answer rather than on an error message. This used to run
+// against a provider with no candidates and look for the word "cost" in the
+// resulting failure, which only held while that failure happened to name the
+// workload — the diagnosis now names the constraint that emptied the set
+// instead, and reports the region.
 func TestRecommendDefaultsARiskFreeProviderToTheCostPolicy(t *testing.T) {
+	registry := mustRegistry(registrationOf(stubProvider{
+		id:           cloud.ProviderGCP,
+		capabilities: offlineLinuxCapabilities(),
+		result: neutralResult(cloud.ProviderGCP,
+			neutralCandidate(cloud.ProviderGCP, "us-central1", "n2-standard-2", "0.021000000", 2, 8)),
+	}))
+
+	output, err := runRecommendCapturing(t, registry,
+		validRecommendArgs("--cloud", "gcp", "--output", outputJSON)...)
+	require.NoError(t, err)
+
+	var payload struct {
+		Request struct {
+			Workload string `json:"workload"`
+		} `json:"request"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(output), &payload))
+	assert.Equal(t, string(cloud.WorkloadCost), payload.Request.Workload)
+}
+
+// A risk-free provider that also has nothing to offer still reports no
+// candidates, not an unsupported capability: the policy was applied, the
+// request was served, and the answer was empty.
+func TestRecommendReportsNoCandidatesFromARiskFreeProvider(t *testing.T) {
 	registry := mustRegistry(registrationOf(stubProvider{id: cloud.ProviderGCP, capabilities: offlineLinuxCapabilities()}))
 
 	err := runRecommend(t, registry, validRecommendArgs("--cloud", "gcp")...)
 	require.ErrorIs(t, err, cloud.ErrNoCandidates)
 	assert.Equal(t, cloud.CodeNoCandidates, cloud.CodeOf(err))
-	assert.Contains(t, err.Error(), string(cloud.WorkloadCost))
 }
 
 // Every interruption-capped workload needs published risk, so asking for one

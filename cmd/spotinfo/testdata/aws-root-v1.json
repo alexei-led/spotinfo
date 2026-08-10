@@ -14,7 +14,8 @@
       "emr": false,
       "ram_gb": 8
     },
-    "price": 0.0416
+    "price": 0.0416,
+    "live_price": false
   },
   {
     "region": "us-west-2",
@@ -50,6 +51,7 @@
       "emr": false,
       "ram_gb": 0.5
     },
-    "price": 0.0016
+    "price": 0.0016,
+    "live_price": false
   }
 ]

@@ -295,7 +295,7 @@ func Recommend(advices []Advice, opts *RecommendationOptions, architectures *Arc
 	})
 
 	if len(candidates) == 0 {
-		return nil, fmt.Errorf("%w for architecture %s and workload %s", ErrNoRecommendationCandidates, opts.Architecture, workload)
+		return nil, noRecommendationCandidates(advices, opts, pattern, architectures, workload, maxInterruption)
 	}
 	if len(candidates) > top {
 		candidates = candidates[:top]

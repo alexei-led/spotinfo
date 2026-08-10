@@ -148,9 +148,21 @@ func resolveAWSProvider(ctx *cli.Context, registry providerRegistry, request clo
 	if err != nil {
 		return err
 	}
+	// Both remaining outcomes end the same way for the caller: this command
+	// cannot answer for this cloud, and `recommend` can. Reporting only the
+	// capability shortfall left the one actionable fact unsaid, so a caller read
+	// "unsupported capability: risk" as "GCP publishes no spot prices".
 	if err := provider.Capabilities().Require(request); err != nil {
-		return fmt.Errorf("%s: %w", id, err)
+		return fmt.Errorf("%s: %w; %s", id, err, recommendHint(id))
 	}
 
-	return fmt.Errorf("%w: %s candidates are not served by this command yet", cloud.ErrUnsupportedCapability, provider.ID())
+	return fmt.Errorf("%w: %s candidates are not served by this command yet; %s",
+		cloud.ErrUnsupportedCapability, provider.ID(), recommendHint(id))
+}
+
+// recommendHint names the command that does serve a non-AWS cloud. The root
+// query command renders an interruption column, which only AWS publishes.
+func recommendHint(id cloud.ProviderID) string {
+	return fmt.Sprintf("the query command renders interruption risk and is AWS-only; use %q instead",
+		appName+" "+recommendCommandName+" --"+flagCloud+" "+string(id))
 }

@@ -41,13 +41,46 @@ AWS is the full surface. GCP and Azure are served offline from committed price s
 ### 💰 **Live Price Fallback**
 - **Automatic enrichment** for newer instance types missing from the static pricing feed
 - **EC2 DescribeSpotPriceHistory API** fetches current prices when static data shows $0
-- **Price source indicators** show whether prices come from static data or live API
-- **Graceful degradation** — works without AWS credentials, just shows $0 for missing types
+- **Price source indicators** in every format: a `*` suffix in `text` and `table`, a
+  `Price Source` column in `csv`, and a `live_price` boolean in `json` (always present)
+- **Graceful degradation** — works without AWS credentials, just shows $0 for missing types.
+  The credential chain is probed once per run, so a machine without credentials skips the
+  live-price and placement-score calls instead of waiting for each to time out
 
 ### 🌐 **Network Resilience**
 - **Embedded data** for offline functionality
 - **Graceful fallbacks** when AWS APIs are unavailable
 - **Real-time API integration** with intelligent caching
+
+### ⚡ **Feed Cache and Offline Mode**
+
+The two AWS feeds dominate an invocation, so fetched copies are cached on disk. A warm
+cache answers in about a tenth of a second against roughly a second and a half cold.
+
+| flag / variable | effect |
+|---|---|
+| `--offline` | answer from the committed snapshot; makes no request at all, including no `DescribeSpotPriceHistory` |
+| `--refresh` | ignore any cached copy and fetch both feeds again |
+| `SPOTINFO_CACHE_DIR` | override the cache location (default: `os.UserCacheDir()/spotinfo`) |
+| `SPOTINFO_CACHE=off` | disable the cache entirely |
+
+Cached entries expire on a per-feed schedule, because the feeds differ: the Spot Advisor
+document is rewritten rarely and takes over a second to transfer, so it is held for **24
+hours**; prices change through the day and transfer in a tenth of a second, so they are
+held for **1 hour**. An expired entry is revalidated with `If-None-Match` /
+`If-Modified-Since` rather than re-downloaded — both feeds serve ETags, so a `304` costs
+one round trip and no payload.
+
+Resolution order is: fresh cache → origin → *expired* cache → committed snapshot. An
+expired entry outranks the snapshot because it is AWS data that is merely old, while the
+snapshot is AWS data that is old *and* frozen at build time. Every cache failure is
+non-fatal: a read-only filesystem costs time, not answers.
+
+Because a cached answer is neither live nor embedded, it is reported as its own state —
+`data_source.mode` is `cached` in `spotinfo.recommend/v2`, and `data_freshness` is
+`cached` in the v1 MCP response (its `data_source` stays `aws`; provenance is unchanged,
+only established recency differs). A copy the origin confirmed with a `304` is `live`: it
+matches AWS right now.
 
 ## Quick Start
 
