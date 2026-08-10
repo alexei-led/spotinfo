@@ -1,4 +1,4 @@
-package azure
+package main
 
 import (
 	"fmt"
@@ -11,6 +11,7 @@ import (
 	"golang.org/x/net/html"
 
 	"spotinfo/internal/cloud"
+	"spotinfo/internal/providers/azure"
 )
 
 // The exact header cells a Microsoft Learn size page publishes for its
@@ -46,10 +47,6 @@ const seriesSuffix = "-series"
 const sizeNamePrefix = "Standard_"
 
 var (
-	// sizeName is the exact shape of an Azure VM size identifier. It is the same
-	// string the Retail Prices API publishes as armSkuName, which is what lets the
-	// two sources be joined at all.
-	sizeName = regexp.MustCompile(`^Standard_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*$`)
 	// architectureMarker matches the bracketed processor architecture Learn
 	// publishes next to each processor model. The spelling is not stable across
 	// pages — "[x86-64]", "[Arm64]" and "[ARM-64]" are all in use today — so the
@@ -59,21 +56,6 @@ var (
 	seriesPath = regexp.MustCompile(`^[a-z][a-z0-9]*$`)
 )
 
-// SeriesSpec is one machine series as its Learn page publishes it: a processor
-// architecture shared by every size, and the sizes themselves.
-type SeriesSpec struct {
-	Series       string
-	Architecture cloud.Architecture
-	Sizes        []SizeSpec
-}
-
-// SizeSpec is one VM size's specification.
-type SizeSpec struct {
-	ID        cloud.MachineID
-	MemoryGiB float64
-	VCPU      int
-}
-
 // ParseSeriesPage reads the architecture and size specifications from one
 // approved Microsoft Learn size page.
 //
@@ -82,19 +64,19 @@ type SizeSpec struct {
 // repository — coverage, price sanity, schema — and silently return a machine
 // that cannot run the caller's binaries, so an unmarked or self-contradicting
 // page fails the parse instead of defaulting.
-func ParseSeriesPage(document io.Reader, series string) (*SeriesSpec, error) {
+func ParseSeriesPage(document io.Reader, series string) (*azure.SeriesSpec, error) {
 	if !seriesPath.MatchString(series) {
-		return nil, fmt.Errorf("%w: %q is not a machine series", ErrSourceContract, series)
+		return nil, fmt.Errorf("%w: %q is not a machine series", azure.ErrSourceContract, series)
 	}
 
 	root, err := html.Parse(document)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrSourceContract, err)
+		return nil, fmt.Errorf("%w: %w", azure.ErrSourceContract, err)
 	}
 
 	var (
 		markers []string
-		sizes   []SizeSpec
+		sizes   []azure.SizeSpec
 		rowErr  error
 	)
 
@@ -129,10 +111,10 @@ func ParseSeriesPage(document io.Reader, series string) (*SeriesSpec, error) {
 	}
 
 	if len(sizes) == 0 {
-		return nil, fmt.Errorf("%w: %s page publishes no size table", ErrSourceContract, series)
+		return nil, fmt.Errorf("%w: %s page publishes no size table", azure.ErrSourceContract, series)
 	}
 
-	return &SeriesSpec{Series: series, Architecture: architecture, Sizes: sizes}, nil
+	return &azure.SeriesSpec{Series: series, Architecture: architecture, Sizes: sizes}, nil
 }
 
 // isSpecHeader recognises the specification table by its exact first three
@@ -166,13 +148,13 @@ func processorMarkers(rows [][]string) []string {
 // two different markers are both failures: neither leaves a defensible answer.
 func resolveArchitecture(series string, markers []string) (cloud.Architecture, error) {
 	if len(markers) == 0 {
-		return "", fmt.Errorf("%w: %s page publishes no processor architecture marker", ErrSourceContract, series)
+		return "", fmt.Errorf("%w: %s page publishes no processor architecture marker", azure.ErrSourceContract, series)
 	}
 
 	for _, marker := range markers[1:] {
 		if marker != markers[0] {
 			return "", fmt.Errorf("%w: %s page mixes %s and %s processors",
-				ErrSourceContract, series, markers[0], marker)
+				azure.ErrSourceContract, series, markers[0], marker)
 		}
 	}
 
@@ -183,7 +165,7 @@ func resolveArchitecture(series string, markers []string) (cloud.Architecture, e
 		return cloud.ArchitectureX8664, nil
 	default:
 		return "", fmt.Errorf("%w: %s page publishes unknown architecture %q",
-			ErrSourceContract, series, markers[0])
+			azure.ErrSourceContract, series, markers[0])
 	}
 }
 
@@ -202,8 +184,8 @@ func normalizeArchitecture(marker string) string {
 // sizeRows reads the data rows of the specification table. A row whose first
 // cell is not a size identifier is not a size row and is skipped; a row that is
 // one but whose numbers cannot be read is a contract failure.
-func sizeRows(series string, rows [][]string) ([]SizeSpec, error) {
-	parsed := make([]SizeSpec, 0, len(rows))
+func sizeRows(series string, rows [][]string) ([]azure.SizeSpec, error) {
+	parsed := make([]azure.SizeSpec, 0, len(rows))
 
 	for _, cells := range rows {
 		if len(cells) == 0 || !strings.HasPrefix(cells[0], sizeNamePrefix) {
@@ -215,7 +197,7 @@ func sizeRows(series string, rows [][]string) ([]SizeSpec, error) {
 		// would quietly publish a catalogue missing those sizes.
 		if len(cells) < specColumns {
 			return nil, fmt.Errorf("%w: %s in %s has %d columns, not the %d this parser reads",
-				ErrSourceContract, cells[0], series, len(cells), specColumns)
+				azure.ErrSourceContract, cells[0], series, len(cells), specColumns)
 		}
 
 		// A cell that starts with the size prefix is a size row, so a name this
@@ -223,15 +205,15 @@ func sizeRows(series string, rows [][]string) ([]SizeSpec, error) {
 		// Azure's constrained-vCPU names carry a hyphen ("Standard_E32-8as_v5");
 		// no contracted page lists one today, and if one starts to, the refresh
 		// must say so rather than quietly publishing a shorter catalogue.
-		if !sizeName.MatchString(cells[0]) {
+		if !azure.ValidSizeName(cells[0]) {
 			return nil, fmt.Errorf("%w: %q in %s is not a size name this parser reads",
-				ErrSourceContract, cells[0], series)
+				azure.ErrSourceContract, cells[0], series)
 		}
 
 		vcpu, err := strconv.Atoi(cells[1])
 		if err != nil || vcpu <= 0 {
 			return nil, fmt.Errorf("%w: %s in %s has unreadable vCPU count %q",
-				ErrSourceContract, cells[0], series, cells[1])
+				azure.ErrSourceContract, cells[0], series, cells[1])
 		}
 
 		// ParseFloat accepts "NaN" and "Inf" without error, and `memoryGiB <= 0`
@@ -241,10 +223,10 @@ func sizeRows(series string, rows [][]string) ([]SizeSpec, error) {
 		memoryGiB, err := strconv.ParseFloat(cells[2], 64)
 		if err != nil || math.IsNaN(memoryGiB) || math.IsInf(memoryGiB, 0) || memoryGiB <= 0 {
 			return nil, fmt.Errorf("%w: %s in %s has unreadable memory %q",
-				ErrSourceContract, cells[0], series, cells[2])
+				azure.ErrSourceContract, cells[0], series, cells[2])
 		}
 
-		parsed = append(parsed, SizeSpec{ID: cloud.MachineID(cells[0]), VCPU: vcpu, MemoryGiB: memoryGiB})
+		parsed = append(parsed, azure.SizeSpec{ID: cloud.MachineID(cells[0]), VCPU: vcpu, MemoryGiB: memoryGiB})
 	}
 
 	return parsed, nil
@@ -258,7 +240,7 @@ func SeriesFromURL(pageURL string) (string, error) {
 
 	series, found := strings.CutSuffix(segment, seriesSuffix)
 	if !found || !seriesPath.MatchString(series) {
-		return "", fmt.Errorf("%w: %q is not a %s page", ErrSourceContract, pageURL, seriesSuffix)
+		return "", fmt.Errorf("%w: %q is not a %s page", azure.ErrSourceContract, pageURL, seriesSuffix)
 	}
 
 	return series, nil

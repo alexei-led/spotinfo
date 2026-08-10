@@ -185,7 +185,7 @@ func fetchSeries(ctx context.Context, client *http.Client, contract *snapshot.So
 			continue
 		}
 
-		series, err := azure.SeriesFromURL(source.URL)
+		series, err := SeriesFromURL(source.URL)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -197,7 +197,7 @@ func fetchSeries(ctx context.Context, client *http.Client, contract *snapshot.So
 			return nil, nil, err
 		}
 
-		spec, err := azure.ParseSeriesPage(bytes.NewReader(body), series)
+		spec, err := ParseSeriesPage(bytes.NewReader(body), series)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", source.URL, err)
 		}

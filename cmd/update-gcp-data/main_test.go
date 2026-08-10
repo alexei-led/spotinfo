@@ -172,7 +172,7 @@ func TestBuildCatalogRefusesAHalfPricedRefresh(t *testing.T) {
 func fixturePage(t *testing.T, name string, kind snapshot.DataKind) page {
 	t.Helper()
 
-	body, err := os.ReadFile(filepath.Join("..", "..", "internal", "providers", "gcp", "testdata", name))
+	body, err := os.ReadFile(filepath.Join("testdata", name))
 	require.NoError(t, err)
 
 	return page{

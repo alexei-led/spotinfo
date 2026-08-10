@@ -276,13 +276,13 @@ func buildCatalog(contract *snapshot.SourceContract, region cloud.Region, pages 
 
 		switch {
 		case slices.Contains(source.kinds, snapshot.DataKindSpotPrice):
-			rows, err := gcp.ParseSpotPage(bytes.NewReader(source.body), region)
+			rows, err := ParseSpotPage(bytes.NewReader(source.body), region)
 			if err != nil {
 				return nil, nil, fmt.Errorf("%s: %w", source.url, err)
 			}
 			spotRows = append(spotRows, rows...)
 		case slices.Contains(source.kinds, snapshot.DataKindOnDemandPrice):
-			rows, err := gcp.ParseOnDemandPage(bytes.NewReader(source.body), region)
+			rows, err := ParseOnDemandPage(bytes.NewReader(source.body), region)
 			if err != nil {
 				return nil, nil, fmt.Errorf("%s: %w", source.url, err)
 			}

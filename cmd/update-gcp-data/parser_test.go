@@ -1,4 +1,4 @@
-package gcp
+package main
 
 import (
 	"os"
@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"spotinfo/internal/cloud"
+	"spotinfo/internal/providers/gcp"
 )
 
 const contractedRegion = cloud.Region("us-central1")
@@ -24,8 +25,8 @@ func openFixture(t *testing.T, name string) *os.File {
 	return file
 }
 
-func rowsByID(rows []MachineRow) map[cloud.MachineID]MachineRow {
-	indexed := make(map[cloud.MachineID]MachineRow, len(rows))
+func rowsByID(rows []gcp.MachineRow) map[cloud.MachineID]gcp.MachineRow {
+	indexed := make(map[cloud.MachineID]gcp.MachineRow, len(rows))
 	for _, row := range rows {
 		indexed[row.ID] = row
 	}
@@ -100,7 +101,7 @@ func TestParseRejectsAPageThatNoLongerMatchesItsContract(t *testing.T) {
 			t.Parallel()
 
 			_, err := ParseSpotPage(openFixture(t, fixture), contractedRegion)
-			require.ErrorIs(t, err, ErrSourceContract)
+			require.ErrorIs(t, err, gcp.ErrSourceContract)
 		})
 	}
 }
@@ -130,7 +131,7 @@ func TestAnUnreadableCellFailsTheParse(t *testing.T) {
 			t.Parallel()
 
 			_, err := ParseSpotPage(strings.NewReader(spotPage(cells)), contractedRegion)
-			require.ErrorIs(t, err, ErrSourceContract)
+			require.ErrorIs(t, err, gcp.ErrSourceContract)
 		})
 	}
 }
@@ -144,7 +145,7 @@ func TestAMachineRowMissingAColumnFails(t *testing.T) {
 	_, err := ParseSpotPage(
 		strings.NewReader(spotPage(`<td>c4-standard-2</td><td>2</td><td>7 GiB</td>`)), contractedRegion)
 
-	require.ErrorIs(t, err, ErrSourceContract)
+	require.ErrorIs(t, err, gcp.ErrSourceContract)
 	assert.Contains(t, err.Error(), "c4-standard-2")
 }
 
@@ -169,7 +170,7 @@ func TestTheSamePageShapeParsesWhenEveryCellIsReadable(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, rows, 1)
-	assert.Equal(t, MachineRow{ID: "c4-standard-2", VCPU: 2, MemoryGiB: 7, Price: rows[0].Price}, rows[0])
+	assert.Equal(t, gcp.MachineRow{ID: "c4-standard-2", VCPU: 2, MemoryGiB: 7, Price: rows[0].Price}, rows[0])
 	assert.Equal(t, "0.058121000", rows[0].Price.String())
 }
 
@@ -192,55 +193,5 @@ func TestParseRejectsARegionThePageDidNotRender(t *testing.T) {
 	t.Parallel()
 
 	_, err := ParseSpotPage(openFixture(t, "spot-pricing.html"), cloud.Region("europe-west3"))
-	require.ErrorIs(t, err, ErrSourceContract)
-}
-
-func TestArchitectureComesFromTheReviewedSeriesList(t *testing.T) {
-	t.Parallel()
-
-	for machine, want := range map[cloud.MachineID]cloud.Architecture{
-		"c4a-standard-4":  cloud.ArchitectureARM64,
-		"n4a-standard-2":  cloud.ArchitectureARM64,
-		"t2a-standard-8":  cloud.ArchitectureARM64,
-		"c4-standard-2":   cloud.ArchitectureX8664,
-		"n2d-standard-16": cloud.ArchitectureX8664,
-		"m3-ultramem-32":  cloud.ArchitectureX8664,
-	} {
-		got, classified := ArchitectureOf(machine)
-		assert.True(t, classified, machine)
-		assert.Equal(t, want, got, machine)
-	}
-}
-
-// An unreviewed series has no architecture. Defaulting it to x86_64 is how a new
-// Arm series ships silently mislabelled, so the classification is total over the
-// contracted series and anything else fails.
-func TestAnUnreviewedSeriesHasNoArchitecture(t *testing.T) {
-	t.Parallel()
-
-	_, classified := ArchitectureOf("z9a-standard-2")
-	assert.False(t, classified)
-}
-
-func TestEveryContractedSeriesIsClassified(t *testing.T) {
-	t.Parallel()
-
-	loaded, err := LoadEmbeddedSnapshot()
-	require.NoError(t, err)
-
-	contract := loaded.Contract
-	require.NotEmpty(t, contract.Support.MachineSeries)
-
-	for _, series := range contract.Support.MachineSeries {
-		architecture, classified := ArchitectureOf(cloud.MachineID(series + "-standard-2"))
-		assert.True(t, classified, "series %q is approved by the contract but has no reviewed architecture", series)
-		assert.Contains(t, contract.Support.Architectures, architecture, series)
-	}
-}
-
-func TestSeriesOfSplitsOnTheFirstSegment(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, "c3d", SeriesOf("c3d-highmem-8"))
-	assert.Equal(t, "e2", SeriesOf("e2-micro"))
+	require.ErrorIs(t, err, gcp.ErrSourceContract)
 }

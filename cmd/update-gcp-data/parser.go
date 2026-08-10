@@ -10,10 +10,9 @@
 // Risk is deliberately absent. GCP publishes preemption history only through an
 // authenticated beta API, and presenting silence as low risk would let a
 // consumer rank it against an AWS interruption bucket.
-package gcp
+package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -24,15 +23,7 @@ import (
 	"golang.org/x/net/html"
 
 	"spotinfo/internal/cloud"
-)
-
-const (
-	// ParserVersion identifies the HTML contract below. Bump it whenever a
-	// header, a column position, or the region rule changes, so a committed
-	// snapshot can never be read as the product of a different parser.
-	ParserVersion = "gcp-pricing-html/1"
-	// CatalogSchemaVersion versions the committed catalogue shape.
-	CatalogSchemaVersion = "spotinfo.gcp-catalog/v1"
+	"spotinfo/internal/providers/gcp"
 )
 
 // The exact header cells the approved pages publish. A renamed header matches
@@ -64,16 +55,6 @@ const (
 
 // Errors a caller distinguishes. Everything else is an invalid catalogue.
 var (
-	// ErrSourceContract reports a page that no longer matches the approved
-	// parser contract: no region selector, no recognised table, or a row whose
-	// cells cannot be read.
-	ErrSourceContract = errors.New("gcp pricing page does not match its parser contract")
-	// ErrCatalog reports a committed catalogue that contradicts the contract
-	// that approved it.
-	ErrCatalog = errors.New("invalid gcp catalogue")
-)
-
-var (
 	// priceCell matches "$0.058121 / 1 hour". The unit is part of the match so a
 	// page that switches to monthly pricing fails instead of parsing.
 	priceCell = regexp.MustCompile(`^\$(\d+(?:\.\d+)?) / 1 hour$`)
@@ -82,56 +63,11 @@ var (
 	memoryCell = regexp.MustCompile(`^(\d+(?:\.\d+)?) GiB$`)
 	// regionSuffix pulls "us-central1" out of "Iowa (us-central1)".
 	regionSuffix = regexp.MustCompile(`\(([a-z0-9-]+)\)$`)
-	// machineIDPattern is the exact shape of a Compute Engine machine type. It
-	// rejects the annotated rows the pages carry, such as
-	// "n1-standard-96 Skylake Platform only", which name a platform variant
-	// rather than a machine type a user can request.
-	machineIDPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$`)
 )
-
-// seriesArchitecture classifies every machine series the source contract
-// approves. The pricing tables publish no architecture column, so it comes from
-// this reviewed list — recorded as a source in the committed manifest — rather
-// than from a guess about the machine name.
-//
-// The map is total on purpose: an unclassified series has no architecture and
-// fails. Defaulting to x86_64 would let a new Arm series approved in the
-// contract ship as x86_64 and pass every other gate, recommending machines that
-// cannot run the caller's binaries.
-// TestEveryContractedSeriesIsClassified pins the two lists together.
-var seriesArchitecture = map[string]cloud.Architecture{
-	"c2":  cloud.ArchitectureX8664,
-	"c3":  cloud.ArchitectureX8664,
-	"c3d": cloud.ArchitectureX8664,
-	"c4":  cloud.ArchitectureX8664,
-	"c4a": cloud.ArchitectureARM64,
-	"c4d": cloud.ArchitectureX8664,
-	"e2":  cloud.ArchitectureX8664,
-	"m1":  cloud.ArchitectureX8664,
-	"m2":  cloud.ArchitectureX8664,
-	"m3":  cloud.ArchitectureX8664,
-	"n1":  cloud.ArchitectureX8664,
-	"n2":  cloud.ArchitectureX8664,
-	"n2d": cloud.ArchitectureX8664,
-	"n4":  cloud.ArchitectureX8664,
-	"n4a": cloud.ArchitectureARM64,
-	"n4d": cloud.ArchitectureX8664,
-	"t2a": cloud.ArchitectureARM64,
-	"t2d": cloud.ArchitectureX8664,
-}
-
-// MachineRow is one machine as a pricing page publishes it: identifier,
-// specification, and the single price that page's contracted column carries.
-type MachineRow struct {
-	ID        cloud.MachineID
-	Price     cloud.Money
-	MemoryGiB float64
-	VCPU      int
-}
 
 // ParseSpotPage reads Spot prices and machine specifications from the Spot VM
 // pricing page, keeping only tables the page rendered for region.
-func ParseSpotPage(document io.Reader, region cloud.Region) ([]MachineRow, error) {
+func ParseSpotPage(document io.Reader, region cloud.Region) ([]gcp.MachineRow, error) {
 	return parsePage(document, region, func(header []string) bool {
 		return len(header) == priceColumn+1 &&
 			header[0] == headerMachineType && header[1] == headerVCPU &&
@@ -142,7 +78,7 @@ func ParseSpotPage(document io.Reader, region cloud.Region) ([]MachineRow, error
 // ParseOnDemandPage reads the Default (on-demand) price column of a Compute
 // pricing category page. Committed-use columns are ignored: they price a
 // contract, not an hour of an interruptible machine.
-func ParseOnDemandPage(document io.Reader, region cloud.Region) ([]MachineRow, error) {
+func ParseOnDemandPage(document io.Reader, region cloud.Region) ([]gcp.MachineRow, error) {
 	return parsePage(document, region, func(header []string) bool {
 		return len(header) > priceColumn &&
 			header[0] == headerMachineType && header[1] == headerVCPU &&
@@ -153,17 +89,17 @@ func ParseOnDemandPage(document io.Reader, region cloud.Region) ([]MachineRow, e
 // parsePage walks a page in document order, tracking which region each table was
 // rendered for, and reads the rows of every accepted table in the requested
 // region.
-func parsePage(document io.Reader, region cloud.Region, accept func([]string) bool) ([]MachineRow, error) {
+func parsePage(document io.Reader, region cloud.Region, accept func([]string) bool) ([]gcp.MachineRow, error) {
 	root, err := html.Parse(document)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrSourceContract, err)
+		return nil, fmt.Errorf("%w: %w", gcp.ErrSourceContract, err)
 	}
 
 	var (
 		rendered  cloud.Region
 		selectors int
 		matched   int
-		rows      []MachineRow
+		rows      []gcp.MachineRow
 		rowErr    error
 	)
 
@@ -196,10 +132,10 @@ func parsePage(document io.Reader, region cloud.Region, accept func([]string) bo
 		return nil, rowErr
 	}
 	if selectors == 0 {
-		return nil, fmt.Errorf("%w: no region selector, so no table can be attributed to a region", ErrSourceContract)
+		return nil, fmt.Errorf("%w: no region selector, so no table can be attributed to a region", gcp.ErrSourceContract)
 	}
 	if matched == 0 {
-		return nil, fmt.Errorf("%w: no machine-type table rendered for region %s", ErrSourceContract, region)
+		return nil, fmt.Errorf("%w: no machine-type table rendered for region %s", gcp.ErrSourceContract, region)
 	}
 
 	return rows, nil
@@ -208,11 +144,11 @@ func parsePage(document io.Reader, region cloud.Region, accept func([]string) bo
 // machineRows reads the data rows of one accepted table. A row whose first cell
 // is not a machine identifier is not a machine row and is skipped; a row that is
 // one but whose cells cannot be read is a contract failure.
-func machineRows(rows [][]string) ([]MachineRow, error) {
-	parsed := make([]MachineRow, 0, len(rows))
+func machineRows(rows [][]string) ([]gcp.MachineRow, error) {
+	parsed := make([]gcp.MachineRow, 0, len(rows))
 
 	for _, cells := range rows {
-		if len(cells) == 0 || !machineIDPattern.MatchString(cells[0]) {
+		if len(cells) == 0 || !gcp.ValidMachineID(cells[0]) {
 			continue
 		}
 
@@ -221,7 +157,7 @@ func machineRows(rows [][]string) ([]MachineRow, error) {
 		// which would quietly publish a catalogue missing those machines.
 		if len(cells) <= priceColumn {
 			return nil, fmt.Errorf("%w: %s has %d columns, not the %d this parser reads",
-				ErrSourceContract, cells[0], len(cells), priceColumn+1)
+				gcp.ErrSourceContract, cells[0], len(cells), priceColumn+1)
 		}
 
 		row, whole, err := machineRow(cells)
@@ -241,49 +177,49 @@ func machineRows(rows [][]string) ([]MachineRow, error) {
 // shared-core machine such as f1-micro, whose fraction of a vCPU cannot be
 // expressed as the whole-core count every neutral consumer compares against;
 // those are left out rather than rounded to a core the machine does not have.
-func machineRow(cells []string) (MachineRow, bool, error) {
+func machineRow(cells []string) (gcp.MachineRow, bool, error) {
 	// ParseFloat accepts "NaN" and "Inf" without error, and `cores <= 0` catches
 	// neither: every comparison against NaN is false, and Inf is positive. Both
 	// would then miss the whole-core test below and be dropped from the
 	// catalogue as if Google had published a shared-core machine.
 	cores, err := strconv.ParseFloat(cells[1], 64)
 	if err != nil || math.IsNaN(cores) || math.IsInf(cores, 0) || cores <= 0 {
-		return MachineRow{}, false, fmt.Errorf("%w: %s has unreadable vCPU count %q",
-			ErrSourceContract, cells[0], cells[1])
+		return gcp.MachineRow{}, false, fmt.Errorf("%w: %s has unreadable vCPU count %q",
+			gcp.ErrSourceContract, cells[0], cells[1])
 	}
 
 	vcpu := int(cores)
 	if float64(vcpu) != cores {
-		return MachineRow{}, false, nil
+		return gcp.MachineRow{}, false, nil
 	}
 
 	memory := memoryCell.FindStringSubmatch(cells[2])
 	if memory == nil {
-		return MachineRow{}, false, fmt.Errorf("%w: %s has unreadable memory %q",
-			ErrSourceContract, cells[0], cells[2])
+		return gcp.MachineRow{}, false, fmt.Errorf("%w: %s has unreadable memory %q",
+			gcp.ErrSourceContract, cells[0], cells[2])
 	}
 
 	memoryGiB, err := strconv.ParseFloat(memory[1], 64)
 	if err != nil || memoryGiB <= 0 {
-		return MachineRow{}, false, fmt.Errorf("%w: %s has unreadable memory %q",
-			ErrSourceContract, cells[0], cells[2])
+		return gcp.MachineRow{}, false, fmt.Errorf("%w: %s has unreadable memory %q",
+			gcp.ErrSourceContract, cells[0], cells[2])
 	}
 
 	amount := priceCell.FindStringSubmatch(cells[priceColumn])
 	if amount == nil {
-		return MachineRow{}, false, fmt.Errorf("%w: %s has unreadable hourly price %q",
-			ErrSourceContract, cells[0], cells[priceColumn])
+		return gcp.MachineRow{}, false, fmt.Errorf("%w: %s has unreadable hourly price %q",
+			gcp.ErrSourceContract, cells[0], cells[priceColumn])
 	}
 
 	price, err := cloud.ParseMoney(amount[1])
 	if err != nil {
-		return MachineRow{}, false, fmt.Errorf("%w: %s: %w", ErrSourceContract, cells[0], err)
+		return gcp.MachineRow{}, false, fmt.Errorf("%w: %s: %w", gcp.ErrSourceContract, cells[0], err)
 	}
 	if price.IsZero() {
-		return MachineRow{}, false, fmt.Errorf("%w: %s is priced at zero", ErrSourceContract, cells[0])
+		return gcp.MachineRow{}, false, fmt.Errorf("%w: %s is priced at zero", gcp.ErrSourceContract, cells[0])
 	}
 
-	return MachineRow{ID: cloud.MachineID(cells[0]), VCPU: vcpu, MemoryGiB: memoryGiB, Price: price}, true, nil
+	return gcp.MachineRow{ID: cloud.MachineID(cells[0]), VCPU: vcpu, MemoryGiB: memoryGiB, Price: price}, true, nil
 }
 
 // selectedRegion reports the region an ARIA listbox currently shows. The
@@ -373,13 +309,4 @@ func SeriesOf(id cloud.MachineID) string {
 	series, _, _ := strings.Cut(string(id), "-")
 
 	return series
-}
-
-// ArchitectureOf resolves a machine series to its reviewed processor
-// architecture. A series this package has not classified reports false: the
-// caller must fail on it rather than assume one.
-func ArchitectureOf(id cloud.MachineID) (cloud.Architecture, bool) {
-	architecture, classified := seriesArchitecture[SeriesOf(id)]
-
-	return architecture, classified
 }

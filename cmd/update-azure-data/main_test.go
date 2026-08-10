@@ -152,7 +152,7 @@ func TestEverySupportedSeriesHasASourcePage(t *testing.T) {
 
 	documented := make(map[string]struct{}, len(contract.Sources))
 	for i := range contract.Sources {
-		series, seriesErr := azure.SeriesFromURL(contract.Sources[i].URL)
+		series, seriesErr := SeriesFromURL(contract.Sources[i].URL)
 		if seriesErr == nil {
 			documented[series] = struct{}{}
 		}

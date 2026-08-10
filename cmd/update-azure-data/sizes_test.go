@@ -1,7 +1,9 @@
-package azure
+package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,7 +11,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"spotinfo/internal/cloud"
+	"spotinfo/internal/providers/azure"
 )
+
+func readFixture(t *testing.T, name string) []byte {
+	t.Helper()
+
+	data, err := os.ReadFile(filepath.Join("testdata", name))
+	require.NoError(t, err)
+
+	return data
+}
 
 func TestSizePageYieldsSpecificationsAndArchitecture(t *testing.T) {
 	t.Parallel()
@@ -22,8 +34,8 @@ func TestSizePageYieldsSpecificationsAndArchitecture(t *testing.T) {
 		"the page writes [ARM-64]; the marker spelling varies and must be normalised")
 
 	require.Len(t, spec.Sizes, 3, "only the specification table is read, not the storage table")
-	assert.Equal(t, SizeSpec{ID: "Standard_D2ps_v5", VCPU: 2, MemoryGiB: 8}, spec.Sizes[0])
-	assert.Equal(t, SizeSpec{ID: "Standard_D8ps_v5", VCPU: 8, MemoryGiB: 32}, spec.Sizes[2])
+	assert.Equal(t, azure.SizeSpec{ID: "Standard_D2ps_v5", VCPU: 2, MemoryGiB: 8}, spec.Sizes[0])
+	assert.Equal(t, azure.SizeSpec{ID: "Standard_D8ps_v5", VCPU: 8, MemoryGiB: 32}, spec.Sizes[2])
 }
 
 // TestArchitectureMarkerSpellingsAreNormalised pins every spelling Microsoft
@@ -54,7 +66,7 @@ func TestAPageWithoutAnArchitectureMarkerFails(t *testing.T) {
 
 	_, err := ParseSeriesPage(strings.NewReader(sizePage("")), "dsv5")
 
-	require.ErrorIs(t, err, ErrSourceContract)
+	require.ErrorIs(t, err, azure.ErrSourceContract)
 	assert.Contains(t, err.Error(), "no processor architecture marker",
 		"an unmarked page must fail rather than default to x86_64")
 }
@@ -64,7 +76,7 @@ func TestAPageThatMixesArchitecturesFails(t *testing.T) {
 
 	_, err := ParseSeriesPage(strings.NewReader(sizePage("[x86-64] and [Arm64]")), "dsv5")
 
-	require.ErrorIs(t, err, ErrSourceContract)
+	require.ErrorIs(t, err, azure.ErrSourceContract)
 	assert.Contains(t, err.Error(), "mixes")
 }
 
@@ -95,7 +107,7 @@ func TestARenamedHeaderEmptiesTheParse(t *testing.T) {
 
 	_, err := ParseSeriesPage(strings.NewReader(page), "dsv5")
 
-	require.ErrorIs(t, err, ErrSourceContract)
+	require.ErrorIs(t, err, azure.ErrSourceContract)
 	assert.Contains(t, err.Error(), "no size table")
 }
 
@@ -114,7 +126,7 @@ func TestUnreadableSpecificationCellsFail(t *testing.T) {
 				"<td>Standard_E2s_v5</td><td>2</td><td>16</td>", replacement, 1)
 
 			_, err := ParseSeriesPage(strings.NewReader(page), "esv5")
-			require.ErrorIs(t, err, ErrSourceContract)
+			require.ErrorIs(t, err, azure.ErrSourceContract)
 		})
 	}
 }
@@ -129,7 +141,7 @@ func TestASizeNameThisParserCannotReadFails(t *testing.T) {
 
 	_, err := ParseSeriesPage(strings.NewReader(page), "easv5")
 
-	require.ErrorIs(t, err, ErrSourceContract)
+	require.ErrorIs(t, err, azure.ErrSourceContract)
 	assert.Contains(t, err.Error(), "Standard_E32-8as_v5")
 }
 
@@ -144,7 +156,7 @@ func TestASizeRowMissingAColumnFails(t *testing.T) {
 
 	_, err := ParseSeriesPage(strings.NewReader(page), "esv5")
 
-	require.ErrorIs(t, err, ErrSourceContract)
+	require.ErrorIs(t, err, azure.ErrSourceContract)
 	assert.Contains(t, err.Error(), "Standard_E2s_v5")
 }
 
@@ -181,7 +193,7 @@ func TestSeriesFromURL(t *testing.T) {
 		"https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/Dv5-Series",
 	} {
 		_, err := SeriesFromURL(target)
-		assert.ErrorIs(t, err, ErrSourceContract, target)
+		assert.ErrorIs(t, err, azure.ErrSourceContract, target)
 	}
 }
 
