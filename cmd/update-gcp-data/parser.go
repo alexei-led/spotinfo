@@ -199,8 +199,14 @@ func machineRow(cells []string) (gcp.MachineRow, bool, error) {
 			gcp.ErrSourceContract, cells[0], cells[2])
 	}
 
+	// Same three terms as the vCPU guard above, for the same reason. memoryCell
+	// admits only digits and one dot today, so nothing non-finite reaches here —
+	// but nothing downstream re-checks either: the resource floors compare with
+	// `<`, which NaN passes, and json.Marshal fails on NaN, degrading the whole
+	// v2 report to INTERNAL. The day the documented procedure loosens that
+	// regexp for a changed page, this line is what still holds.
 	memoryGiB, err := strconv.ParseFloat(memory[1], 64)
-	if err != nil || memoryGiB <= 0 {
+	if err != nil || math.IsNaN(memoryGiB) || math.IsInf(memoryGiB, 0) || memoryGiB <= 0 {
 		return gcp.MachineRow{}, false, fmt.Errorf("%w: %s has unreadable memory %q",
 			gcp.ErrSourceContract, cells[0], cells[2])
 	}

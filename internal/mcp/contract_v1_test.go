@@ -11,6 +11,8 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"spotinfo/internal/spot"
 )
 
 // The goldens in testdata record the AWS v1 MCP contract before the
@@ -33,19 +35,25 @@ func TestFindSpotInstancesInputSchemaMatchesRecordedV1Contract(t *testing.T) {
 	assertGolden(t, "find-spot-instances-v1-input-schema.json", append(encoded, '\n'))
 }
 
+// Driven through the production AWS adapter over fixed spot.Advice, not a
+// neutral provider stub. The advice below is the input v1 acquired; everything
+// between it and the recorded bytes — the whole spot.Advice -> cloud.Candidate
+// conversion plus the MCP renderer — is what this golden pins.
 func TestFindSpotInstancesResponseMatchesRecordedV1Contract(t *testing.T) {
 	regionScore := 8
-	_, registry := awsStub(buildCandidates(
-		testCandidate{
-			Region: "us-east-1", Machine: "m6i.large", Price: 0.0416, Savings: 72,
-			RiskLabel: "<5%", RiskMin: 0, RiskMax: 5, VCPU: 2, MemoryGiB: 8,
+	registry := awsAdapterRegistry(t, []spot.Advice{
+		{
+			Region: "us-east-1", Instance: "m6i.large", Price: 0.0416, Savings: 72,
+			Info:  spot.TypeInfo{Cores: 2, RAM: 8},
+			Range: spot.Range{Label: "<5%", Min: 0, Max: 5},
 		},
-		testCandidate{
-			Region: "us-west-2", Machine: "m5.xlarge", Price: 0.1234, Savings: 65, Live: true,
-			RiskLabel: "5-10%", RiskMin: 5, RiskMax: 11, VCPU: 4, MemoryGiB: 16,
+		{
+			Region: "us-west-2", Instance: "m5.xlarge", Price: 0.1234, Savings: 65, LivePrice: true,
+			Info:        spot.TypeInfo{Cores: 4, RAM: 16},
+			Range:       spot.Range{Label: "5-10%", Min: 5, Max: 11},
 			RegionScore: &regionScore,
 		},
-	)...)
+	})
 
 	result, err := NewFindSpotInstancesTool(registry, slog.Default()).
 		Handle(t.Context(), mcp.CallToolRequest{})

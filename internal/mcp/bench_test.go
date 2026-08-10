@@ -141,7 +141,7 @@ func BenchmarkCalculateAvgInterruption(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		result := calculateAvgInterruption(&testRisk)
+		result, _ := calculateAvgInterruption(&testRisk)
 		_ = result // Prevent optimization
 	}
 }

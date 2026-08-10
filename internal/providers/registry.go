@@ -9,8 +9,10 @@
 package providers
 
 import (
+	"errors"
 	"fmt"
 	"slices"
+	"sync"
 
 	"spotinfo/internal/cloud"
 )
@@ -25,6 +27,10 @@ const (
 	// ReasonSnapshotUnavailable means the provider's embedded data is missing,
 	// unreadable, hash-mismatched, or failed validation.
 	ReasonSnapshotUnavailable ReasonCode = "SNAPSHOT_UNAVAILABLE"
+	// ReasonNotLoaded is a registered provider nothing has asked for yet. It is
+	// neither enabled nor broken: its snapshot has simply not been read, because
+	// providers are built on first use.
+	ReasonNotLoaded ReasonCode = "NOT_LOADED"
 )
 
 // Factory builds one provider from committed data. It returns an error when
@@ -48,16 +54,30 @@ type Status struct {
 }
 
 // Registry holds the providers this binary can serve.
+//
+// A provider is built on first use, not at construction. Every factory here
+// decodes, hashes and re-validates a committed snapshot, so building all of
+// them up front charged an AWS-only invocation — the common case — for the GCP
+// and Azure catalogues it never reads, and for the MCP server it retained both
+// for the process lifetime. Resolution is memoized, so a provider is still
+// built at most once and a failure stays sticky rather than being retried per
+// call.
 type Registry struct {
-	enabled map[cloud.ProviderID]cloud.Provider
-	status  []Status
+	resolve  map[cloud.ProviderID]func() (cloud.Provider, error)
+	loaded   map[cloud.ProviderID]*Status
+	resolved map[cloud.ProviderID]cloud.Provider
+	mu       sync.Mutex
 }
 
-// New builds the registry, running every factory once. A factory failure
-// disables its provider; the returned error is reserved for wiring bugs an
-// operator cannot fix at runtime: an unrecognised identifier, a duplicate
-// registration, a missing factory, or a provider that reports an identifier
-// other than the one it was registered under.
+// New validates the registrations and records how to build each provider; no
+// factory runs here. A factory failure disables its provider when it is first
+// asked for. The returned error is reserved for wiring bugs an operator cannot
+// fix at runtime: an unrecognised identifier, a duplicate registration, or a
+// missing factory.
+//
+// A provider that reports an identifier other than the one it was registered
+// under is the one wiring bug that moved: it cannot be detected without building
+// the provider, so it now surfaces from Get rather than from here.
 func New(registrations ...Registration) (*Registry, error) {
 	byID := make(map[cloud.ProviderID]Factory, len(registrations))
 	for _, registration := range registrations {
@@ -74,62 +94,98 @@ func New(registrations ...Registration) (*Registry, error) {
 	}
 
 	registry := &Registry{
-		enabled: make(map[cloud.ProviderID]cloud.Provider, len(byID)),
-		status:  make([]Status, 0, len(cloud.ProviderIDs())),
+		resolve:  make(map[cloud.ProviderID]func() (cloud.Provider, error), len(byID)),
+		loaded:   make(map[cloud.ProviderID]*Status, len(byID)),
+		resolved: make(map[cloud.ProviderID]cloud.Provider, len(byID)),
 	}
-	// Iterating the vocabulary, not the registrations, is what makes Status
-	// report every recognised provider in stable lexical order.
-	for _, id := range cloud.ProviderIDs() {
-		build, registered := byID[id]
-		if !registered {
-			registry.status = append(registry.status, Status{ID: id, Reason: ReasonNotRegistered})
 
-			continue
-		}
+	for id, build := range byID {
+		registry.resolve[id] = sync.OnceValues(func() (cloud.Provider, error) {
+			provider, err := build()
+			switch {
+			case err != nil:
+				return nil, err
+			case provider == nil:
+				return nil, errNoProvider
+			case provider.ID() != id:
+				// A wiring bug, not a data problem. It used to fail construction;
+				// deferring the build defers the detection with it, so it surfaces
+				// on the first request for that cloud instead.
+				return nil, fmt.Errorf("%w: provider registered as %q reports %q",
+					cloud.ErrInvalidArgument, id, provider.ID())
+			}
 
-		provider, err := build()
-		switch {
-		case err != nil:
-			registry.status = append(registry.status, Status{
-				ID: id, Reason: ReasonSnapshotUnavailable, Detail: err.Error(),
-			})
-		case provider == nil:
-			registry.status = append(registry.status, Status{
-				ID: id, Reason: ReasonSnapshotUnavailable, Detail: "factory returned no provider",
-			})
-		case provider.ID() != id:
-			return nil, fmt.Errorf("%w: provider registered as %q reports %q", cloud.ErrInvalidArgument, id, provider.ID())
-		default:
-			registry.enabled[id] = provider
-			registry.status = append(registry.status, Status{ID: id, Enabled: true})
-		}
+			return provider, nil
+		})
 	}
 
 	return registry, nil
 }
+
+// errNoProvider reports a factory that returned neither a provider nor an error.
+var errNoProvider = errors.New("factory returned no provider")
 
 // Get returns an enabled provider. An identifier outside the neutral
 // vocabulary is ErrInvalidArgument; a recognised but disabled provider is
 // ErrDataUnavailable, carrying the reason code. Nothing falls back to another
 // cloud.
 func (r *Registry) Get(id cloud.ProviderID) (cloud.Provider, error) {
-	if provider, ok := r.enabled[id]; ok {
-		return provider, nil
-	}
-	for _, status := range r.status {
-		if status.ID == id {
-			return nil, fmt.Errorf("%w: cloud provider %q is unavailable (%s)", cloud.ErrDataUnavailable, id, status.Reason)
+	resolve, registered := r.resolve[id]
+	if !registered {
+		if slices.Contains(cloud.ProviderIDs(), id) {
+			return nil, fmt.Errorf("%w: cloud provider %q is unavailable (%s)",
+				cloud.ErrDataUnavailable, id, ReasonNotRegistered)
 		}
+
+		return nil, fmt.Errorf("%w: unknown cloud provider %q", cloud.ErrInvalidArgument, id)
 	}
 
-	return nil, fmt.Errorf("%w: unknown cloud provider %q", cloud.ErrInvalidArgument, id)
+	provider, err := resolve()
+	r.record(id, provider, err)
+
+	if err != nil {
+		// A wiring bug keeps its own error; anything else is a snapshot this
+		// binary cannot serve, and no other cloud is substituted for it.
+		if errors.Is(err, cloud.ErrInvalidArgument) {
+			return nil, err
+		}
+
+		return nil, fmt.Errorf("%w: cloud provider %q is unavailable (%s): %w",
+			cloud.ErrDataUnavailable, id, ReasonSnapshotUnavailable, err)
+	}
+
+	return provider, nil
 }
 
-// Available returns the enabled providers in stable lexical order.
+// record remembers what resolving a provider produced, so Status can report it
+// without building anything itself.
+func (r *Registry) record(id cloud.ProviderID, provider cloud.Provider, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	status := &Status{ID: id, Enabled: err == nil}
+	if err != nil {
+		status.Reason = ReasonSnapshotUnavailable
+		status.Detail = err.Error()
+	} else {
+		r.resolved[id] = provider
+	}
+
+	r.loaded[id] = status
+}
+
+// Available returns the providers that are already resolved and enabled, in
+// stable lexical order.
+//
+// It deliberately does not resolve anything: building every registered provider
+// to answer "which ones work" is the cost this registry defers.
 func (r *Registry) Available() []cloud.Provider {
-	available := make([]cloud.Provider, 0, len(r.enabled))
-	for _, status := range r.status {
-		if provider, ok := r.enabled[status.ID]; ok {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	available := make([]cloud.Provider, 0, len(r.resolved))
+	for _, id := range cloud.ProviderIDs() {
+		if provider, ok := r.resolved[id]; ok {
 			available = append(available, provider)
 		}
 	}
@@ -137,8 +193,42 @@ func (r *Registry) Available() []cloud.Provider {
 	return available
 }
 
-// Status returns every recognised provider, enabled and disabled, in stable
-// lexical order. The slice is a copy: a caller cannot mutate the registry.
+// Registered returns the providers this binary was built to serve, in stable
+// lexical order, without building any of them.
+//
+// This is what "which clouds can this binary answer for" means once providers
+// are built on first use: Available reports only what has already been resolved,
+// which is empty at startup and would understate the binary's reach.
+func (r *Registry) Registered() []cloud.ProviderID {
+	ids := make([]cloud.ProviderID, 0, len(r.resolve))
+	for _, id := range cloud.ProviderIDs() {
+		if r.resolve[id] != nil {
+			ids = append(ids, id)
+		}
+	}
+
+	return ids
+}
+
+// Status returns every recognised provider in stable lexical order, reporting
+// what is known without resolving anything. A registered provider that has not
+// been asked for yet reports ReasonNotLoaded — neither enabled nor broken, just
+// not built. Forcing a build here would undo the deferral.
 func (r *Registry) Status() []Status {
-	return slices.Clone(r.status)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	statuses := make([]Status, 0, len(cloud.ProviderIDs()))
+	for _, id := range cloud.ProviderIDs() {
+		switch {
+		case r.loaded[id] != nil:
+			statuses = append(statuses, *r.loaded[id])
+		case r.resolve[id] != nil:
+			statuses = append(statuses, Status{ID: id, Reason: ReasonNotLoaded})
+		default:
+			statuses = append(statuses, Status{ID: id, Reason: ReasonNotRegistered})
+		}
+	}
+
+	return statuses
 }

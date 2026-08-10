@@ -421,21 +421,44 @@ func TestBuildResponseReportsAbsentObservationsAsTheV1Zero(t *testing.T) {
 
 func TestCalculateAvgInterruption(t *testing.T) {
 	tests := []struct {
-		name     string
-		fixture  testCandidate
-		expected float64
+		name      string
+		fixture   testCandidate
+		expected  float64
+		published bool
 	}{
-		{"normal range", testCandidate{RiskLabel: "10-20%", RiskMin: 10, RiskMax: 20}, 15.0},
-		{"no published risk", testCandidate{}, 0.0},
-		{"single value", testCandidate{RiskLabel: "5%", RiskMin: 5, RiskMax: 5}, 5.0},
+		{"normal range", testCandidate{RiskLabel: "10-20%", RiskMin: 10, RiskMax: 20}, 15.0, true},
+		// Zero here is not a measurement of zero. The second result is what keeps
+		// a caller from ranking an unmeasured machine as the most reliable one.
+		{"no published risk", testCandidate{}, 0.0, false},
+		{"single value", testCandidate{RiskLabel: "5%", RiskMin: 5, RiskMax: 5}, 5.0, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			risk := tt.fixture.build().Risk
-			assert.InDelta(t, tt.expected, calculateAvgInterruption(&risk), 0)
+			average, published := calculateAvgInterruption(&risk)
+			assert.Equal(t, tt.published, published)
+			assert.InDelta(t, tt.expected, average, 0)
 		})
 	}
+}
+
+// A candidate whose provider publishes no risk must not pass an interruption
+// ceiling. Reading its silence as 0% admitted it under every ceiling and scored
+// it 100 reliability — the most reliable result in the list, unmeasured.
+func TestFilterByInterruptionDropsUnpublishedRisk(t *testing.T) {
+	t.Parallel()
+
+	measured := testCandidate{Region: "us-east-1", Machine: "m6i.large", RiskLabel: "<5%", RiskMin: 0, RiskMax: 5}.build()
+	unmeasured := testCandidate{Region: "us-central1", Machine: "n2-standard-2"}.build()
+	require.Equal(t, cloud.RiskStatusUnavailable, unmeasured.Risk.Status)
+
+	filtered := filterByInterruption([]cloud.Candidate{measured, unmeasured}, 10)
+	require.Len(t, filtered, 1)
+	assert.Equal(t, cloud.MachineID("m6i.large"), filtered[0].Machine.ID)
+
+	// With no ceiling asked for, v1 returned everything and still does.
+	assert.Len(t, filterByInterruption([]cloud.Candidate{measured, unmeasured}, 0), 2)
 }
 
 func TestCalculateReliabilityScore(t *testing.T) {

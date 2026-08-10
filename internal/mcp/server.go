@@ -32,7 +32,7 @@ const (
 // providers it hands out rather than against a provider SDK.
 type providerRegistry interface {
 	Get(id cloud.ProviderID) (cloud.Provider, error)
-	Available() []cloud.Provider
+	Registered() []cloud.ProviderID
 }
 
 // Server wraps the MCP server with spotinfo-specific configuration
@@ -147,25 +147,23 @@ func (s *Server) registerTools() {
 
 	s.logger.Info("MCP tools registered",
 		slog.Int("count", totalMCPTools),
-		slog.Any("providers", s.availableProviders()))
+		slog.Any("providers", s.registeredProviders()))
 }
 
-// availableProviders names the providers this server can serve. Registration is
-// unconditional so the advertised tool surface does not change with the data a
-// binary happens to carry; a request for a disabled cloud reports why.
-func (s *Server) availableProviders() []cloud.ProviderID {
+// registeredProviders names the clouds this binary was built to serve, for the
+// startup log. Registration is unconditional so the advertised tool surface does
+// not change with the data a binary happens to carry; a request for a cloud
+// whose snapshot is unusable reports why.
+//
+// It reports registration, not health, because providers are built on first use:
+// asking whether each one loads would decode every catalogue at startup, which
+// is exactly the cost the registry defers.
+func (s *Server) registeredProviders() []cloud.ProviderID {
 	if s.providers == nil {
 		return nil
 	}
 
-	available := s.providers.Available()
-
-	ids := make([]cloud.ProviderID, 0, len(available))
-	for _, provider := range available {
-		ids = append(ids, provider.ID())
-	}
-
-	return ids
+	return s.providers.Registered()
 }
 
 // ServeStdio starts the MCP server with stdio transport

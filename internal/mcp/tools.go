@@ -324,8 +324,13 @@ func filterByInterruption(candidates []cloud.Candidate, maxInterruptionParam flo
 	}
 
 	filtered := make([]cloud.Candidate, 0, len(candidates))
+
 	for i := range candidates {
-		if calculateAvgInterruption(&candidates[i].Risk) <= maxInterruptionParam {
+		// An unpublished range cannot satisfy a ceiling. Reading it as 0% would
+		// admit every unmeasured candidate under any ceiling and rank it as the
+		// most reliable result — the substitution the neutral seam forbids.
+		average, published := calculateAvgInterruption(&candidates[i].Risk)
+		if published && average <= maxInterruptionParam {
 			filtered = append(filtered, candidates[i])
 		}
 	}
@@ -350,7 +355,7 @@ func buildResponse(candidates []cloud.Candidate, startTime time.Time, mode cloud
 	for i := range candidates {
 		candidate := &candidates[i]
 		regionsSearched[string(candidate.Location.Region)] = true
-		avgInterruption := calculateAvgInterruption(&candidate.Risk)
+		avgInterruption, _ := calculateAvgInterruption(&candidate.Risk)
 		price := spotPrice(candidate)
 
 		result := map[string]any{
@@ -430,12 +435,27 @@ func savingsPercent(candidate *cloud.Candidate) int {
 // interruptionRange renders the v1 percentage range. A candidate with no
 // published risk renders the same "0-0%" v1 produced for an unlabelled range.
 func interruptionRange(risk *cloud.RiskObservation) string {
-	low, high := interruptionBounds(risk)
+	// The unpublished case deliberately still renders "0-0%": that is the string
+	// v1 produced for an unlabelled range, and this is a golden-pinned field.
+	// Filtering is where an unpublished range must not be read as 0 — see
+	// filterByInterruption.
+	low, high, _ := interruptionBounds(risk)
 
 	return fmt.Sprintf("%d-%d%%", int(low), int(high))
 }
 
-func interruptionBounds(risk *cloud.RiskObservation) (low, high float64) {
+// interruptionBounds reports the published range and whether it is a
+// measurement at all.
+//
+// Status is authoritative, not the pointers. A provider that publishes no risk
+// must never have its silence read as 0% — that ranks an unmeasured machine as
+// the most reliable result — and the fields are exported, so the contradictory
+// {Unavailable, MaxPercent: &p} is representable and must not be trusted either.
+func interruptionBounds(risk *cloud.RiskObservation) (low, high float64, published bool) {
+	if risk.Status != cloud.RiskStatusAvailable {
+		return 0, 0, false
+	}
+
 	if risk.MinPercent != nil {
 		low = *risk.MinPercent
 	}
@@ -443,14 +463,16 @@ func interruptionBounds(risk *cloud.RiskObservation) (low, high float64) {
 		high = *risk.MaxPercent
 	}
 
-	return low, high
+	return low, high, true
 }
 
-// calculateAvgInterruption calculates average interruption rate
-func calculateAvgInterruption(risk *cloud.RiskObservation) float64 {
-	low, high := interruptionBounds(risk)
+// calculateAvgInterruption calculates average interruption rate. The second
+// result reports whether the provider published a range at all; a caller that
+// ranks or filters on the average must not treat an unpublished one as 0%.
+func calculateAvgInterruption(risk *cloud.RiskObservation) (float64, bool) {
+	low, high, published := interruptionBounds(risk)
 
-	return (low + high) / avgDivisor
+	return (low + high) / avgDivisor, published
 }
 
 // calculateReliabilityScore creates a reliability score based on interruption frequency

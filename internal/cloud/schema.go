@@ -53,6 +53,13 @@ type RiskDTO struct { //nolint:govet // field order follows the published schema
 }
 
 // SourceDTO is the published provenance of one snapshot.
+//
+// ContentSHA256 is required by the schema but nullable, and both halves are
+// deliberate: the key is always present so a consumer can rely on its position,
+// and it is null for a source whose content this repository does not hash. The
+// AWS architecture snapshot is one — its source is a documentation page, not a
+// fetched payload — so null is a real value on the AWS path, not a theoretical
+// one. A consumer that verifies provenance must test the value, not the key.
 type SourceDTO struct { //nolint:govet // field order follows the published schema
 	URL           string  `json:"url"`
 	FetchedAt     string  `json:"fetched_at"`
@@ -178,6 +185,16 @@ func requestDTO(request *RecommendRequest) RequestDTO {
 		Top:          request.Top,
 	}
 	if request.MaxPrice != nil {
+		// Float64 is documented as lossy and not for rendering, and this is the
+		// one place it is correct anyway: the published schema types
+		// max_price_per_hour as a number, so a canonical decimal string — what
+		// every amount in the payload uses — would not validate.
+		//
+		// It is exact here. Money carries 9 fractional digits, and float64 holds
+		// any such value below 2^53 nanos (about $9,007,199) without rounding,
+		// which every instance-hour price is. The echo also reports the ceiling
+		// actually applied rather than the float the caller sent, so a value
+		// finer than the scale reads back truncated on purpose.
 		ceiling := request.MaxPrice.Float64()
 		echoed.MaxPricePerHour = &ceiling
 	}

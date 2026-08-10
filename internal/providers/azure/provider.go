@@ -68,7 +68,10 @@ func (p *Provider) Query(_ context.Context, query *cloud.Query) (cloud.Result, e
 	}
 
 	capabilities := p.Capabilities()
-	if !capabilities.SupportsOS(query.OS) {
+	// Guarded on non-empty, like the architecture check below and
+	// Capabilities.Require: cloud.Query documents a zero-valued filter as
+	// inactive, so an unset OS is "any", not the OS named "".
+	if query.OS != "" && !capabilities.SupportsOS(query.OS) {
 		return cloud.Result{}, fmt.Errorf("%w: azure does not support os %q", cloud.ErrInvalidArgument, query.OS)
 	}
 	if query.Architecture != "" && !capabilities.SupportsArchitecture(query.Architecture) {

@@ -85,10 +85,18 @@ func runRecommendWith(t *testing.T, registry *providers.Registry, args ...string
 func TestOfflineCloudsRegisterFromTheirCommittedSnapshots(t *testing.T) {
 	t.Parallel()
 
-	status := shippedRegistry(t).Status()
+	registry := shippedRegistry(t)
 
-	byID := make(map[cloud.ProviderID]providers.Status, len(status))
-	for _, entry := range status {
+	// Providers are built on first use, so ask for each one: that is what proves
+	// its committed snapshot loads, and Status then reports the result.
+	for _, id := range []cloud.ProviderID{cloud.ProviderGCP, cloud.ProviderAzure} {
+		provider, err := registry.Get(id)
+		require.NoError(t, err)
+		assert.Equal(t, id, provider.ID())
+	}
+
+	byID := make(map[cloud.ProviderID]providers.Status)
+	for _, entry := range registry.Status() {
 		byID[entry.ID] = entry
 	}
 

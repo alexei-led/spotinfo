@@ -60,6 +60,13 @@ func TestRegistryRecognisesOnlyTheNeutralVocabularyInStableOrder(t *testing.T) {
 	// Registration order was gcp then aws; the report is lexical regardless.
 	assert.Equal(t, []cloud.ProviderID{cloud.ProviderAWS, cloud.ProviderAzure, cloud.ProviderGCP}, ids)
 
+	// Providers are built on first use, so nothing is available until asked for.
+	assert.Empty(t, registry.Available(), "construction must not build anything")
+	for _, id := range []cloud.ProviderID{cloud.ProviderAWS, cloud.ProviderGCP} {
+		_, getErr := registry.Get(id)
+		require.NoError(t, getErr)
+	}
+
 	available := make([]cloud.ProviderID, 0, len(registry.Available()))
 	for _, provider := range registry.Available() {
 		available = append(available, provider.ID())
@@ -86,12 +93,6 @@ func TestRegistryRejectsWiringBugs(t *testing.T) {
 			name:          "duplicate registration",
 			registrations: []providers.Registration{registrationFor(cloud.ProviderAWS), registrationFor(cloud.ProviderAWS)},
 		},
-		{
-			name: "provider reports another identifier",
-			registrations: []providers.Registration{{ID: cloud.ProviderAWS, Build: func() (cloud.Provider, error) {
-				return fakeProvider{id: cloud.ProviderGCP}, nil
-			}}},
-		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -101,6 +102,26 @@ func TestRegistryRejectsWiringBugs(t *testing.T) {
 			assert.Nil(t, registry)
 		})
 	}
+}
+
+// A provider that reports an identifier other than the one it was registered
+// under is still a wiring bug, but it cannot be seen without building the
+// provider. Deferring the build defers the detection to the first request for
+// that cloud, where it stays ErrInvalidArgument rather than being reported as a
+// missing snapshot.
+func TestProviderReportingAnotherIdentifierFailsOnFirstUse(t *testing.T) {
+	t.Parallel()
+
+	registry, err := providers.New(providers.Registration{
+		ID:    cloud.ProviderAWS,
+		Build: func() (cloud.Provider, error) { return fakeProvider{id: cloud.ProviderGCP}, nil },
+	})
+	require.NoError(t, err, "the mismatch is invisible until the factory runs")
+
+	provider, err := registry.Get(cloud.ProviderAWS)
+	assert.Nil(t, provider)
+	require.ErrorIs(t, err, cloud.ErrInvalidArgument)
+	assert.Contains(t, err.Error(), string(cloud.ProviderGCP))
 }
 
 func TestUnregisteredProviderIsDisabledAndUnavailable(t *testing.T) {
@@ -134,13 +155,16 @@ func TestBrokenSnapshotDisablesOnlyItsOwnProvider(t *testing.T) {
 	)
 	require.NoError(t, err)
 
+	// Nothing is built until it is asked for, so the failure surfaces from Get.
+	assert.Equal(t, providers.ReasonNotLoaded, statusFor(t, registry, cloud.ProviderGCP).Reason)
+
+	_, err = registry.Get(cloud.ProviderGCP)
+	require.ErrorIs(t, err, cloud.ErrDataUnavailable)
+
 	status := statusFor(t, registry, cloud.ProviderGCP)
 	assert.False(t, status.Enabled)
 	assert.Equal(t, providers.ReasonSnapshotUnavailable, status.Reason)
 	assert.Equal(t, failure.Error(), status.Detail)
-
-	_, err = registry.Get(cloud.ProviderGCP)
-	require.ErrorIs(t, err, cloud.ErrDataUnavailable)
 
 	served, err := registry.Get(cloud.ProviderAWS)
 	require.NoError(t, err)
@@ -158,12 +182,12 @@ func TestFactoryReturningNoProviderIsDisabledRatherThanServed(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	_, err = registry.Get(cloud.ProviderAzure)
+	require.ErrorIs(t, err, cloud.ErrDataUnavailable)
+
 	status := statusFor(t, registry, cloud.ProviderAzure)
 	assert.False(t, status.Enabled)
 	assert.Equal(t, providers.ReasonSnapshotUnavailable, status.Reason)
-
-	_, err = registry.Get(cloud.ProviderAzure)
-	require.ErrorIs(t, err, cloud.ErrDataUnavailable)
 	assert.Empty(t, registry.Available())
 }
 
@@ -210,6 +234,9 @@ func TestStatusIsNotAliasedToRegistryState(t *testing.T) {
 	t.Parallel()
 
 	registry, err := providers.New(registrationFor(cloud.ProviderAWS))
+	require.NoError(t, err)
+
+	_, err = registry.Get(cloud.ProviderAWS)
 	require.NoError(t, err)
 
 	registry.Status()[0].Enabled = false

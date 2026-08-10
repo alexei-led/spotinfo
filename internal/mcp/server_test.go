@@ -112,7 +112,7 @@ func TestServerAcceptsAProviderRegistryWithoutChangingAWSToolNames(t *testing.T)
 	assert.Contains(t, tools, "list_spot_regions")
 	assert.Len(t, tools, totalMCPTools)
 
-	assert.Equal(t, []cloud.ProviderID{cloud.ProviderAWS, cloud.ProviderGCP}, server.availableProviders(),
+	assert.Equal(t, []cloud.ProviderID{cloud.ProviderAWS, cloud.ProviderGCP}, server.registeredProviders(),
 		"available providers are reported in stable lexical order")
 }
 
@@ -122,13 +122,17 @@ func TestServerWithoutAProviderRegistryReportsNoProviders(t *testing.T) {
 	server, err := NewServer(Config{Version: "1.0.0", Logger: slog.Default()})
 	require.NoError(t, err)
 
-	assert.Nil(t, server.availableProviders())
+	assert.Nil(t, server.registeredProviders())
 	assert.Len(t, server.mcpServer.ListTools(), totalMCPTools)
 }
 
 // A disabled provider is absent from the registration log rather than reported
 // as something the server can answer for.
-func TestDisabledProvidersAreNotReportedAsAvailable(t *testing.T) {
+// A registered cloud is named at startup even when its snapshot turns out to be
+// unusable: providers are built on first use, so the failure is not knowable
+// here without decoding every catalogue. The request for that cloud is what
+// reports it, which TestBrokenSnapshotDisablesOnlyItsOwnProvider covers.
+func TestRegisteredProvidersAreNamedBeforeTheyAreBuilt(t *testing.T) {
 	registry, err := providers.New(providers.Registration{
 		ID:    cloud.ProviderAzure,
 		Build: func() (cloud.Provider, error) { return nil, errors.New("catalog hash mismatch") },
@@ -142,7 +146,7 @@ func TestDisabledProvidersAreNotReportedAsAvailable(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.Empty(t, server.availableProviders())
+	assert.Equal(t, []cloud.ProviderID{cloud.ProviderAzure}, server.registeredProviders())
 }
 
 // TestServeStdio_ContextCancellation tests that stdio server respects context cancellation

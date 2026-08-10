@@ -118,15 +118,15 @@ func (r *stubRegistry) Get(id cloud.ProviderID) (cloud.Provider, error) {
 	return nil, fmt.Errorf("%w: cloud provider %q is unavailable (PROVIDER_NOT_REGISTERED)", cloud.ErrDataUnavailable, id)
 }
 
-func (r *stubRegistry) Available() []cloud.Provider {
-	available := make([]cloud.Provider, 0, len(r.providers))
+func (r *stubRegistry) Registered() []cloud.ProviderID {
+	ids := make([]cloud.ProviderID, 0, len(r.providers))
 	for _, id := range cloud.ProviderIDs() {
-		if provider, ok := r.providers[id]; ok {
-			available = append(available, provider)
+		if _, ok := r.providers[id]; ok {
+			ids = append(ids, id)
 		}
 	}
 
-	return available
+	return ids
 }
 
 // awsStub builds a registry holding one AWS provider that answers with the
@@ -306,6 +306,34 @@ func newEmbeddedRegistry() *stubRegistry {
 	if err != nil {
 		panic(err)
 	}
+
+	return newStubRegistry(provider)
+}
+
+// fixedSavingsClient returns advice the test wrote, so the real AWS adapter can
+// be driven without AWS and without the embedded feeds.
+type fixedSavingsClient struct{ advices []spot.Advice }
+
+func (c *fixedSavingsClient) GetSpotSavings(context.Context, ...spot.GetSpotSavingsOption) ([]spot.Advice, error) {
+	return c.advices, nil
+}
+func (*fixedSavingsClient) DataSource() string { return spot.DataSourceEmbedded }
+
+// awsAdapterRegistry wires the production AWS adapter over fixed advice.
+//
+// The v1 response golden used to be built from a cloud.Provider stub, which
+// meant it recorded the MCP renderer over candidates that were already neutral
+// and never executed the spot.Advice -> cloud.Candidate conversion this PR
+// introduces. Every conversion in that adapter — the float32 memory widening,
+// the savings clamp, the price and zone-price handling, the region/zone
+// placement split — was unpinned by the test whose whole purpose is to prove
+// v1 byte compatibility. Driving it through the real adapter is what makes the
+// golden able to observe a regression there.
+func awsAdapterRegistry(t *testing.T, advices []spot.Advice) *stubRegistry {
+	t.Helper()
+
+	provider, err := awsprovider.New(&fixedSavingsClient{advices: advices}, noopArchitectures{})
+	require.NoError(t, err)
 
 	return newStubRegistry(provider)
 }

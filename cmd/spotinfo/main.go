@@ -192,8 +192,13 @@ func newProviderRegistry(client *spot.Client) (*providers.Registry, error) {
 
 	// Why a cloud is missing is a --debug question, not an error: the request
 	// that selects it reports the same reason code on stderr.
+	//
+	// NOT_LOADED is skipped rather than logged as unavailable. Providers are
+	// built on first use, so at this point every registered cloud is unloaded —
+	// reporting that as "unavailable" would be noise, and reading the status of
+	// the others is exactly the eager construction the registry now defers.
 	for _, status := range registry.Status() {
-		if !status.Enabled {
+		if !status.Enabled && status.Reason != providers.ReasonNotLoaded {
 			log.Debug("cloud provider unavailable",
 				slog.String("provider", string(status.ID)),
 				slog.String("reason", string(status.Reason)),
