@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"spotinfo/internal/cloud"
+	"spotinfo/internal/reproducible"
 	"spotinfo/internal/snapshot"
 )
 
@@ -17,9 +18,31 @@ import (
 // describes it and with the coverage its parser actually finds.
 type embeddedSnapshot struct {
 	load     func() (*snapshot.Manifest, error)
-	payload  func(t *testing.T) []byte
-	coverage func(t *testing.T) snapshot.Coverage
+	coverage func(t *testing.T, payload []byte) snapshot.Coverage
 	manifest string
+	// file is the payload on disk, the file the manifest names and hashes.
+	file string
+	// source is the readable .json a compressed payload is built from, empty for
+	// a payload committed raw. It is what a data-refresh pull request is reviewed
+	// from, and what the archive is regenerated from.
+	source string
+}
+
+// readPayload reads the file the manifest describes.
+//
+// Deliberately from disk rather than from the //go:embed variable: a refresh
+// rewrites the archive during the run, and the embedded copy is whatever was
+// compiled in before that write. Hashing the embedded bytes recorded a manifest
+// for an archive that no longer existed. The embedded copy is checked against
+// this file by TestEmbeddedArchivesMatchTheirJSON and by the loaders' own
+// verification.
+func (e embeddedSnapshot) readPayload(t *testing.T) []byte {
+	t.Helper()
+
+	contents, err := os.ReadFile(filepath.Join("data", e.file))
+	require.NoError(t, err)
+
+	return contents
 }
 
 func embeddedSnapshots() []embeddedSnapshot {
@@ -27,11 +50,15 @@ func embeddedSnapshots() []embeddedSnapshot {
 		{
 			manifest: advisorManifestFile,
 			load:     advisorManifest,
-			payload:  func(*testing.T) []byte { return []byte(embeddedSpotData) },
-			coverage: func(t *testing.T) snapshot.Coverage {
+			source:   "spot-advisor-data.json",
+			file:     "spot-advisor-data.json.gz",
+			coverage: func(t *testing.T, payload []byte) snapshot.Coverage {
 				t.Helper()
 
-				data, err := loadEmbeddedAdvisorData()
+				contents, err := decompressEmbedded(payload)
+				require.NoError(t, err)
+
+				data, err := parseAdvisorResponse(contents)
 				require.NoError(t, err)
 
 				return advisorCoverage(data)
@@ -40,11 +67,15 @@ func embeddedSnapshots() []embeddedSnapshot {
 		{
 			manifest: priceManifestFile,
 			load:     priceManifest,
-			payload:  func(*testing.T) []byte { return []byte(embeddedPriceData) },
-			coverage: func(t *testing.T) snapshot.Coverage {
+			source:   "spot-price-data.json",
+			file:     "spot-price-data.json.gz",
+			coverage: func(t *testing.T, payload []byte) snapshot.Coverage {
 				t.Helper()
 
-				data, err := loadEmbeddedPricingData()
+				contents, err := decompressEmbedded(payload)
+				require.NoError(t, err)
+
+				data, err := parsePricingResponse(contents)
 				require.NoError(t, err)
 
 				return priceCoverage(data)
@@ -53,18 +84,11 @@ func embeddedSnapshots() []embeddedSnapshot {
 		{
 			manifest: architectureManifestFile,
 			load:     architectureManifest,
-			payload: func(t *testing.T) []byte {
+			file:     "architecture-snapshot.json",
+			coverage: func(t *testing.T, payload []byte) snapshot.Coverage {
 				t.Helper()
 
-				contents, err := architectureSnapshotFS.ReadFile("data/architecture-snapshot.json")
-				require.NoError(t, err)
-
-				return contents
-			},
-			coverage: func(t *testing.T) snapshot.Coverage {
-				t.Helper()
-
-				lookup, err := LoadEmbeddedArchitectureLookup()
+				lookup, err := parseArchitectureSnapshot(payload)
 				require.NoError(t, err)
 
 				return snapshot.Coverage{Machines: len(lookup.families)}
@@ -76,6 +100,12 @@ func embeddedSnapshots() []embeddedSnapshot {
 // TestEmbeddedSnapshotManifests is the data gate: every committed AWS snapshot
 // must have a valid manifest, hash to what that manifest declares, and still
 // cover its reviewed floor.
+//
+// Coverage is computed by parsing the payload this gate was handed, not by
+// calling the loaders. The loaders verify the payload against the on-disk
+// manifest, which is the very file a refresh is in the middle of replacing — so
+// routing coverage through them made `make refresh-manifests` fail on exactly
+// the case it exists for, a feed whose data actually changed.
 //
 // Run with REFRESH_MANIFESTS=1 after refreshing a feed to rewrite the hashes and
 // fetch times. Coverage floors stay hand-curated on purpose — regenerating them
@@ -105,23 +135,33 @@ func TestEmbeddedSnapshotManifests(t *testing.T) {
 	// snapshot.WriteFile skips a manifest whose bytes did not change and a
 	// refresh swaps one payload: the run rewrites the one sidecar that payload
 	// changed, atomically, and never opens the other two.
+	if regenerate {
+		for _, embedded := range snapshots {
+			if embedded.source == "" {
+				continue
+			}
+			require.NoError(t, writeArchive(embedded.source),
+				"regenerate the archive %s ships from the .json a reviewer reads", embedded.source)
+		}
+	}
+
 	validated := t.Run("validate", func(t *testing.T) {
 		for i, embedded := range snapshots {
 			t.Run(embedded.manifest, func(t *testing.T) {
 				t.Parallel()
 
-				payload := embedded.payload(t)
+				payload := embedded.readPayload(t)
 
 				manifest, err := embedded.load()
 				require.NoError(t, err)
 
 				if regenerate {
-					manifest = refreshed(manifest, payload)
+					manifest = refreshed(t, manifest, embedded, payload)
 				}
 
 				require.NoError(t, manifest.VerifyPayload(payload),
 					"%s and its data file were not updated together; refresh with `make refresh-manifests`", embedded.manifest)
-				require.NoError(t, snapshot.ValidateCoverage(embedded.coverage(t), manifest.MinRecords))
+				require.NoError(t, snapshot.ValidateCoverage(embedded.coverage(t, payload), manifest.MinRecords))
 
 				manifests[i] = manifest
 			})
@@ -150,15 +190,15 @@ func TestVerifyEmbeddedPayloadFailsClosedOnDrift(t *testing.T) {
 		payload  []byte
 		tampered bool
 	}{
-		{name: "advisor matches", load: advisorManifest, file: advisorManifestFile, payload: []byte(embeddedSpotData)},
-		{name: "price matches", load: priceManifest, file: priceManifestFile, payload: []byte(embeddedPriceData)},
+		{name: "advisor matches", load: advisorManifest, file: advisorManifestFile, payload: embeddedSpotData},
+		{name: "price matches", load: priceManifest, file: priceManifestFile, payload: embeddedPriceData},
 		{
 			name: "advisor drifted", load: advisorManifest, file: advisorManifestFile,
-			payload: append([]byte(embeddedSpotData), ' '), tampered: true,
+			payload: append(embeddedSpotData, ' '), tampered: true,
 		},
 		{
 			name: "price drifted", load: priceManifest, file: priceManifestFile,
-			payload: append([]byte(embeddedPriceData), ' '), tampered: true,
+			payload: append(embeddedPriceData, ' '), tampered: true,
 		},
 	}
 
@@ -321,18 +361,86 @@ func TestPriceCoverageCountsDistinctRowsOnly(t *testing.T) {
 // — for a raw feed, whose committed bytes are the source — the source hash and
 // fetch time. A reviewed catalogue keeps its human provenance, and coverage
 // floors are never touched.
-func refreshed(manifest *snapshot.Manifest, payload []byte) *snapshot.Manifest {
+func refreshed(t *testing.T, manifest *snapshot.Manifest, embedded embeddedSnapshot, payload []byte) *snapshot.Manifest {
+	t.Helper()
+
 	updated := *manifest
 	updated.Payload.SHA256 = snapshot.SHA256Hex(payload)
 
-	if updated.Payload.Form == snapshot.PayloadFormRawSource {
+	// The source hash is the upstream document's, never the payload's, unless
+	// the payload literally is that document. For a compressed payload the two
+	// differ on purpose: v2 publishes the source hash as provenance a consumer
+	// can verify by re-fetching the URL, and an archive's hash would not match.
+	switch updated.Payload.Form {
+	case snapshot.PayloadFormRawSource:
 		updated.Sources = []snapshot.Source{manifest.Sources[0]}
 		updated.Sources[0].SHA256 = updated.Payload.SHA256
 
 		if manifest.Payload.SHA256 != updated.Payload.SHA256 {
 			updated.Sources[0].FetchedAt = time.Now().UTC().Truncate(time.Second)
 		}
+	case snapshot.PayloadFormCompressedSource:
+		document, err := os.ReadFile(filepath.Join("data", embedded.source))
+		require.NoError(t, err)
+
+		updated.Sources = []snapshot.Source{manifest.Sources[0]}
+		updated.Sources[0].SHA256 = snapshot.SHA256Hex(document)
+
+		if manifest.Sources[0].SHA256 != updated.Sources[0].SHA256 {
+			updated.Sources[0].FetchedAt = time.Now().UTC().Truncate(time.Second)
+		}
+	case snapshot.PayloadFormParsedCatalog:
 	}
 
 	return &updated
+}
+
+// writeArchive rebuilds a committed feed archive from the .json beside it.
+//
+// It uses the same deterministic encoder the GCP and Azure updaters use, so a
+// refresh that changes no data produces byte-identical output and does not churn
+// the manifest hash. internal/reproducible is build-time only and is reachable
+// here because this is test code; the shipped package must never import it.
+func writeArchive(source string) error {
+	contents, err := os.ReadFile(filepath.Join("data", source))
+	if err != nil {
+		return err
+	}
+
+	archive, err := reproducible.Compress(contents)
+	if err != nil {
+		return err
+	}
+
+	return snapshot.WriteFile(filepath.Join("data", source+".gz"), archive)
+}
+
+// The archive the binary embeds must be exactly the .json committed next to it.
+//
+// Both files are committed on purpose: the .json is what a weekly data-refresh
+// pull request is reviewed from, and the .gz is what ships, 3.4 MB smaller. That
+// only works while they cannot drift, which is what this checks — a hand-edited
+// .json, or an archive rebuilt from data nobody reviewed, fails here.
+func TestEmbeddedArchivesMatchTheirJSON(t *testing.T) {
+	t.Parallel()
+
+	for _, embedded := range embeddedSnapshots() {
+		if embedded.source == "" {
+			continue
+		}
+
+		t.Run(embedded.source, func(t *testing.T) {
+			t.Parallel()
+
+			reviewed, err := os.ReadFile(filepath.Join("data", embedded.source))
+			require.NoError(t, err)
+
+			shipped, err := decompressEmbedded(embedded.readPayload(t))
+			require.NoError(t, err)
+
+			assert.Equal(t, reviewed, shipped,
+				"%s.gz does not decompress to %s; run `make refresh-manifests`",
+				embedded.source, embedded.source)
+		})
+	}
 }

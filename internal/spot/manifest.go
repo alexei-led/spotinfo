@@ -39,10 +39,10 @@ var (
 // construction would repeat work for no gain.
 var (
 	advisorPayloadVerified = sync.OnceValue(func() error {
-		return verifyEmbeddedPayload(advisorManifest, advisorManifestFile, []byte(embeddedSpotData))
+		return verifyEmbeddedPayload(advisorManifest, advisorManifestFile, embeddedSpotData)
 	})
 	pricePayloadVerified = sync.OnceValue(func() error {
-		return verifyEmbeddedPayload(priceManifest, priceManifestFile, []byte(embeddedPriceData))
+		return verifyEmbeddedPayload(priceManifest, priceManifestFile, embeddedPriceData)
 	})
 )
 

@@ -179,17 +179,32 @@ The embedded data files are critical — they provide offline capability:
 
 - `internal/spot/data/spot-advisor-data.json` — Interruption rates, savings % (AWS advisor feed)
 - `internal/spot/data/spot-price-data.json` — Static spot pricing (AWS pricing-page feed, plain JSON)
+- `internal/spot/data/{spot-advisor,spot-price}-data.json.gz` — **what the binary embeds.**
+  Each is its `.json` compressed, and is 3.4 MB smaller across the two
 - `internal/spot/data/{spot-advisor,spot-price,architecture}-manifest.json` — the sidecar
   manifests that hash and describe those files
+
+**Two files per feed, on purpose.** The readable `.json` is what a data-refresh pull
+request is reviewed from — a reviewer can see which prices moved. The `.json.gz` is what
+ships. They cannot drift: `TestEmbeddedArchivesMatchTheirJSON`, part of `verify-data`,
+fails when an archive does not decompress to exactly the `.json` beside it. Never
+hand-edit either; run `make refresh-manifests`, which rebuilds the archive from the
+`.json` and rewrites the hashes.
+
+The manifest's `payload.form` is `compressed-source`, not `raw-source`: `payload.sha256`
+is the archive that ships, while `sources[0].sha256` stays the hash of the document the
+URL serves. That distinction is what keeps the `content_sha256` published in every v2
+answer verifiable by re-fetching the source — an archive's hash would not match it.
+`architecture-snapshot.json` is left uncompressed; it is 3.8 KB.
 
 **Update flow:**
 
 1. `make update-data` — fetches fresh `spot-advisor-data.json`
 2. `make update-price` — fetches fresh `spot-price-data.json`
 3. `make verify-data` — parse gate on the embedded files
-4. Commit the refreshed data files **and** their manifest sidecars — both update targets
-   end by running `refresh-manifests`, and `verify-data` fails when a data file and its
-   manifest hash disagree
+4. Commit the refreshed `.json`, its regenerated `.json.gz`, **and** the manifest
+   sidecars — the update targets end by running `refresh-manifests`, which rebuilds the
+   archive and rewrites the hashes, and `verify-data` fails when any of the three disagree
 
 Both targets download to a `.tmp` file and only replace the tracked file on success,
 so a failed download cannot clobber good data.

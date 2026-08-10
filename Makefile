@@ -7,8 +7,15 @@ DATE    ?= $(shell date +%FT%T%z)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null)
 BRANCH  ?= $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null)
 
-# Build flags
-LDFLAGS = -X main.Version=$(VERSION) -X main.BuildDate=$(DATE) -X main.GitCommit=$(COMMIT) -X main.GitBranch=$(BRANCH) -X main.GitHubRelease=$(GITHUB_RELEASE)
+# Build flags.
+#
+# -s -w strips the symbol table and DWARF, which is 27% of the binary (58.2 MB ->
+# 42.3 MB measured). It costs nothing a released CLI needs: Go panics still
+# symbolize, because runtime stack traces read pclntab rather than DWARF, and
+# `go tool objdump` still disassembles. Only an external debugger attaching to a
+# release binary loses information, and that is not how this is debugged — build
+# without the flags for that.
+LDFLAGS = -s -w -X main.Version=$(VERSION) -X main.BuildDate=$(DATE) -X main.GitCommit=$(COMMIT) -X main.GitBranch=$(BRANCH) -X main.GitHubRelease=$(GITHUB_RELEASE)
 
 # Directories
 BIN_DIR = .bin
@@ -42,6 +49,7 @@ DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestEmbeddedSourceRefsCoverEverySnapshot
 DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestValidateCoverageRejectsATruncatedLiveFeed
 DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestEmbeddedPricesSatisfyTheNeutralRecordContract
 DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestEveryEmbeddedAdvisorRangeIsLabelled
+DATA_GATE_TESTS := $(DATA_GATE_TESTS)|TestEmbeddedArchivesMatchTheirJSON
 
 # Go environment. CGO stays off so `build` and `release` produce static binaries
 # for the scratch-based image; test-race overrides it for itself, because the

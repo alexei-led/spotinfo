@@ -7,14 +7,14 @@
   "payload": {
     "file": "spot-advisor-data.json",
     "form": "raw-source",
-    "sha256": "f2bd345cbf48629e9ba32d127dd989aada8db3c099c21f54e941611d034e32be"
+    "sha256": "158f404cca4a5167a2a035cbd952de8f1886bb14c8cdbc2a55f4871c33735f1a"
   },
   "sources": [
     {
-      "fetched_at": "2026-08-06T08:58:27Z",
+      "fetched_at": "2026-08-10T06:54:02Z",
       "observed_at": null,
       "url": "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json",
-      "sha256": "f2bd345cbf48629e9ba32d127dd989aada8db3c099c21f54e941611d034e32be"
+      "sha256": "158f404cca4a5167a2a035cbd952de8f1886bb14c8cdbc2a55f4871c33735f1a"
     }
   ],
   "min_records": {

@@ -1,6 +1,8 @@
 package spot
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -15,11 +17,23 @@ import (
 	"time"
 )
 
-//go:embed data/spot-advisor-data.json
-var embeddedSpotData string
+// The two large feeds are embedded gzipped, as the GCP and Azure catalogues
+// already are. Raw, they are 3.8 MB of the binary; compressed they are 341 KB,
+// because both repeat the same machine-size and OS strings in every region.
+//
+// The readable .json stays committed next to each archive and remains the file a
+// data-refresh pull request is reviewed from; TestEmbeddedArchivesMatchTheirJSON
+// proves the archive is exactly that file, so the two cannot drift. The manifest
+// hashes the archive, because the archive is what ships.
+//
+// architecture-snapshot.json is left raw on purpose: it is 3.8 KB, so
+// compressing it would save 3 KB and add a third decode path.
 
-//go:embed data/spot-price-data.json
-var embeddedPriceData string
+//go:embed data/spot-advisor-data.json.gz
+var embeddedSpotData []byte
+
+//go:embed data/spot-price-data.json.gz
+var embeddedPriceData []byte
 
 const (
 	spotAdvisorJSONURL = "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json"
@@ -150,15 +164,48 @@ func parseAdvisorResponse(body []byte) (*advisorData, error) {
 	return &result, nil
 }
 
+// maxEmbeddedFeedBytes bounds a decompressed feed. The two committed feeds are
+// under 3 MB; the ceiling keeps a corrupted archive from expanding without limit.
+const maxEmbeddedFeedBytes = 64 << 20
+
+// decompressEmbedded expands one committed feed archive.
+//
+// The bytes it returns are heap-allocated, unlike a raw //go:embed string, which
+// is demand-paged from the executable's read-only mapping. That is the trade the
+// compression makes: ~3.4 MB off the binary for one transient copy of each feed
+// during load. It is transient because only the parsed result is retained — the
+// decompressed JSON is garbage after Unmarshal returns.
+func decompressEmbedded(archive []byte) ([]byte, error) {
+	reader, err := gzip.NewReader(bytes.NewReader(archive))
+	if err != nil {
+		return nil, fmt.Errorf("open archive: %w", err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	contents, err := io.ReadAll(io.LimitReader(reader, maxEmbeddedFeedBytes))
+	if err != nil {
+		return nil, fmt.Errorf("read archive: %w", err)
+	}
+	if len(contents) == maxEmbeddedFeedBytes {
+		return nil, fmt.Errorf("archive hit the %d byte ceiling", maxEmbeddedFeedBytes) //nolint:err113
+	}
+
+	return contents, nil
+}
+
 // loadEmbeddedAdvisorData loads embedded advisor data as fallback.
 func loadEmbeddedAdvisorData() (*advisorData, error) {
 	if err := advisorPayloadVerified(); err != nil {
 		return nil, err
 	}
 
-	var result advisorData
-	err := json.Unmarshal([]byte(embeddedSpotData), &result)
+	contents, err := decompressEmbedded(embeddedSpotData)
 	if err != nil {
+		return nil, fmt.Errorf("embedded spot advisor archive: %w", err)
+	}
+
+	var result advisorData
+	if err := json.Unmarshal(contents, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse embedded spot data: %w", err)
 	}
 
@@ -247,9 +294,13 @@ func loadEmbeddedPricingData() (*rawPriceData, error) {
 		return nil, err
 	}
 
-	var result rawPriceData
-	err := json.Unmarshal([]byte(embeddedPriceData), &result)
+	contents, err := decompressEmbedded(embeddedPriceData)
 	if err != nil {
+		return nil, fmt.Errorf("embedded spot price archive: %w", err)
+	}
+
+	var result rawPriceData
+	if err := json.Unmarshal(contents, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse embedded spot price data: %w", err)
 	}
 

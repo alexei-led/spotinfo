@@ -90,6 +90,14 @@ const (
 	// its sources. The payload hash then describes a different artifact from
 	// every source hash and must differ from all of them.
 	PayloadFormParsedCatalog PayloadForm = "parsed-catalog"
+	// PayloadFormCompressedSource means the committed file is the upstream
+	// document compressed — the same bytes, smaller. It is deliberately distinct
+	// from raw-source: the payload hash describes the archive that ships, while
+	// the source hash stays the hash of the document the URL serves, which is
+	// what a consumer verifying published provenance can actually re-fetch and
+	// check. Collapsing the two would publish an archive's hash as the upstream
+	// document's.
+	PayloadFormCompressedSource PayloadForm = "compressed-source"
 )
 
 // Source records the provenance of one upstream document.
@@ -293,6 +301,16 @@ func (m *Manifest) validatePayload() error {
 
 		if m.Sources[0].SHA256 != m.Payload.SHA256 {
 			return fmt.Errorf("%w: a raw-source payload is its source, so their hashes must match",
+				ErrInvalidManifest)
+		}
+	case PayloadFormCompressedSource:
+		if len(m.Sources) != 1 {
+			return fmt.Errorf("%w: a compressed-source payload has exactly one source, got %d",
+				ErrInvalidManifest, len(m.Sources))
+		}
+
+		if m.Sources[0].SHA256 == m.Payload.SHA256 {
+			return fmt.Errorf("%w: a compressed-source payload is the archive, not the document, so their hashes must differ",
 				ErrInvalidManifest)
 		}
 	case PayloadFormParsedCatalog:

@@ -9,14 +9,14 @@
   "payload": {
     "file": "spot-price-data.json",
     "form": "raw-source",
-    "sha256": "f42df66cd52c9dc3ac28b6bb7e525627696eec60692d5cf56658c679f0012393"
+    "sha256": "cafdfff877df03265127b0b7615b92de79bc4e53b20eef3f2bb37181160fdbee"
   },
   "sources": [
     {
-      "fetched_at": "2026-08-06T08:58:27Z",
+      "fetched_at": "2026-08-10T06:54:02Z",
       "observed_at": null,
       "url": "https://website.spot.ec2.aws.a2z.com/spot.json",
-      "sha256": "f42df66cd52c9dc3ac28b6bb7e525627696eec60692d5cf56658c679f0012393"
+      "sha256": "cafdfff877df03265127b0b7615b92de79bc4e53b20eef3f2bb37181160fdbee"
     }
   ],
   "min_records": {
