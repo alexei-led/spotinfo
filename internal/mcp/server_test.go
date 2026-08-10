@@ -16,6 +16,8 @@ import (
 
 // TestNewServer tests server creation with different configurations
 func TestNewServer(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		cfg     Config
@@ -65,6 +67,8 @@ func TestNewServer(t *testing.T) {
 
 // TestServerToolRegistration verifies tools are registered during server creation
 func TestServerToolRegistration(t *testing.T) {
+	t.Parallel()
+
 	cfg := Config{
 		Version:   "1.0.0",
 		Logger:    slog.Default(),
@@ -100,6 +104,8 @@ func testProviderRegistry(t *testing.T, ids ...cloud.ProviderID) *providers.Regi
 // Every tool is served from the registry now. The AWS v1 names must survive
 // alongside the neutral recommendation tool.
 func TestServerAcceptsAProviderRegistryWithoutChangingAWSToolNames(t *testing.T) {
+	t.Parallel()
+
 	server, err := NewServer(Config{
 		Version:   "1.0.0",
 		Logger:    slog.Default(),
@@ -119,6 +125,8 @@ func TestServerAcceptsAProviderRegistryWithoutChangingAWSToolNames(t *testing.T)
 // A binary composed without a registry still serves the AWS tools rather than
 // failing to start.
 func TestServerWithoutAProviderRegistryReportsNoProviders(t *testing.T) {
+	t.Parallel()
+
 	server, err := NewServer(Config{Version: "1.0.0", Logger: slog.Default()})
 	require.NoError(t, err)
 
@@ -133,6 +141,8 @@ func TestServerWithoutAProviderRegistryReportsNoProviders(t *testing.T) {
 // here without decoding every catalogue. The request for that cloud is what
 // reports it, which TestBrokenSnapshotDisablesOnlyItsOwnProvider covers.
 func TestRegisteredProvidersAreNamedBeforeTheyAreBuilt(t *testing.T) {
+	t.Parallel()
+
 	registry, err := providers.New(providers.Registration{
 		ID:    cloud.ProviderAzure,
 		Build: func() (cloud.Provider, error) { return nil, errors.New("catalog hash mismatch") },
@@ -151,6 +161,8 @@ func TestRegisteredProvidersAreNamedBeforeTheyAreBuilt(t *testing.T) {
 
 // TestServeStdio_ContextCancellation tests that stdio server respects context cancellation
 func TestServeStdio_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	cfg := Config{
 		Version:   "1.0.0",
 		Logger:    slog.Default(),
@@ -187,6 +199,8 @@ func TestServeStdio_ContextCancellation(t *testing.T) {
 
 // TestServeSSE_ContextCancellation tests that SSE server respects context cancellation
 func TestServeSSE_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	cfg := Config{
 		Version:   "1.0.0",
 		Logger:    slog.Default(),
@@ -225,6 +239,8 @@ func TestServeSSE_ContextCancellation(t *testing.T) {
 
 // TestServeSSE_InvalidPort tests error handling for invalid port
 func TestServeSSE_InvalidPort(t *testing.T) {
+	t.Parallel()
+
 	cfg := Config{
 		Version:   "1.0.0",
 		Logger:    slog.Default(),
@@ -244,6 +260,8 @@ func TestServeSSE_InvalidPort(t *testing.T) {
 
 // TestServerConcurrentAccess tests that multiple operations can be performed concurrently
 func TestServerConcurrentAccess(t *testing.T) {
+	t.Parallel()
+
 	cfg := Config{
 		Version:   "1.0.0",
 		Logger:    slog.Default(),

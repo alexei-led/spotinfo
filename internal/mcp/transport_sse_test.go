@@ -17,6 +17,8 @@ import (
 
 // TestSSETransportBasic tests basic SSE transport functionality
 func TestSSETransportBasic(t *testing.T) {
+	t.Parallel()
+
 	cfg := Config{
 		Version:   "1.0.0",
 		Logger:    slog.Default(),
@@ -52,6 +54,8 @@ func TestSSETransportBasic(t *testing.T) {
 
 // TestSSETransportContextCancellation tests graceful shutdown
 func TestSSETransportContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	cfg := Config{
 		Version:   "1.0.0",
 		Logger:    slog.Default(),
@@ -88,6 +92,8 @@ func TestSSETransportContextCancellation(t *testing.T) {
 
 // TestSSETransportPortBinding tests port binding behavior
 func TestSSETransportPortBinding(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		port        string
@@ -139,6 +145,8 @@ func TestSSETransportPortBinding(t *testing.T) {
 
 // TestSSETransportWithStubProvider tests SSE with a stubbed provider registry
 func TestSSETransportWithStubProvider(t *testing.T) {
+	t.Parallel()
+
 	_, registry := awsStub()
 
 	cfg := Config{
@@ -171,6 +179,8 @@ func TestSSETransportWithStubProvider(t *testing.T) {
 
 // TestSSEServerCreation tests that SSE server can be created properly
 func TestSSEServerCreation(t *testing.T) {
+	t.Parallel()
+
 	cfg := Config{
 		Version:   "1.0.0",
 		Logger:    slog.Default(),
@@ -193,6 +203,8 @@ func TestSSEServerCreation(t *testing.T) {
 
 // TestSSEConcurrentAccess tests concurrent access to SSE server
 func TestSSEConcurrentAccess(t *testing.T) {
+	t.Parallel()
+
 	cfg := Config{
 		Version:   "1.0.0",
 		Logger:    slog.Default(),
@@ -233,6 +245,8 @@ func TestSSEConcurrentAccess(t *testing.T) {
 
 // TestSSEWithDifferentConfigurations tests different server configurations
 func TestSSEWithDifferentConfigurations(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		version string
@@ -280,6 +294,8 @@ func TestSSEWithDifferentConfigurations(t *testing.T) {
 
 // Mock HTTP test to simulate SSE endpoint behavior
 func TestSSEEndpointSimulation(t *testing.T) {
+	t.Parallel()
+
 	// This test simulates what the SSE endpoint would do
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Set SSE headers
@@ -338,6 +354,8 @@ func BenchmarkSSEServerCreation(b *testing.B) {
 
 // TestSSETransportErrorHandling tests error scenarios
 func TestSSETransportErrorHandling(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name          string
 		setupServer   func() (*Server, error)

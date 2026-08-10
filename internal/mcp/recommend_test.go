@@ -37,6 +37,8 @@ func gcpCandidates() []cloud.Candidate {
 // sends 0.041666666666666664 routinely, and the two tools must not disagree
 // about whether that is a usable ceiling or an invalid argument.
 func TestFinerThanScalePriceCeilingStillFiltersOnV2(t *testing.T) {
+	t.Parallel()
+
 	for name, test := range map[string]struct {
 		price float64
 		want  string
@@ -131,6 +133,8 @@ func decodeError(t *testing.T, result *mcp.CallToolResult) cloud.ErrorReport {
 // The registered input schema is the client contract. It is recorded as a
 // golden so a change is reviewed rather than shipped by accident.
 func TestRecommendInputSchemaMatchesTheRecordedContract(t *testing.T) {
+	t.Parallel()
+
 	server, err := NewServer(Config{Version: "1.0.0", Logger: slog.Default(), Providers: newEmbeddedRegistry()})
 	require.NoError(t, err)
 
@@ -156,6 +160,8 @@ var boundKeywords = []string{
 // the enum: a contract integer advertised as a number lets a host pass 2.5 where
 // the handler will truncate, and an open object silently drops a misspelled key.
 func TestRegisteredInputSchemaAgreesWithTheNormativeContract(t *testing.T) {
+	t.Parallel()
+
 	server, err := NewServer(Config{Version: "1.0.0", Logger: slog.Default(), Providers: newEmbeddedRegistry()})
 	require.NoError(t, err)
 
@@ -223,6 +229,8 @@ func TestRegisteredInputSchemaAgreesWithTheNormativeContract(t *testing.T) {
 // A successful answer validates against the published success schema, for every
 // provider shape.
 func TestRecommendSuccessPayloadValidatesAgainstTheContract(t *testing.T) {
+	t.Parallel()
+
 	schema := loadContractSchema(t, "recommend-spot-instances-v2-success.schema.json")
 
 	for _, test := range []struct {
@@ -269,6 +277,8 @@ func TestRecommendSuccessPayloadValidatesAgainstTheContract(t *testing.T) {
 // Every documented default is applied by the handler, so a minimal request is
 // answered exactly as the contract describes.
 func TestRecommendAppliesTheDocumentedDefaults(t *testing.T) {
+	t.Parallel()
+
 	_, registry := awsStub(buildCandidates(testCandidate{
 		Region: "us-east-1", Machine: "m6i.large", Price: 0.0416, Savings: 72,
 		RiskLabel: "<5%", RiskMin: 0, RiskMax: 5, VCPU: 2, MemoryGiB: 8,
@@ -293,6 +303,8 @@ func TestRecommendAppliesTheDocumentedDefaults(t *testing.T) {
 // Canonical prices are decimal strings with nine fractional digits, so a
 // consumer never reconstructs an amount from a float.
 func TestRecommendPublishesCanonicalPriceStrings(t *testing.T) {
+	t.Parallel()
+
 	_, registry := awsStub(buildCandidates(testCandidate{
 		Region: "us-east-1", Machine: "m6i.large", Price: 0.0416, Savings: 72,
 		RiskLabel: "<5%", RiskMin: 0, RiskMax: 5, VCPU: 2, MemoryGiB: 8,
@@ -316,6 +328,8 @@ func TestRecommendPublishesCanonicalPriceStrings(t *testing.T) {
 // A provider without risk data reports it explicitly. Nothing renders unknown
 // risk as a zero, and the cost policy makes no interruption claim.
 func TestRecommendReportsUnavailableRiskExplicitly(t *testing.T) {
+	t.Parallel()
+
 	registry := newStubRegistry(offlineProvider(cloud.ProviderGCP, gcpCandidates()))
 
 	report := decodeReport(t, callRecommend(t, registry, map[string]any{
@@ -335,6 +349,8 @@ func TestRecommendReportsUnavailableRiskExplicitly(t *testing.T) {
 // Every failure is a published error payload with a stable code, and no failure
 // carries recommendations.
 func TestRecommendErrorContract(t *testing.T) {
+	t.Parallel()
+
 	schema := loadContractSchema(t, "recommend-spot-instances-v2-error.schema.json")
 	riskFree := newStubRegistry(offlineProvider(cloud.ProviderGCP, gcpCandidates()))
 
@@ -585,6 +601,8 @@ func TestRecommendErrorContract(t *testing.T) {
 // alone cannot tell a caller which key was misspelled, and a sentinel-only
 // assertion would pass on any other INVALID_ARGUMENT branch.
 func TestRecommendNamesEveryUndeclaredArgument(t *testing.T) {
+	t.Parallel()
+
 	provider := offlineProvider(cloud.ProviderGCP, gcpCandidates())
 
 	result := callRecommend(t, newStubRegistry(provider), map[string]any{
@@ -601,6 +619,8 @@ func TestRecommendNamesEveryUndeclaredArgument(t *testing.T) {
 // Input is validated before any provider is queried, so an invalid request
 // costs no acquisition.
 func TestRecommendValidatesBeforeAcquisition(t *testing.T) {
+	t.Parallel()
+
 	provider := offlineProvider(cloud.ProviderGCP, gcpCandidates())
 	registry := newStubRegistry(provider)
 
@@ -621,6 +641,8 @@ func TestRecommendValidatesBeforeAcquisition(t *testing.T) {
 // The neutral request deliberately does not: the CLI has no upper bound on --top
 // and must not inherit one from the MCP surface.
 func TestRecommendEnforcesItsPublishedTopCeiling(t *testing.T) {
+	t.Parallel()
+
 	provider := offlineProvider(cloud.ProviderGCP, gcpCandidates())
 	registry := newStubRegistry(provider)
 
@@ -640,6 +662,8 @@ func TestRecommendEnforcesItsPublishedTopCeiling(t *testing.T) {
 
 // A binary composed without a registry reports it rather than panicking.
 func TestRecommendWithoutARegistryReportsDataUnavailable(t *testing.T) {
+	t.Parallel()
+
 	result := callRecommend(t, nil, map[string]any{
 		"architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
 	})
@@ -649,6 +673,8 @@ func TestRecommendWithoutARegistryReportsDataUnavailable(t *testing.T) {
 
 // The recorded success and error payloads document what a client receives.
 func TestRecommendGoldenPayloads(t *testing.T) {
+	t.Parallel()
+
 	_, registry := awsStub(buildCandidates(testCandidate{
 		Region: "us-east-1", Machine: "m6i.large", Price: 0.0416, Savings: 72,
 		RiskLabel: "<5%", RiskMin: 0, RiskMax: 5, VCPU: 2, MemoryGiB: 8,

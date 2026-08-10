@@ -18,6 +18,8 @@ import (
 // TestConcurrentSameClient tests concurrent access to the same spot client instance
 // This tests the real shared state in spot.Client (sync.Once, cached data)
 func TestConcurrentSameClient(t *testing.T) {
+	t.Parallel()
+
 	// Use real client to test actual shared state concurrency issues
 	registry := newEmbeddedRegistry() // Wraps a client with internal sync.Once and shared data providers
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -66,6 +68,8 @@ func TestConcurrentSameClient(t *testing.T) {
 
 // TestConcurrentDifferentParameters tests concurrent calls with different parameters
 func TestConcurrentDifferentParameters(t *testing.T) {
+	t.Parallel()
+
 	registry := newEmbeddedRegistry()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	findTool := NewFindSpotInstancesTool(registry, logger)
@@ -104,6 +108,8 @@ func TestConcurrentDifferentParameters(t *testing.T) {
 
 // TestConcurrentRegionsToolAccess tests concurrent access to regions tool
 func TestConcurrentRegionsToolAccess(t *testing.T) {
+	t.Parallel()
+
 	registry := newEmbeddedRegistry()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	regionsTool := NewListSpotRegionsTool(registry, logger)
@@ -137,6 +143,8 @@ func TestConcurrentRegionsToolAccess(t *testing.T) {
 
 // TestConcurrentServerCreation tests concurrent MCP server creation
 func TestConcurrentServerCreation(t *testing.T) {
+	t.Parallel()
+
 	const numGoroutines = 10
 	var wg sync.WaitGroup
 	servers := make([]*Server, numGoroutines)
@@ -169,6 +177,8 @@ func TestConcurrentServerCreation(t *testing.T) {
 
 // TestConcurrentParameterParsing tests concurrent parameter parsing with complex data
 func TestConcurrentParameterParsing(t *testing.T) {
+	t.Parallel()
+
 	// Different parameter sets to test concurrent parsing
 	testArgSets := []map[string]any{
 		{
@@ -220,6 +230,8 @@ func TestConcurrentParameterParsing(t *testing.T) {
 
 // TestConcurrentResponseBuilding tests concurrent response building with shared data
 func TestConcurrentResponseBuilding(t *testing.T) {
+	t.Parallel()
+
 	// Shared test candidates (simulates what would come from a provider)
 	testCandidates := buildCandidates(
 		testCandidate{Machine: "t2.micro", Region: "us-east-1", Price: 0.0116, Savings: 50,
@@ -272,6 +284,8 @@ func TestConcurrentResponseBuilding(t *testing.T) {
 
 // TestConcurrentHelperFunctions tests concurrent access to helper functions
 func TestConcurrentHelperFunctions(t *testing.T) {
+	t.Parallel()
+
 	// Shared test arguments
 	testArgs := map[string]any{
 		"test_string": "value",
@@ -311,6 +325,8 @@ func TestConcurrentHelperFunctions(t *testing.T) {
 // TestConcurrentDataProviderInitialization tests the critical sync.Once race condition
 // This is the most important race test - targets real shared state in spot.Client
 func TestConcurrentDataProviderInitialization(t *testing.T) {
+	t.Parallel()
+
 	const numGoroutines = 50
 	var wg sync.WaitGroup
 	results := make([]*mcp.CallToolResult, numGoroutines)
@@ -349,6 +365,8 @@ func TestConcurrentDataProviderInitialization(t *testing.T) {
 
 // TestConcurrentMixedOperations tests different operations triggering different code paths
 func TestConcurrentMixedOperations(t *testing.T) {
+	t.Parallel()
+
 	sharedRegistry := newEmbeddedRegistry()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
@@ -405,6 +423,8 @@ func TestConcurrentMixedOperations(t *testing.T) {
 
 // TestConcurrentContextCancellation tests concurrent context cancellation scenarios
 func TestConcurrentContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	registry := newEmbeddedRegistry()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	tool := NewFindSpotInstancesTool(registry, logger)
@@ -453,6 +473,8 @@ func TestConcurrentContextCancellation(t *testing.T) {
 
 // TestConcurrentLargeDatasets tests concurrent access with realistic large datasets
 func TestConcurrentLargeDatasets(t *testing.T) {
+	t.Parallel()
+
 	registry := newEmbeddedRegistry()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	tool := NewFindSpotInstancesTool(registry, logger)

@@ -11,6 +11,8 @@ import (
 
 // TestStdioTransport_ContextCancellation tests that stdio transport respects context cancellation
 func TestStdioTransport_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	cfg := Config{
 		Version:   "1.0.0",
 		Logger:    slog.Default(),

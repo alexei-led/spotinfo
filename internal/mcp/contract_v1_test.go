@@ -24,6 +24,8 @@ import (
 // can alter the schema without any change in this repository.
 
 func TestFindSpotInstancesInputSchemaMatchesRecordedV1Contract(t *testing.T) {
+	t.Parallel()
+
 	server, err := NewServer(Config{Version: "1.0.0", Logger: slog.Default(), Providers: newEmbeddedRegistry()})
 	require.NoError(t, err)
 
@@ -40,6 +42,8 @@ func TestFindSpotInstancesInputSchemaMatchesRecordedV1Contract(t *testing.T) {
 // between it and the recorded bytes — the whole spot.Advice -> cloud.Candidate
 // conversion plus the MCP renderer — is what this golden pins.
 func TestFindSpotInstancesResponseMatchesRecordedV1Contract(t *testing.T) {
+	t.Parallel()
+
 	regionScore := 8
 	registry := awsAdapterRegistry(t, []spot.Advice{
 		{

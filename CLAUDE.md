@@ -308,7 +308,14 @@ func WithFoo(foo string) GetSpotSavingsOption {
   or network, so `-short` currently skips nothing. If you add one that needs real AWS,
   guard it with `if testing.Short() { t.Skip("requires AWS credentials") }` so
   `go test -short ./...` stays credential-free.
-- **Parallel**: all unit tests use `t.Parallel()` — keep it that way
+- **Parallel**: unit tests use `t.Parallel()` — keep it that way, with one
+  measured exception. Tests in `cmd/spotinfo` that build or run a `cli.App` must
+  stay serial: urfave/cli appends its **package-level** `HelpFlag` to every
+  command it parses and writes to it in `Apply`, so two concurrent `app.Run`
+  calls race inside the library. `go test -race` reports it as a data race in
+  `urfave/cli`, not in this repository. A test in that package that touches no
+  CLI app can still be parallel. Anything using `t.Setenv` must stay serial too —
+  Go panics if a test calls both.
 - **Table-driven**: use `tc := tc` (loop variable capture) or Go 1.22+ range semantics
 - **Resilient**: assertions tolerate the embedded feeds changing under them
 - **No network in unit tests**: build clients via the embedded path and a nil live-price

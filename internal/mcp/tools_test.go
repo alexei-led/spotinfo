@@ -20,6 +20,8 @@ func testLogger() *slog.Logger {
 }
 
 func TestParseParameters(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		args     any
@@ -126,6 +128,8 @@ func TestParseParameters(t *testing.T) {
 }
 
 func TestSortOrderFor(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name   string
 		sortBy string
@@ -150,6 +154,8 @@ func TestSortOrderFor(t *testing.T) {
 // response alone would pass even if score, zone, ordering and price options
 // were dropped, because a fixture can carry scores the request never asked for.
 func TestToolParametersReachTheProviderQuery(t *testing.T) {
+	t.Parallel()
+
 	provider, registry := awsStub()
 
 	_, err := NewFindSpotInstancesTool(registry, testLogger()).Handle(context.Background(),
@@ -315,6 +321,8 @@ func TestUnusableMaxInterruptionRateIsRejectedBeforeAcquisition(t *testing.T) {
 
 // A zero max_price_per_hour is the v1 "no ceiling" value, not a ceiling of zero.
 func TestZeroMaxPriceRequestsNoCeiling(t *testing.T) {
+	t.Parallel()
+
 	provider, registry := awsStub()
 
 	_, err := NewFindSpotInstancesTool(registry, testLogger()).Handle(context.Background(),
@@ -325,6 +333,8 @@ func TestZeroMaxPriceRequestsNoCeiling(t *testing.T) {
 }
 
 func TestFilterByInterruption(t *testing.T) {
+	t.Parallel()
+
 	candidates := buildCandidates(
 		testCandidate{RiskLabel: "<5%", RiskMin: 0, RiskMax: 5},      // avg = 2.5
 		testCandidate{RiskLabel: "10-20%", RiskMin: 10, RiskMax: 20}, // avg = 15
@@ -350,6 +360,8 @@ func TestFilterByInterruption(t *testing.T) {
 }
 
 func TestBuildResponse(t *testing.T) {
+	t.Parallel()
+
 	startTime := time.Now()
 	scoreValue := 8
 	scoreTime := time.Now()
@@ -398,6 +410,8 @@ func TestBuildResponse(t *testing.T) {
 // neutral domain. The v1 response reported both as zero, and this tool is the
 // compatibility surface, so they stay zero here.
 func TestBuildResponseReportsAbsentObservationsAsTheV1Zero(t *testing.T) {
+	t.Parallel()
+
 	response := buildResponse(buildCandidates(testCandidate{
 		Machine: "m5.large", Region: "us-east-1", VCPU: 2, MemoryGiB: 8,
 	}), time.Now(), cloud.DataModeLive)
@@ -420,6 +434,8 @@ func TestBuildResponseReportsAbsentObservationsAsTheV1Zero(t *testing.T) {
 }
 
 func TestCalculateAvgInterruption(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name      string
 		fixture   testCandidate
@@ -462,6 +478,8 @@ func TestFilterByInterruptionDropsUnpublishedRisk(t *testing.T) {
 }
 
 func TestCalculateReliabilityScore(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name            string
 		avgInterruption float64
@@ -481,6 +499,8 @@ func TestCalculateReliabilityScore(t *testing.T) {
 }
 
 func TestFindSpotInstancesTool_Handle(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name           string
 		arguments      any
@@ -632,6 +652,8 @@ func TestFindSpotInstancesTool_Handle(t *testing.T) {
 }
 
 func TestListSpotRegionsTool_Handle(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name           string
 		registry       providerRegistry
