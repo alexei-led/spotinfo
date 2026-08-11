@@ -427,10 +427,20 @@ func WithFoo(foo string) GetSpotSavingsOption {
 - **Framework**: testify for assertions; `make test-coverage` for the coverage report
 - **Unit tests** use mock providers from `mocks_test.go` (in `internal/spot` and
   `cmd/spotinfo`) or hand-written `cloud.Provider` stubs — no AWS credentials needed
-- **Integration tests**: there are none today — every test runs without AWS credentials
-  or network, so `-short` currently skips nothing. If you add one that needs real AWS,
-  guard it with `if testing.Short() { t.Skip("requires AWS credentials") }` so
-  `go test -short ./...` stays credential-free.
+- **End-to-end tests**: `cmd/spotinfo/e2e_test.go` builds the binary once in `TestMain` and
+  runs it as a subprocess. It is the only place that covers flag parsing, exit codes, the
+  stdout/stderr split and the MCP stdio handshake as shipped. It needs no credentials and
+  makes no request: AWS runs with `--offline`, GCP and Azure have no live path, and the MCP
+  session pins `HTTP_PROXY`/`HTTPS_PROXY` at a closed port so the live-to-snapshot fallback
+  is exercised rather than the network. `-short` skips these — they compile the binary — so
+  `go test -short ./...` is the fast lane, not a credential guard.
+- **Never let a test reach the network.** The MCP surface has no per-call offline argument,
+  so an AWS tool call fetches both feeds: measured at 8,149 ms against 203 ms for
+  `spotinfo --offline --mcp`. Note that `--offline` *does* compose with `--mcp` — it is a
+  root flag. If you add a test that drives MCP, pass it, or pin a dead proxy.
+- If you add a test that genuinely needs real AWS, guard it with
+  `if testing.Short() { t.Skip("requires AWS credentials") }` so `go test -short ./...`
+  stays credential-free.
 - **Parallel**: unit tests use `t.Parallel()` — keep it that way, with one
   measured exception. Tests in `cmd/spotinfo` that build or run a `cli.App` must
   stay serial: urfave/cli appends its **package-level** `HelpFlag` to every
