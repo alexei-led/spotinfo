@@ -1459,8 +1459,10 @@ is `cached`; `--offline` is `embedded-snapshot` with no request; `--refresh` is 
 `internal/spot/{cache,cache_test,data,cache_flow_test}.go`, `.archfit.yaml`,
 `internal/providers/azure/{prices,provider_test}.go`, `cmd/update-azure-data/{main,main_test}.go`,
 `cmd/spotinfo/{main,list}.go` (`newProviderRegistryFor` and `fetchPolicy` — the delegating
-overload keeps Task 8's `refusals_test.go` byte-identical), and `docs/{data-sources,clouds,
-quick-start}.md`.
+overload meant Task 8's `refusals_test.go` needed no change for the capability; the fix pass
+below touched only a comment in it, never an assertion),
+`cmd/spotinfo/{multicloud_test,refusals_test}.go` (fix pass), and
+`docs/{data-sources,clouds,quick-start}.md`.
 
 ➕ **One `internal/providers/azure/provider_test.go` assertion changed, and it is not the Task
 8 test.** `TestCapabilitiesNeverClaimRisk` asserted `LiveEnrichment` was false, which is the
@@ -1507,9 +1509,12 @@ comment claimed a structural safety it does not have and now says the real reaso
 `go test`.** The same fresh-cache-dir probe attributes `advisor.json.gz` and `pricing.json.gz`
 to `TestNew_IntegrationWithEmbeddedData` and `TestNewWithOptions_EmbeddedDataMode`
 (`internal/spot/client_test.go`, `datasource_test.go`), both of which build a live `New()`
-client. It predates this plan and is out of scope for a Task 10 fix — the first test exists to
-prove the _live_ client falls back, so it cannot simply be switched to an embedded one — but it
-violates CLAUDE.md's "never let a test reach the network" and should get its own task.
+client. The fetch itself predates this plan — `git log -S` puts both tests in `5eedf20`, and
+`New()` has always been the live client — but the _cache write_ that makes it visible arrived
+with `4e82714` on this branch, which is why nobody had seen it before. It is out of scope for a
+Task 10 fix — the first test exists to prove the _live_ client falls back, so it cannot simply
+be switched to an embedded one — but it violates CLAUDE.md's "never let a test reach the
+network" and should get its own task.
 
 ⚠️ **CLAUDE.md is now stale on one point.** Its testing section still says "GCP and Azure have
 no live path", which this task falsified for Azure. A later task should correct it.
