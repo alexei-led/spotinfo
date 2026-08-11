@@ -2252,7 +2252,7 @@ are outside the suite.** They are shell probes over `.bin/spotinfo`, not tests; 
 
 ### Task 16: [Final] Update documentation
 
-- [ ] rewrite `docs/usage.md` against the new vocabulary and both commands
+- [x] rewrite `docs/usage.md` against the new vocabulary and both commands
 - [ ] update `README.md`, `docs/quick-start.md`, `docs/clouds.md`, `docs/installation.md`,
       `docs/mcp-server.md`, `docs/api-reference.md`, `docs/examples.md`,
       `docs/troubleshooting.md`, `docs/claude-desktop-setup.md` and `llms.txt`
@@ -2263,6 +2263,32 @@ are outside the suite.** They are shell probes over `.bin/spotinfo`, not tests; 
       and must carry the vocabulary rule, the unified defaults and the new invariants
 - [ ] leave this plan in place — Phase 10 still has to run against the documented surface, so
       archiving it here would file it as done before anyone has run the binary
+
+➕ **`docs/usage.md` is done.** Rewritten whole against `.bin/spotinfo` at `2f2b80b`: the old
+page documented a root query command that does not exist, `--type`/`--cpu`/`--memory`/`--price`
+throughout, a `spotinfo.recommend/v1` example payload, and score columns in all four output
+examples. Every command block in the new page was run and its output pasted; both `--help`
+pages are verbatim. This closes the debt recorded at :1135-1141 — the retired CSV header
+(`Instance Info,…,Frequency of interruption,…`) and text keys (`type=…, interruption=…`) are
+replaced by the measured `Machine,vCPU,Memory GiB,Savings over On-Demand,Risk,USD/Hour,Price
+Source` and `machine=…, vCPU=…, memory=…GiB, saving=…%, risk=…, price=…` — and the
+`docs/usage.md` half of :1220-1228, since `--offline` and `--refresh` are documented as
+accepted and meaningful on all three clouds.
+
+➕ **Three things the old page asserted that the binary contradicts, and one it never
+mentioned.** (1) "Repeated `--region` values are trimmed, deduplicated, and sorted before
+fetching and reporting" is true on `recommend` only: `spotinfo list --region us-west-2
+--region us-east-1 --region us-east-1` echoes `["us-west-2","us-east-1","us-east-1"]` and
+prints the region's rows twice, while the same regions on `recommend` echo
+`["us-east-1","us-west-2"]`. The new page states the split. (2) `--sort risk` is refused on
+`list` for GCP and Azure but accepted on `recommend` for the same cloud (exit 0, page
+printed); both halves are documented and the refusal is deliberately not generalised.
+(3) `--sort` on `recommend` reorders the printed page without re-ranking — `--sort machine`
+prints rank 3 first — which no earlier doc recorded. (4) `list` publishes a machine the cloud
+prices at nothing as `-` in `table`/`text`/`csv` and `null` in JSON, and `--sort price --order
+asc` therefore puts those rows first; `recommend` never proposes one (`KNOWN_POSITIVE_PRICE`).
+All three `data_source.mode` values were observed for the page: `embedded-snapshot`, `cached`,
+and `live` from `--refresh` on both AWS and Azure.
 
 ➕ **`docs/api-reference.md` and `llms.txt` are done.** The second checkbox above names ten
 files and is left unticked until the other nine land; these two are complete and every command
