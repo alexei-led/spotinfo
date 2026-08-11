@@ -119,8 +119,9 @@ $ spotinfo list --offline --region us-east-1 --machine '^m5\.large$'
 └──────────┴──────┴────────────┴────────────────────────┴──────┴──────────┘
 ```
 
-Two regions. The `REGION` column appears whenever the query asks for more than one region;
-it is dropped when exactly one region is queried:
+Two regions. The `REGION` column is dropped when the **request** names exactly one `--region`,
+and is present otherwise — that is about the request, not the result, so the default
+`--region all` keeps the column even on GCP, where it resolves to a single region:
 
 ```console
 $ spotinfo list --offline --region us-east-1 --region eu-west-1 --machine '^m5\.large$'
@@ -158,6 +159,17 @@ machine=Standard_D2as_v5, vCPU=2, memory=8GiB, saving=81%, risk='unavailable', p
 
 $ spotinfo list --cloud azure --region westeurope --machine '^Standard_D2as_v5$' --os windows --output text
 machine=Standard_D2as_v5, vCPU=2, memory=8GiB, saving=81%, risk='unavailable', price=0.0362
+```
+
+`--architecture` partitions a catalogue rather than searching it. In `us-east-1` the offline
+snapshot lists 1145 Linux machines: 348 `arm64`, 797 `x86_64`, no overlap.
+
+```console
+$ spotinfo list --offline --region us-east-1 --architecture arm64 --output csv | head -4
+Machine,vCPU,Memory GiB,Savings over On-Demand,Risk,USD/Hour,Price Source
+a1.metal,16,32,0,<5%,0.408,static
+c6g.metal,64,128,70,<5%,0.6574,static
+c7g.4xlarge,16,32,54,<5%,0.1934,static
 ```
 
 ### Machines with no published price
@@ -444,9 +456,10 @@ Machine,vCPU,Memory GiB,Savings over On-Demand,Risk,USD/Hour,Price Source
 m5.large,2,8,59,>20%,0.0399,static
 ```
 
-The CSV header gains a leading `Region` column when more than one region is queried. The
-`Price Source` column is `static` for a snapshot or feed price and `live` when the AWS
-`DescribeSpotPriceHistory` fallback supplied it.
+The CSV header gains a leading `Region` column under the same rule as the table: it is there
+unless the request names exactly one `--region`. The `Price Source` column is `static` for a
+snapshot or feed price, `live` when the AWS `DescribeSpotPriceHistory` fallback supplied it,
+and `-` for a machine with no published price.
 
 `number` prints one bare integer: the savings percent of the first match. It is not a price.
 
@@ -657,8 +670,16 @@ of VMs that stopped running; AWS measures the share of _running_ instances inter
 are different measurements, so `--workload web|ci|batch` still refuses GCP even when the
 number is in hand.
 
-A failed live lookup degrades rather than fails: the command warns on stderr, reports the
-snapshot's risk status, and exits 0.
+A failed live lookup degrades rather than fails. The ranked page prints with
+`risk=unavailable`, the run exits 0, and the reason arrives on stderr in a warning that begins
+`live risk unavailable; reporting the snapshot's risk status`:
+
+```console
+$ spotinfo recommend --cloud gcp --architecture x86_64 --min-vcpu 2 --min-memory-gib 4 \
+    --top 1 --live-risk --gcp-project fake-project-123 --output text
+time=... level=WARN msg="live risk unavailable; reporting the snapshot's risk status" provider=gcp error="all 1 preemption lookups failed, first: capacity history returned 404 Not Found: ..."
+rank=1, cloud=gcp, region=us-central1, machine=n2d-standard-2, architecture=x86_64, vcpu=2, memory_gib=8, spot_usd_per_hour=0.026912000, savings_percent=68, risk=unavailable, rationale_codes=ARCHITECTURE_MATCH COST_POLICY KNOWN_POSITIVE_PRICE RESOURCE_MINIMUMS_MET
+```
 
 The flag is refused on the other two clouds:
 
