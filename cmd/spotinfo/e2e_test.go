@@ -173,6 +173,7 @@ func e2eEnv(t *testing.T, extra ...string) []string {
 		"AWS_REGION=",
 		"GOOGLE_CLOUD_PROJECT=",
 		"GOOGLE_APPLICATION_CREDENTIALS=",
+		"SPOTINFO_GCP_BILLING_KEY=",
 		"AZURE_SUBSCRIPTION_ID=",
 	}
 

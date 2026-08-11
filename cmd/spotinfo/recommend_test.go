@@ -233,7 +233,10 @@ func TestRecommendCommandRejectsInvalidInputsBeforeFetching(t *testing.T) {
 
 func TestRecommendCommandNoCandidatesReturnsSentinelWithoutOutput(t *testing.T) {
 	client := newQueryClient(t)
-	client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return([]spot.Advice{}, nil).Once()
+	// Twice: the ranked query, then the widened one that diagnoses the empty
+	// set. This client answers from the embedded snapshot, which is the state
+	// where that second query costs nothing — see diagnoseNoCandidates.
+	client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return([]spot.Advice{}, nil).Twice()
 	var output bytes.Buffer
 
 	err := recommendTestApp(client, &output).Run(recommendArgs("--workload", "ci"))

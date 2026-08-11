@@ -332,8 +332,22 @@ func newProviderRegistryFor(client *spot.Client, policy cloud.FetchPolicy) (*pro
 			Build: func() (cloud.Provider, error) { return newAWSProvider(client) },
 		},
 		providers.Registration{
-			ID:    cloud.ProviderGCP,
-			Build: func() (cloud.Provider, error) { return gcpprovider.New() },
+			ID: cloud.ProviderGCP,
+			Build: func() (cloud.Provider, error) {
+				provider, buildErr := gcpprovider.New()
+				if buildErr != nil {
+					return nil, buildErr
+				}
+
+				// Only the environment here, never a flag: this is the composition
+				// the MCP surface answers from, and that surface takes no credential
+				// as a tool argument. The CLI resolves --gcp-billing-key on top of
+				// this in withGCPPrices, which supersedes it for that invocation.
+				return provider.WithLivePrices(gcpprovider.LivePriceConfig{
+					APIKey: gcpBillingKeyFromEnv(),
+					Policy: policy,
+				}), nil
+			},
 		},
 		providers.Registration{
 			ID: cloud.ProviderAzure,
@@ -1201,6 +1215,7 @@ func recommendCommand(action cli.ActionFunc) *cli.Command {
 				Usage: refreshFlagUsage,
 			},
 			&cli.StringFlag{Name: flagOutput, Usage: "format output: table|json", Value: defaultOutput},
+			gcpBillingKeyFlag(),
 		}, append(liveRiskFlags(), scoreFlags()...)...),
 	}
 }

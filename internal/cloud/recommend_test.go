@@ -19,9 +19,12 @@ type fakeProvider struct {
 	id             ProviderID
 	capabilities   Capabilities
 	resultProvider ProviderID
-	sources        []SourceRef
-	candidates     []Candidate
-	queries        []Query
+	// mode is what the answer claims about its freshness. The zero value reads
+	// as the committed snapshot, which is what most tests here answer from.
+	mode       DataMode
+	sources    []SourceRef
+	candidates []Candidate
+	queries    []Query
 }
 
 func (p *fakeProvider) ID() ProviderID             { return p.id }
@@ -38,9 +41,14 @@ func (p *fakeProvider) Query(_ context.Context, query *Query) (Result, error) {
 		resultProvider = p.id
 	}
 
+	mode := p.mode
+	if mode == "" {
+		mode = DataModeEmbeddedSnapshot
+	}
+
 	return Result{
 		Provider:   resultProvider,
-		Mode:       DataModeEmbeddedSnapshot,
+		Mode:       mode,
 		Sources:    p.sources,
 		Candidates: p.candidates,
 	}, nil

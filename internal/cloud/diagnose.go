@@ -45,17 +45,25 @@ type rejectionStage struct {
 //
 // Every failure to diagnose falls back to the plain message: this runs on an
 // error path and must never replace one error with a different one.
-func diagnoseNoCandidates(ctx context.Context, provider Provider, request *RecommendRequest) error {
+func diagnoseNoCandidates(ctx context.Context, provider Provider, request *RecommendRequest, mode DataMode) error {
 	plain := fmt.Errorf("%w for architecture %s and workload %s",
 		ErrNoCandidates, request.Architecture, request.Workload)
 
-	// A second query is free against a committed snapshot and is not free
-	// against a provider that enriches from a live API: clearing the vCPU and
-	// memory minima widens the candidate set, and on AWS every widened candidate
-	// without a static price falls through to DescribeSpotPriceHistory. That
-	// would spend a live-price timeout to improve the wording of a request that
-	// has already failed. A better message is not worth a slower failure.
-	if provider.Capabilities().LiveEnrichment {
+	// A second query is free against data the provider already holds and is not
+	// free against a live API: clearing the vCPU and memory minima widens the
+	// candidate set, and on AWS every widened candidate without a static price
+	// falls through to DescribeSpotPriceHistory. That would spend a live-price
+	// timeout to improve the wording of a request that has already failed. A
+	// better message is not worth a slower failure.
+	//
+	// The test is the mode the failed answer reported, not merely whether the
+	// provider *has* a live path. Every provider now declares live enrichment —
+	// AWS from its feeds, Azure from the Retail Prices API, GCP from the billing
+	// catalogue behind a key — so a capability test alone would disable this
+	// diagnosis everywhere and leave the whole file dead. An answer served from
+	// the committed snapshot was served from bytes already in memory, and asking
+	// again for a wider slice of them costs nothing.
+	if provider.Capabilities().LiveEnrichment && mode != DataModeEmbeddedSnapshot {
 		return plain
 	}
 

@@ -102,6 +102,27 @@ func MoneyCeilingFromFloat(value float64) (Money, error) {
 	return money, nil
 }
 
+// MoneyFromNanos builds an amount from nano units — the inverse of Nanos.
+//
+// It exists for a price that is *composed* rather than read: Google's Cloud
+// Billing Catalog API publishes a per-core and a per-GiB rate, and a machine
+// price is their weighted sum. Doing that arithmetic in nanos and converting
+// once keeps it exact, where routing each intermediate through a decimal string
+// would round twice and make the result depend on the order of the terms.
+//
+// A negative amount is not a price, and a value beyond the fixed-point range
+// would wrap: both fail rather than being clamped.
+func MoneyFromNanos(nanos int64) (Money, error) {
+	if nanos < 0 {
+		return Money{}, fmt.Errorf("%w: %d nano units is negative", ErrInvalidArgument, nanos)
+	}
+	if nanos/nanosPerUnit > maxWholeUnits {
+		return Money{}, fmt.Errorf("%w: %d nano units is out of range", ErrInvalidArgument, nanos)
+	}
+
+	return Money{nanos: nanos}, nil
+}
+
 // Nanos returns the amount in nano units — the exact stored value.
 func (m Money) Nanos() int64 { return m.nanos }
 

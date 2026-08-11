@@ -321,7 +321,7 @@ func Recommend(ctx context.Context, provider Provider, request *RecommendRequest
 		// of which constraint emptied it. diagnoseNoCandidates asks again, wider,
 		// and names it — on this path only, where the request has already failed.
 		if errors.Is(err, ErrNoCandidates) {
-			return nil, diagnoseNoCandidates(ctx, provider, request)
+			return nil, diagnoseNoCandidates(ctx, provider, request, result.Mode)
 		}
 
 		return nil, err

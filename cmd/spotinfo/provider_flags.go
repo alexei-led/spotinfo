@@ -237,15 +237,32 @@ func refuseUnsupportedFlags(ctx *cli.Context, provider cloud.Provider) error {
 		}
 	}
 
-	// Refused the way --live-risk is: the flag names one cloud's mechanism, and
+	// Refused the way --live-risk is: each flag names one cloud's mechanism, and
 	// passing it to another is a question that cloud cannot be asked.
-	if id != cloud.ProviderGCP && lineageIsSet(ctx, flagGCPProject) {
-		return refusedFlag(flagGCPProject, id,
-			fmt.Sprintf("the flag names the project an authenticated %s call is billed to, and %s makes none",
-				cloud.ProviderGCP, id))
+	if id != cloud.ProviderGCP {
+		for _, credential := range gcpCredentials {
+			if lineageIsSet(ctx, credential.flag) {
+				return refusedFlag(credential.flag, id,
+					fmt.Sprintf("the flag names %s, and %s makes none", credential.names, id))
+			}
+		}
 	}
 
 	return nil
+}
+
+// gcpCredential is a flag that carries something a Google Cloud call is
+// authenticated or billed with.
+type gcpCredential struct {
+	flag  string
+	names string
+}
+
+// gcpCredentials is ordered rather than a map, so a caller who passes both is
+// told about the same one on every run.
+var gcpCredentials = []gcpCredential{
+	{flag: flagGCPProject, names: "the project an authenticated " + string(cloud.ProviderGCP) + " call is billed to"},
+	{flag: flagGCPBillingKey, names: "the api key a " + string(cloud.ProviderGCP) + " price catalogue lookup is made with"},
 }
 
 // placementScoreReason says why a cloud serves no placement score.

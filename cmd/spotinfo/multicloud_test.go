@@ -194,7 +194,13 @@ func TestRecommendationAcceptsABudgetFinerThanTheScale(t *testing.T) {
 	}
 }
 
+// Without a billing key the committed snapshot is the whole answer, and it
+// covers one region. The variable is cleared rather than assumed absent: a
+// developer machine that exports a key would otherwise turn this test into a
+// live call to Google, billed to whoever the key belongs to.
 func TestGCPRecommendationHonoursAnExplicitRegion(t *testing.T) {
+	t.Setenv(gcpBillingKeyEnv, "")
+
 	_, err := runMulticloudRecommend(t,
 		"--cloud", "gcp", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
 		"--region", "europe-west1", "--output", "json")

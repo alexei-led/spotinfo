@@ -48,11 +48,19 @@ type CatalogMachine struct {
 // paired On-Demand price. It is absent when the two prices cannot produce a
 // figure in the 1..100 range a consumer can read as a percentage.
 func (m *CatalogMachine) SavingsPercent() *int {
-	if m.OnDemand.IsZero() || m.Spot.Nanos() >= m.OnDemand.Nanos() {
+	return savingsPercent(m.Spot, m.OnDemand)
+}
+
+// savingsPercent is the same figure for a pair of prices that did not come from
+// a catalogue row — a live answer composes both from the billing catalogue, and
+// its savings must be derived from the prices it publishes rather than from the
+// snapshot's.
+func savingsPercent(spot, onDemand cloud.Money) *int {
+	if onDemand.IsZero() || spot.Nanos() >= onDemand.Nanos() {
 		return nil
 	}
 
-	saved := int((m.OnDemand.Nanos() - m.Spot.Nanos()) * percentScale / m.OnDemand.Nanos())
+	saved := int((onDemand.Nanos() - spot.Nanos()) * percentScale / onDemand.Nanos())
 	if saved <= 0 {
 		return nil
 	}

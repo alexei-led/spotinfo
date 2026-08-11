@@ -364,6 +364,11 @@ func execRecommend(ctx *cli.Context, execCtx context.Context, provider cloud.Pro
 		return err
 	}
 
+	// Last, so a live price path is wired onto whatever the two authenticated
+	// lookups above returned rather than replacing it. All three copy the
+	// provider, so the registry's own stays untouched.
+	provider = withGCPPrices(ctx, provider)
+
 	report, err := cloud.Recommend(execCtx, provider, request)
 	if err != nil {
 		return err

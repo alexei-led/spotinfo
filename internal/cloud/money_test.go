@@ -84,6 +84,44 @@ func TestMoneyFromFloat(t *testing.T) {
 	}
 }
 
+// MoneyFromNanos is the constructor a composed price needs: a GCP machine price
+// is a sum of two nano amounts, and routing that through a decimal string would
+// round it twice.
+func TestMoneyFromNanos(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name    string
+		wantErr error
+		input   int64
+	}{
+		{name: "a composed price round-trips", input: 41_600_000},
+		{name: "zero is an amount", input: 0},
+		{name: "the largest representable amount", input: 9_223_372_035_000_000_000},
+		{name: "negative is not a price", input: -1, wantErr: ErrInvalidArgument},
+		{name: "beyond the fixed-point range", input: 9_223_372_036_000_000_000, wantErr: ErrInvalidArgument},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			money, err := MoneyFromNanos(test.input)
+			if test.wantErr != nil {
+				require.ErrorIs(t, err, test.wantErr)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, test.input, money.Nanos())
+
+			// The inverse of Nanos, so the canonical string form agrees.
+			parsed, parseErr := ParseMoney(money.String())
+			require.NoError(t, parseErr)
+			assert.Equal(t, money, parsed)
+		})
+	}
+}
+
 func TestMoneyCeilingFromFloat(t *testing.T) {
 	t.Parallel()
 

@@ -1840,20 +1840,101 @@ missing three placement fields now misses four: `region_estimated_uptime_seconds
 - Modify: `internal/providers/gcp/provider.go`
 - Modify: `cmd/spotinfo/provider_flags.go`
 
-- [ ] read the Cloud Billing Catalog API with a key from `--gcp-billing-key` or an environment
+- [x] read the Cloud Billing Catalog API with a key from `--gcp-billing-key` or an environment
       variable, for the queried regions only
-- [ ] let a successful call widen `--region` past `us-central1` for that invocation only
-- [ ] never write a catalogue price into the snapshot: Google states no redistribution terms
-- [ ] without a key, keep answering `us-central1` from the snapshot and report `NO_CANDIDATES`
+- [x] let a successful call widen `--region` past `us-central1` for that invocation only
+- [x] never write a catalogue price into the snapshot: Google states no redistribution terms
+- [x] without a key, keep answering `us-central1` from the snapshot and report `NO_CANDIDATES`
       for any other explicit region, exactly as today
-- [ ] set `CapabilityLiveEnrichment` true for GCP once the key path exists, retiring the Task 8
+- [x] set `CapabilityLiveEnrichment` true for GCP once the key path exists, retiring the Task 8
       refusal for `--offline` and `--refresh` on GCP
-- [ ] write tests against a stub transport: success, no key, a rejected key, and a region the
+- [x] write tests against a stub transport: success, no key, a rejected key, and a region the
       API does not price
-- [ ] write a test asserting the snapshot is unchanged after a live call
-- ➕ declare `--gcp-billing-key` on both commands and delete its two `vocabularyGaps` rows in
-  `cmd/spotinfo/vocabulary_test.go`
-- [ ] run `make verify-data` and `make test` — must pass before Task 14
+- [x] write a test asserting the snapshot is unchanged after a live call
+- [x] ➕ declare `--gcp-billing-key` on both commands and delete its two `vocabularyGaps` rows in
+  `cmd/spotinfo/vocabulary_test.go` — `vocabularyGaps` is now empty, so the command-tree test is
+  plain equality between the tree and the vocabulary, which is what criterion 3 asks for
+- [x] run `make verify-data` and `make test` — must pass before Task 14
+
+➕ **This path _derives_ prices where the snapshot _scrapes_ them, and that is the design
+decision the rest follows from.** The catalogue API prices **components** — a per-core and a
+per-GiB rate per machine series — and a machine price is their weighted sum, which is how
+Google bills a predefined machine type. That is a second derivation of the same figure, so the
+two are never mixed: an overlay covers **every** queried region or it is dropped whole
+(`livePrices` returns nil on the first region that cannot be composed), and within a region
+every published price comes from the same document. Consequence, recorded rather than papered
+over: **with a key, `--region us-central1` returns slightly different numbers than without
+one** — same vendor, same instant, two derivations.
+
+➕ **The floor is asymmetric on purpose.** `us-central1` — the region a reviewer accepted 333
+scraped machines for — is held to the contract's `min_machines`, because thinning there is a
+regression against reviewed data. Any other region has no such baseline and Google genuinely
+sells fewer series in a small region, so holding it to us-central1's floor would refuse most of
+the world to catch a defect the parse gates already catch: unit, currency, usage type, exact
+series match, and `spot < on_demand` each drop a bad rate rather than publishing one.
+`TestTheCommittedRegionKeepsItsReviewedFloorAndAWidenedRegionDoesNot` drives both halves.
+
+➕ **The key travels in `X-Goog-Api-Key`, never in a URL**, so it cannot reach the cache entry,
+a debug log or the provenance a published answer cites — asserted by
+`TestTheApiKeyNeverReachesAUrlOrThePublishedProvenance`. The environment fallback is
+`SPOTINFO_GCP_BILLING_KEY` rather than Google's generic `GOOGLE_API_KEY`: the key is the only
+opt-in this path has, so an ambient variable exported for another Google API would silently
+turn on a billed network call. `e2eEnv` clears it, and
+`TestGCPRecommendationHonoursAnExplicitRegion` clears it too — without that, a developer
+machine with a key exported would have made that test call Google.
+
+➕ **A live answer publishes the catalogue API _beside_ the committed pages, not instead of
+them.** The amounts came from the API but every vCPU, memory and architecture figure still
+comes from the scraped snapshot, and Invariant 7 forbids dropping the provenance of a value a
+candidate carries. `ParserVersion` is a new `gcp-billing-catalog/1`, deliberately not the
+snapshot's `gcp-pricing-html/1`: reporting a composed price under the scrape's parser would
+claim a reader could reproduce it from the pricing pages. No source contract changed —
+the contract governs the committed snapshot and this never touches it, exactly as `--live-risk`
+records.
+
+➕ **`diagnoseNoCandidates` now tests the answer's data _mode_, not merely the provider's
+capability.** The guard skipped the widened diagnostic query for any provider declaring
+`LiveEnrichment`; after this task all three declare it, so that guard would have left the whole
+of `internal/cloud/diagnose.go` unreachable and every `NO_CANDIDATES` message back to the
+generic sentence — caught by the pinned e2e row that asks GCP for `eu-west-1`. The diagnosis now
+runs when the failed answer was served from the committed snapshot, which is exactly when the
+second query costs nothing, and is skipped on `live`/`cached`. This also restores the message on
+Azure, which lost it silently in Task 10. `internal/cloud/diagnose_test.go` covers all three
+cases.
+
+➕ **Files this task's list omits.** `internal/cloud/money.go` (`MoneyFromNanos`, the
+constructor a composed price needs so two nano terms are summed exactly instead of rounded
+twice through a decimal string), `internal/cloud/{diagnose,recommend}.go`,
+`internal/providers/gcp/catalog.go` (`savingsPercent` extracted so a live pair derives its own
+savings), `cmd/spotinfo/gcpprices.go` (new: the flag, the environment fallback and
+`withGCPPrices`), `cmd/spotinfo/{list,recommend,main}.go`, and the tests
+`internal/cloud/{diagnose,money,recommend}_test.go`,
+`internal/providers/gcp/provider_test.go`, `cmd/spotinfo/{gcpprices,recommend,multicloud,
+e2e,vocabulary}_test.go`.
+
+➕ **MCP reads the key from the environment only**, wired in the GCP registration in
+`newProviderRegistryFor`, which is the composition that surface answers from — it takes no
+credential as a tool argument, the way it takes no `--gcp-project`. The CLI resolves the flag on
+top of that in `withGCPPrices`.
+
+➕ **`make verify-architecture` passes: verdict `pass`,
+`archfitcheck: no open critical or high findings (32 findings reviewed)`, all 46 severities
+`medium`.** Run because this task adds two production files.
+
+⚠️ **The SKU description grammar and the Compute service id are unverified against the live
+API.** No test here reaches Google, and this repository holds no key. The mitigation is
+structural rather than informational: the series token is matched **exactly** against the
+contract's reviewed series list, so a wrong guess **drops** a machine instead of mis-attributing
+a price, and a document that drops too much falls back to the snapshot. Post-Completion already
+lists `--gcp-billing-key` against a real key as maintainer verification; that run is what turns
+the grammar from plausible into known. Expect `m1`/`m2` to drop — Google describes them as
+`Memory-optimized Instance Core`, which carries no series token.
+
+⚠️ **Task 16 doc debt, added to Tasks 11 and 12's.** `docs/clouds.md` and `docs/data-sources.md`
+still say GCP is `us-central1` only and that its answers are always `embedded-snapshot`; both are
+now conditional on a billing key. `docs/api-reference.md` must document
+`SPOTINFO_GCP_BILLING_KEY`, the extra `data_source.sources` entry a live GCP answer carries, and
+that GCP `mode` can now be `live` or `cached`.
 
 ---
 

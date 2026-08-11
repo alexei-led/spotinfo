@@ -75,7 +75,13 @@ func TestProviderDeclaresOnlyWhatTheCommittedPagesPublish(t *testing.T) {
 	assert.True(t, capabilities.Has(cloud.CapabilityMachineSpec))
 	assert.False(t, capabilities.Has(cloud.CapabilityRisk), "gcp publishes no anonymous preemption history")
 	assert.False(t, capabilities.Has(cloud.CapabilityZoneDetail))
-	assert.False(t, capabilities.Has(cloud.CapabilityLiveEnrichment))
+
+	// Declared unconditionally, like the placement score below: it says this
+	// build has a live price path — the Cloud Billing Catalog API — not that this
+	// invocation carries a key for it. Both surfaces read capabilities before a
+	// key is wired onto the provider, so a conditional declaration would refuse
+	// --offline and --refresh on the one invocation that can act on them.
+	assert.True(t, capabilities.Has(cloud.CapabilityLiveEnrichment))
 
 	// Declared, and named. compute advice.capacity publishes a probability, so a
 	// consumer must read it as one: an integer floor over it has no reviewed

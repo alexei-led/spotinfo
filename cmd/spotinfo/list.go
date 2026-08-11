@@ -118,6 +118,7 @@ func listCommand(action cli.ActionFunc) *cli.Command {
 				Usage: refreshFlagUsage,
 			},
 			gcpProjectFlag(),
+			gcpBillingKeyFlag(),
 		}, scoreFlags()...),
 	}
 }
@@ -305,7 +306,10 @@ func resolveListProvider(ctx *cli.Context, registry providerRegistry,
 		return nil, fmt.Errorf("%s: %w", id, capErr)
 	}
 
-	return provider, nil
+	// Wired last, after every refusal above: a key must not buy a request the
+	// capability gate would have refused, and the gate reads the provider's own
+	// declaration rather than whether a lookup happens to be attached.
+	return withGCPPrices(ctx, provider), nil
 }
 
 // listProvider builds the AWS provider from the acquisition client and resolves

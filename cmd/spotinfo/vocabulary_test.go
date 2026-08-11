@@ -55,18 +55,10 @@ type flagGap struct {
 	extra map[string]string
 }
 
-var vocabularyGaps = map[string]flagGap{
-	listCommandName: {
-		missing: map[string]string{
-			flagGCPBillingKey: "task 13 declares the flag",
-		},
-	},
-	recommendCommandName: {
-		missing: map[string]string{
-			flagGCPBillingKey: "task 13 declares the flag",
-		},
-	},
-}
+// Empty since Task 13 landed --gcp-billing-key on both commands: the assertion
+// below is now plain equality between the built tree and the vocabulary, which
+// is what acceptance criterion 3 asks for.
+var vocabularyGaps = map[string]flagGap{}
 
 // TestTheCommandTreeDeclaresExactlyTheVocabulary is what makes acceptance
 // criterion 3 mechanical: every concept has one flag name, and the built tree
