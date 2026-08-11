@@ -1478,9 +1478,41 @@ request was made. It was caught by temporarily panicking in `sweepRegion` when
 provider that way. `newTestProvider` in `internal/providers/azure/provider_test.go` now returns
 a provider with `Offline: true` and says why, which closes the trap for every current and future
 test in the package; `liveProvider` builds its own from `New()` because it wires a stub endpoint.
-With that fix the probe fires nowhere in the module. The default itself stays live, because it
-matches `spot.Client` and because a bare provider that silently ignored `--offline` would be the
-very silent no-op Phase 2 exists to remove.
+The default itself stays live, because it matches `spot.Client` and because a bare provider that
+silently ignored `--offline` would be the very silent no-op Phase 2 exists to remove.
+
+⚠️➕ **That note first read "with that fix the probe fires nowhere in the module", and that was
+false — the probe was run against a warm cache.** `cmd/spotinfo`'s `shippedRegistry` built
+Azure the same bare way, and two tests that name a covered region —
+`TestAzureRecommendationHonoursAnExplicitRegion` and `TestListAnswersWindowsOnAzure` — swept
+`prices.azure.com` for real on every `make test`, 5.5 MB each. The `sweepRegion` panic never
+fired there because `~/Library/Caches/spotinfo/azure-prices-westeurope.json.gz` was already
+warm from the manual verification an hour earlier, so the fetch branch was never entered. The
+generalizable rule: **a network-reach probe run against a warm cache proves nothing.** Run it
+under a fresh `SPOTINFO_CACHE_DIR` and inspect the directory afterwards — a cache file that
+appears is a request that happened, and it is evidence a passing fail-soft test cannot give
+you. `shippedRegistry` now builds Azure through `WithLivePrices` with `Offline: true`, the way
+`main.go` builds it, and both region-naming tests assert
+`data_source.mode == embedded-snapshot`, which is the one observable that separates a snapshot
+answer from a swept one. Verified both ways: with the pin, a fresh cache dir stays empty and
+the package drops from 3.9 s to 1.4 s; with the pin dropped and a pre-warmed cache behind a
+dead proxy, both assertions go red at `cached` — so the guard discriminates and needs no
+network to prove it. `go test ./... -count=1` under one fresh cache dir now writes no
+`azure-prices-*` entry anywhere in the module. `refusals_test.go`'s registry was left alone: it
+is deliberately the production wiring, and it stays off the network only because every request
+in it leaves `--region` at its default of `all`, which `liveRegions` refuses to sweep — its
+comment claimed a structural safety it does not have and now says the real reason.
+
+⚠️ **Discovered, pre-existing, not Azure: `internal/spot` fetches both AWS feeds during
+`go test`.** The same fresh-cache-dir probe attributes `advisor.json.gz` and `pricing.json.gz`
+to `TestNew_IntegrationWithEmbeddedData` and `TestNewWithOptions_EmbeddedDataMode`
+(`internal/spot/client_test.go`, `datasource_test.go`), both of which build a live `New()`
+client. It predates this plan and is out of scope for a Task 10 fix — the first test exists to
+prove the _live_ client falls back, so it cannot simply be switched to an embedded one — but it
+violates CLAUDE.md's "never let a test reach the network" and should get its own task.
+
+⚠️ **CLAUDE.md is now stale on one point.** Its testing section still says "GCP and Azure have
+no live path", which this task falsified for Azure. A later task should correct it.
 
 ➕ **The live sweep is held to `verifyOperatingSystems`' second half as well as the machine
 floor.** A sweep that clears 180 machines on Linux alone is refused (`errUnpricedOS`): all 55

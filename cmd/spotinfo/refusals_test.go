@@ -27,9 +27,12 @@ import (
 // the capability lands, and this test keeps asserting the same rule either way.
 func TestOfflineAndRefreshAreRefusedExactlyWhereThereIsNoLiveFeed(t *testing.T) {
 	// The production registry, so "registered" means what the binary ships.
-	// Building it opens no connection: providers are constructed on first use
-	// and spot.Client fetches on first query, and every request below is refused
-	// or answered before either happens.
+	// Building it opens no connection: providers are constructed on first use.
+	// What keeps the requests below off the network is narrower than it looks —
+	// the AWS client is offline, and the Azure provider here is live-capable but
+	// every request leaves --region at its default of all, which liveRegions
+	// answers from the snapshot rather than sweeping. Name a covered region here
+	// and this test fetches.
 	registry, err := newProviderRegistry(newSpotClientFor(cloud.FetchPolicy{Offline: true}))
 	require.NoError(t, err)
 

@@ -20,9 +20,15 @@ import (
 	gcpprovider "spotinfo/internal/providers/gcp"
 )
 
-// shippedRegistry is the wiring the binary uses, minus AWS. AWS needs a live
-// client, and these tests are about the offline clouds; the AWS paths are
-// covered by their own tests.
+// shippedRegistry is the wiring the binary uses, minus AWS and pinned offline.
+// AWS needs a live client, and these tests answer from the committed snapshots;
+// the AWS paths are covered by their own tests.
+//
+// Azure goes through WithLivePrices because a bare azureprovider.New() has
+// Offline: false and liveBase() falls back to the contracted endpoint, so a test
+// naming one or two covered regions swept prices.azure.com for real — and, the
+// path being fail-soft, passed while doing it. The data_source.mode assertions
+// in the region-naming tests below go red if this pin is ever dropped.
 func shippedRegistry(t *testing.T) *providers.Registry {
 	t.Helper()
 
@@ -32,8 +38,17 @@ func shippedRegistry(t *testing.T) *providers.Registry {
 			Build: func() (cloud.Provider, error) { return gcpprovider.New() },
 		},
 		providers.Registration{
-			ID:    cloud.ProviderAzure,
-			Build: func() (cloud.Provider, error) { return azureprovider.New() },
+			ID: cloud.ProviderAzure,
+			Build: func() (cloud.Provider, error) {
+				provider, buildErr := azureprovider.New()
+				if buildErr != nil {
+					return nil, buildErr
+				}
+
+				return provider.WithLivePrices(azureprovider.LivePriceConfig{
+					Policy: cloud.FetchPolicy{Offline: true},
+				}), nil
+			},
 		},
 	)
 	require.NoError(t, err)
@@ -242,6 +257,11 @@ func TestAzureRecommendationHonoursAnExplicitRegion(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(output), &report))
 	require.NotEmpty(t, report.Recommendations)
 
+	// A named covered region is the one shape that triggers a live Azure sweep,
+	// so this is where the offline pin in shippedRegistry is checked. Anything
+	// but embedded-snapshot means the test reached prices.azure.com.
+	assert.Equal(t, cloud.DataModeEmbeddedSnapshot, report.DataSource.Mode)
+
 	for _, recommendation := range report.Recommendations {
 		assert.Equal(t, cloud.Region("westeurope"), recommendation.Region)
 		assert.Equal(t, cloud.ArchitectureARM64, recommendation.Architecture)
@@ -315,6 +335,9 @@ func TestListAnswersWindowsOnAzure(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(output), &report))
 
 	assert.Equal(t, cloud.OSWindows, report.Request.OS)
+	// Same check as the recommend path: a named covered region must be answered
+	// from the committed catalogue, never from a live sweep.
+	assert.Equal(t, cloud.DataModeEmbeddedSnapshot, report.DataSource.Mode)
 	require.NotEmpty(t, report.Candidates)
 
 	for _, candidate := range report.Candidates {
