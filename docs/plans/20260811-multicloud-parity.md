@@ -7,7 +7,7 @@ data. The same question asked two ways returns two different documents, ten of t
 flag names repeat a concept another name already expresses, and six flags are accepted and
 silently ignored on some clouds.
 
-This plan does three things, in this order:
+This plan does four things, in this order:
 
 1. **Collapses the surface to one vocabulary.** One name per concept, one schema family, two
    commands that both work on every cloud. Mechanical CLI-to-MCP name derivation, so the six
@@ -16,6 +16,11 @@ This plan does three things, in this order:
    catalogue key.
 3. **Adds every capability reachable without a new credential type**: Windows on Azure, live
    Azure prices, GCP obtainability, and GCP regions beyond `us-central1`.
+4. **Validates the shipped binary on all three clouds** (Phase 10). Tasks 1 to 16 prove the
+   packages are right against mocks, stubs and goldens; nothing in them proves the binary a
+   user downloads returns a _correct_ answer. Task 17 automates the command x cloud x format
+   matrix, and Task 18 is the human judgement — vendor spot-checks, help text, error wording —
+   that no assertion makes.
 
 Three things stay refused, because no vendor publishes them: Windows on GCP, zone-level
 _prices_ on either cloud, and risk-capped workloads (`web`/`ci`/`batch`) on either cloud.
@@ -462,9 +467,9 @@ unchanged, for all five formats. That is a stronger gate than any hand-written p
 - [ ] write a test asserting `spotinfo --mcp` and `spotinfo --version` still work and bare
       `spotinfo` does not run a query
 - ➕ point `commandScopes` in `cmd/spotinfo/vocabulary_test.go` at the new `list` command —
-      it currently records the list vocabulary as living on the root — and delete every
-      `vocabularyGaps` row marked "task 4". The command-tree test fails if a flag lands and
-      its row stays
+  it currently records the list vocabulary as living on the root — and delete every
+  `vocabularyGaps` row marked "task 4". The command-tree test fails if a flag lands and
+  its row stays
 - [ ] run `go test ./... -skip 'E2E'` — must pass before Task 5
 
 ### Task 5: Retire `spotinfo.recommend/v1` and publish one schema family
@@ -601,7 +606,7 @@ refusal tests here only to delete them there is churn.
       `UNSUPPORTED_CAPABILITY` — reuse the existing capability, do not add a new one
 - [ ] on Azure, make the `--with-score` and `--live-risk` refusals name the reason: both
       exist as vendor APIs but need an Azure subscription, which this build does not
-      authenticate to. A reader must be able to tell "not built" from "not published" 
+      authenticate to. A reader must be able to tell "not built" from "not published"
 - [ ] refuse `--gcp-project` when the cloud is not GCP, matching how `--live-risk` is refused
 - [ ] refuse `--offline` and `--refresh` **only** on a cloud without
       `CapabilityLiveEnrichment` (`internal/cloud/provider.go:29`, already declared by AWS);
@@ -751,7 +756,7 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
 - [ ] write a test asserting a placement kind is never accepted by `acceptsRisk`
 - [ ] write a test asserting the AWS path still produces the same score it does today
 - ➕ delete the four `vocabularyGaps` rows marked "task 11" in
-      `cmd/spotinfo/vocabulary_test.go`
+  `cmd/spotinfo/vocabulary_test.go`
 - [ ] run `make test` — must pass before Task 12
 
 ### Task 12: Fetch GCP obtainability
@@ -793,7 +798,7 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
       API does not price
 - [ ] write a test asserting the snapshot is unchanged after a live call
 - ➕ declare `--gcp-billing-key` on both commands and delete its two `vocabularyGaps` rows in
-      `cmd/spotinfo/vocabulary_test.go`
+  `cmd/spotinfo/vocabulary_test.go`
 - [ ] run `make verify-data` and `make test` — must pass before Task 14
 
 ---
@@ -842,7 +847,148 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
       every renamed MCP tool
 - [ ] update `CLAUDE.md` — it names the old MCP tools and the v1 golden rule in several places,
       and must carry the vocabulary rule, the unified defaults and the new invariants
-- [ ] move this plan to `docs/plans/completed/`
+- [ ] leave this plan in place — Phase 10 still has to run against the documented surface, so
+      archiving it here would file it as done before anyone has run the binary
+
+---
+
+## Phase 10 — Validate the shipped binary, not the packages
+
+Tasks 1 to 16 prove the code is right against mocks, stubs and goldens. Nothing so far proves
+that the **binary a user downloads** answers correctly on three clouds. These two tasks close
+that gap: Task 17 automates what a machine can check, Task 18 is the judgement a machine
+cannot make.
+
+**Why this is not already covered.** `make test` runs `e2e_test.go`, which is deliberately
+network-free and drives a handful of invocations. It does not sweep the command x cloud x
+format matrix, it never exercises a live path, and it cannot tell a well-formed answer from a
+_correct_ one. A price that parses, validates against its schema and renders in five formats
+can still be the wrong price.
+
+### Task 17: Build the binary and validate the full command x cloud x format matrix
+
+**Files:**
+
+- Modify: `cmd/spotinfo/e2e_test.go`
+- Create: `cmd/spotinfo/validate_clouds_test.go`
+- Modify: `Makefile`
+- Create: `docs/reviews/surface-validation.md`
+
+**The split is load-bearing.** The offline matrix extends the e2e suite and runs in
+`make test`. The live checks reach real vendor endpoints, so per the Safety notes they must
+**not** be part of `make test`; they go in `validate_clouds_test.go` behind a build tag or an
+explicit env guard, driven by a separate `make validate-clouds` target. A test that reaches a
+real cloud inside the default suite is a broken test; a target a person runs on purpose is
+not.
+
+**Offline matrix, in `e2e_test.go`, network-free and credential-free:**
+
+- [ ] build once via `make build` and drive the **real binary** as a subprocess, as the file
+      already does — never an in-process `cli.App`
+- [ ] sweep `{list, recommend}` x `{aws, gcp, azure}` x `{number, text, json, table, csv}` and
+      assert for each cell: exit code 0, non-empty stdout, empty stderr, at least one candidate
+      row. `number` is `list`-only, so assert `recommend --output number` is **refused**, not
+      that it is skipped
+- [ ] assert every `json` cell validates against its contract schema file — `spotinfo.list/v1`
+      or `spotinfo.recommend/v3` — by reading the schema from `docs/plans/contracts/`, so a
+      schema edit that outruns the code fails here
+- [ ] assert the risk column on GCP and Azure prints a **status**, never a blank, a zero or an
+      AWS-shaped bucket. This is Invariant 2 checked on rendered output rather than on a struct
+- [ ] assert determinism: the same `--offline` invocation run twice produces byte-identical
+      stdout. A non-deterministic map iteration in a renderer surfaces here and nowhere else
+- [ ] assert the refusal matrix: every flag Task 8 refuses, on every cloud that refuses it,
+      exits non-zero with **empty stdout** and a message naming both the flag and the cloud
+- [ ] assert every removed flag name (`--type`, `--instance`, `--vcpu`, `--memory`,
+      `--memory-gib`, `--cpu`, `--price`, `--budget`) prints a rename hint naming its
+      replacement, exits non-zero, and prints nothing to stdout
+- [ ] drive the MCP stdio surface end to end: handshake, `tools/list` returns exactly the three
+      tool names, then call each of the three tools for each of the three clouds and assert a
+      structured result. Pin `HTTP_PROXY`/`HTTPS_PROXY` at a closed port and pass `--offline`,
+      as `CLAUDE.md` requires, so the fallback path is what is exercised
+- [ ] assert CLI/MCP parity on rendered output, not just in-process: the same question through
+      `spotinfo recommend --output json` and through `recommend_spot_machines` yields the same
+      `request` echo, the same ranking policy and the same first candidate. This is acceptance
+      criterion 2, checked against the binary
+
+**Binary-level assertions, same task:**
+
+- [ ] assert the shipped binary links **no Azure credential library**: `go version -m` on the
+      built binary must show no `azidentity`, `armresourcegraph` or `armrecommender`. This is
+      Invariant 8 and acceptance criterion 8, and it is the only check that catches a
+      transitive pull
+- [ ] record the binary size and compare it against the pre-plan baseline; flag a growth over
+      15% for review rather than failing on it
+
+**Live checks, in `validate_clouds_test.go`, behind `make validate-clouds`:**
+
+- [ ] AWS with live feeds (anonymous): assert `list` and `recommend` answer, and that
+      `data_source.mode` reports `live` or `cached`, never `embedded-snapshot`
+- [ ] Azure with the anonymous Retail Prices API (Task 10): same assertions
+- [ ] GCP from the snapshot, and — only if a key is present in the environment — the
+      `--gcp-billing-key` path; **skip with a stated reason when the key is absent**, never fail
+- [ ] assert every live path **degrades to the snapshot** rather than failing the run: point
+      each at a closed port and assert exit 0 with an answer and a `data_source.mode` of
+      `embedded-snapshot`. This is the Safety note "never let a live path fail a run", checked
+      rather than assumed
+- [ ] `make validate-clouds` must be absent from `make test` and from every CI workflow that
+      gates a merge — assert that by grepping the Makefile and `.github/workflows/`
+
+**Close out:**
+
+- [ ] run `make build && make test && make validate-clouds`
+- [ ] run the e2e suite explicitly with no skip: `go test ./cmd/spotinfo/ -run E2E -v`, and
+      confirm the test count is **non-zero** — a vacuous pass against zero collected tests is
+      the exact failure the `TestE2E` infix rule exists to prevent
+- [ ] write `docs/reviews/surface-validation.md` recording the matrix, what passed, and every
+      cell that was skipped and why
+
+### Task 18: Manual correctness and usability review
+
+A person runs the binary and judges it. Findings go in a document; defects that are real get
+fixed in this task, not deferred.
+
+**Files:**
+
+- Create: `docs/reviews/manual-validation.md`
+- Modify: whatever the findings require
+
+**Correctness — is the answer _right_, not merely well-formed:**
+
+- [ ] spot-check three AWS instance types in three regions against the AWS Spot pricing page,
+      and confirm the savings percent and interruption range agree with the Spot Advisor
+- [ ] spot-check three Azure sizes in three regions against the Azure pricing calculator,
+      **including one Windows price**, and confirm a Windows price is never presented as a
+      saving against a Linux price
+- [ ] spot-check three GCP machine types against Google's Spot pricing page
+- [ ] confirm a cloud with no interruption data never renders a number in the risk column
+- [ ] confirm `--workload web|ci|batch` still refuses GCP and Azure with a message naming the
+      vendor limit, and that `--live-risk` on GCP makes the preemption rate **visible but not
+      filterable** — Invariant 1 observed from the outside
+
+**Usability — the part no test asserts:**
+
+- [ ] run `spotinfo`, `spotinfo --help`, `spotinfo list --help`, `spotinfo recommend --help`
+      and judge whether a first-time reader can tell the two commands apart without the plan.
+      The discriminator is that `recommend` requires `--architecture`, `--min-vcpu` and
+      `--min-memory-gib`; if the help text does not make that obvious, fix the help text
+- [ ] confirm the `--region all` default is discoverable and its cost is stated, with the
+      pointer to `--offline` or an explicit `--region` the plan requires
+- [ ] trigger every error path by hand — unknown cloud, unknown region, unknown format, a
+      removed flag, a refused capability, a filter matching nothing — and judge each message
+      on whether it says **what to do next**. `NO_CANDIDATES` with no hint is a finding
+- [ ] time a cold `spotinfo list --cloud aws` and the same call with `--offline`; if the
+      default is slow enough to read as broken, that is a usability finding
+- [ ] check the rename hints name the replacement flag, not just the removal
+- [ ] drive the MCP surface from a real client (Claude Desktop or `mcp` CLI) and confirm the
+      three tools are discoverable and their descriptions say which clouds each supports
+
+**Close out:**
+
+- [ ] record every finding in `docs/reviews/manual-validation.md` with a severity and a verdict
+- [ ] fix every correctness finding and every high-severity usability finding **in this task**
+- [ ] re-run `make test && make lint && make validate-clouds` after the fixes
+- [ ] list anything deliberately not fixed, with the reason
+- [ ] move this plan to `docs/plans/completed/` — this is the last step of the last task
 
 ## Acceptance criteria
 
@@ -865,6 +1011,13 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
     is referenced by at least one candidate.
 11. `make test`, `make test-race`, `make lint`, `make verify-data` and
     `make verify-architecture` all pass.
+12. The **built binary** answers on the full `{list, recommend}` x `{aws, gcp, azure}` x
+    `{number, text, json, table, csv}` matrix, every `json` cell validates against its contract
+    schema, the same `--offline` invocation twice is byte-identical, and `go version -m` on
+    that binary shows no Azure credential library.
+13. A person has run the binary against all three clouds, spot-checked prices against each
+    vendor's own page, judged the help and error text, and recorded the result in
+    `docs/reviews/manual-validation.md`. Every correctness finding is fixed.
 
 ## Safety notes
 
@@ -887,19 +1040,22 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
 
 ## Post-Completion
 
-_Manual and external work. No checkboxes — these cannot run in this repository's test suite._
+_External work only. No checkboxes — these need a credential this repository does not hold._
 
-**Manual verification against real credentials:**
+**Task 18 now owns every manual check that needs no credential**, including the Azure Windows
+price spot-check. What remains here is what a maintainer can only do with an account:
 
-- `--live-risk` on Azure with a real subscription, including one lacking the Resource Graph
-  permission
-- `--with-score` on Azure and GCP with real credentials, including the over-limit batching path
+- `--with-score` on GCP with real Application Default Credentials, including the over-limit
+  batching path from Task 12
 - `--gcp-billing-key` against a real key, and against a key with the Billing API disabled
-- Windows Azure prices spot-checked against the portal for three regions
+- Nothing on Azure requires a credential in this plan. The two deferred Azure features —
+  eviction rate and placement score — are **not built**, so there is nothing to verify; if a
+  subscription ever appears, `docs/reviews/multicloud-parity.md` §3 has the query and the
+  reason neither may join `interruptionCappableKinds`
 
 **Release mechanics:**
 
 - Tag a new major version; the CLI surface, both schemas and all three MCP tool names change
-- Publish the migration table from Task 18 in the release notes
+- Publish the migration table from Task 16 in the release notes
 - Update any published MCP client configuration that names the old tool names
 - Confirm the weekly data workflows still pass against the raised thresholds
