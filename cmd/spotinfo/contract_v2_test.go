@@ -61,7 +61,7 @@ func TestCLIRejectsATopAboveThePublishedV2Contract(t *testing.T) {
 	bound := int(publishedTopBound(t))
 
 	_, err := runMulticloudRecommend(t,
-		"--cloud", "gcp", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
+		"--cloud", "gcp", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
 		"--top", strconv.Itoa(bound+1))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, cloud.ErrInvalidArgument)
@@ -75,7 +75,7 @@ func TestCLIRejectsATopAboveThePublishedV2Contract(t *testing.T) {
 // the bound moves with it.
 func TestCLIRejectsATopAboveTheBoundBeforeChoosingASchema(t *testing.T) {
 	_, err := runRecommendWith(t, shippedRegistry(t),
-		"--architecture", "x86_64", "--cpu", "2", "--memory", "8",
+		"--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
 		"--workload", "web", "--top", strconv.Itoa(cloud.MaxTop+1))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, cloud.ErrInvalidArgument)
@@ -85,7 +85,7 @@ func TestCLIRejectsATopAboveTheBoundBeforeChoosingASchema(t *testing.T) {
 // boundary as well as below it.
 func TestCLIEmitsAV2RequestTopWithinTheContract(t *testing.T) {
 	output, err := runMulticloudRecommend(t,
-		"--cloud", "gcp", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
+		"--cloud", "gcp", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
 		"--top", strconv.Itoa(cloud.MaxTop), "--output", "json")
 	require.NoError(t, err)
 

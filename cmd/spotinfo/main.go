@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"maps"
-	"math"
 	"os"
 	"os/signal"
 	"runtime"
@@ -68,13 +66,14 @@ const (
 	scoreHeaderRegional = "Placement Score (Regional)"
 	scoreHeaderGeneric  = "Placement Score"
 
-	// Sort types
-	sortType         = "type"
-	sortInterruption = "interruption"
-	sortSavings      = "savings"
-	sortPrice        = "price"
-	sortRegion       = "region"
-	sortScore        = "score"
+	// Sort keys. Each names a neutral observation, so the same word means the
+	// same thing on both commands and on every cloud.
+	sortMachine = "machine"
+	sortRisk    = "risk"
+	sortSavings = "savings"
+	sortPrice   = "price"
+	sortRegion  = "region"
+	sortScore   = "score"
 
 	// Score thresholds
 	excellentScoreThreshold = 8 // Scores 8-10 are excellent
@@ -118,10 +117,6 @@ const (
 	// allRegions is the --region value selecting every published region.
 	allRegions = "all"
 
-	// defaultAWSRegion is the declared --region default. It is an AWS region
-	// name, which is why the recommend command documents it per cloud.
-	defaultAWSRegion = "us-east-1"
-
 	// appName is the CLI application name.
 	appName = "spotinfo"
 
@@ -136,25 +131,78 @@ const (
 	unfilteredDefaultText = "no filter"
 
 	recommendCommandName = "recommend"
-	refreshFlagUsage     = "ignore any cached AWS feed and fetch it again"
-	regionFlagUsage      = "set one or more provider regions, use \"all\" for all published regions"
+	refreshFlagUsage     = "ignore any cached provider feed and fetch it again"
+	offlineFlagUsage     = "answer from the embedded snapshot instead of fetching the live feeds"
+	outputFormatUsage    = "number|text|json|table|csv"
+	osFlagUsage          = "machine operating system: linux|windows"
+
+	// regionFlagUsage documents the default and its cost. Every published
+	// region is what makes the same question return the same document on both
+	// surfaces, but on AWS it also means the live-price fallback can fire in
+	// every region, so the fast alternatives are named here rather than left
+	// for a reader to discover from a slow run.
+	regionFlagUsage = "one or more provider regions, or \"all\" for every published region; " +
+		"\"all\" on AWS queries every region, so pass --offline or an explicit --region when speed matters"
 )
 
-//nolint:cyclop
-func mainCmd(ctx *cli.Context) error {
-	// Check for MCP mode before running CLI
+// rootCmd is what bare `spotinfo` does. The query moved to `spotinfo list`, so
+// the root command only selects a mode: --mcp serves the MCP server (urfave/cli
+// answers --version before this runs), and anything else is a caller who has not
+// said which question they are asking. Help plus a non-zero exit says so; a
+// silent zero-exit help page reads as success to a script.
+func rootCmd(ctx *cli.Context) error {
+	// Checked before anything else: --mcp has always been dispatched from here,
+	// and it is the one bare invocation that means something.
 	if isMCPMode(ctx) {
 		return runMCPServer(ctx, mainCtx)
 	}
 
-	client := newSpotClient(ctx)
+	_ = cli.ShowAppHelp(ctx)
 
-	registry, err := newProviderRegistry(client)
-	if err != nil {
+	return fmt.Errorf("%w: no command given; run %q to browse or %q to rank",
+		cloud.ErrInvalidArgument,
+		appName+" "+listCommandName, appName+" "+recommendCommandName)
+}
+
+// renameHint answers a retired flag name with the one that replaced it.
+//
+// Two things are wrong with the default usage-error path for this. It prints
+// "Incorrect Usage" and the whole help page to stdout before returning, so
+// `spotinfo list --type m5.large > out.json` writes a help page into the file
+// it was asked to fill; and "flag provided but not defined: -type" tells a
+// caller their spelling is wrong without saying that the concept still exists
+// under one name, which is the whole point of collapsing the vocabulary.
+//
+// Anything that is not a retired name is returned unchanged, so a genuinely
+// unknown flag still fails as one.
+func renameHint(_ *cli.Context, err error, _ bool) error {
+	name, ok := undefinedFlagName(err)
+	if !ok {
 		return err
 	}
 
-	return execMainCmd(ctx, mainCtx, registry, client, os.Stdout)
+	replacement, retired := renamedFlags[name]
+	if !retired {
+		return err
+	}
+
+	return fmt.Errorf("%w: --%s was renamed to --%s", cloud.ErrInvalidArgument, name, replacement)
+}
+
+// undefinedFlagName reads the flag name out of the standard library's
+// "flag provided but not defined: -name" message, which is what urfave/cli
+// hands to OnUsageError for an unknown flag.
+func undefinedFlagName(err error) (string, bool) {
+	const marker = "flag provided but not defined: -"
+
+	message := err.Error()
+
+	index := strings.Index(message, marker)
+	if index < 0 {
+		return "", false
+	}
+
+	return strings.TrimLeft(message[index+len(marker):], "-"), true
 }
 
 // newSpotClient builds the AWS client for this invocation.
@@ -378,269 +426,8 @@ func lineageIsSet(ctx *cli.Context, name string) bool {
 	return false
 }
 
-func lineageInt(ctx *cli.Context, name string, aliases ...string) int {
-	return flagLineageContext(ctx, append([]string{name}, aliases...)...).Int(name)
-}
-
-// execMainCmd is the testable version of mainCmd that accepts dependencies.
-//
-//nolint:cyclop,gocyclo,funlen // CLI argument parsing inherently has high complexity due to comprehensive option handling
-func execMainCmd(ctx *cli.Context, execCtx context.Context, registry providerRegistry, client spotClient, output io.Writer) error {
-	if v := execCtx.Value("key"); v != nil {
-		log.Debug("context value received", slog.Any("value", v))
-	}
-
-	// Provider selection and capability checks run before acquisition, so an
-	// unsupported request costs no I/O.
-	if providerErr := resolveAWSProvider(ctx, registry, rootCapabilityRequest(ctx)); providerErr != nil {
-		return providerErr
-	}
-
-	regions := ctx.StringSlice(flagRegion)
-	cpu := ctx.Int(flagCPU)
-	memory := ctx.Int(flagMemory)
-	maxPrice := ctx.Float64(flagPrice)
-	withScore := ctx.Bool(flagWithScore)
-	minScore := ctx.Int(flagMinScore)
-
-	// ParseFloat accepts NaN and ±Inf, and neither is caught by the `> 0` test
-	// below that decides whether to append the filter: NaN fails every
-	// comparison and -Inf is not positive, so both drop the ceiling and answer
-	// an unfiltered query as if it were filtered. +Inf would be stored raw and
-	// compared against in the client, making the filter a silent no-op.
-	if ctx.IsSet(flagPrice) && (math.IsNaN(maxPrice) || math.IsInf(maxPrice, 0) || maxPrice <= 0) {
-		return fmt.Errorf("%w: price must be a positive USD instance-hour price", cloud.ErrInvalidArgument)
-	}
-
-	if err := validateRootFlags(ctx, cpu, memory, minScore, withScore); err != nil {
-		return err
-	}
-
-	// An unrecognised --sort used to fall through to the interruption sort and
-	// an unrecognised --output to the number format, both silently and both
-	// exiting 0. `--output jsonn` printed "59" and reported success, which a
-	// script reads as a valid answer in the format it asked for.
-	sortKey, err := parseSortBy(ctx.String(flagSort))
-	if err != nil {
-		return err
-	}
-
-	query, err := rootQuery(ctx, sortKey)
-	if err != nil {
-		return err
-	}
-
-	provider, err := awsQueryProvider(client)
-	if err != nil {
-		return err
-	}
-
-	result, err := provider.Query(execCtx, query)
-	if err != nil {
-		return fmt.Errorf("failed to get spot savings: %w", err)
-	}
-	candidates := result.Candidates
-
-	// decide if region should be printed
-	printRegion := len(regions) > 1 || (len(regions) == 1 && regions[0] == allRegions)
-
-	// An empty match used to print a bare table frame and exit 0 with nothing
-	// on stderr, so a typo'd instance type was indistinguishable from a real
-	// "no such thing here". The formats keep rendering — an empty JSON array
-	// stays parseable — and the note goes to stderr so it never contaminates a
-	// piped result.
-	if len(candidates) == 0 {
-		log.Warn("no instances matched the query", slog.Any("filters", describeRootFilters(ctx)))
-	}
-
-	switch ctx.String(flagOutput) {
-	case outputNumber:
-		printAdvicesNumber(candidates, printRegion, output)
-	case outputText:
-		printAdvicesText(candidates, printRegion, output)
-	case outputJSON:
-		printAdvicesJSON(v1Advices(candidates), output)
-	case outputTable:
-		printAdvicesTable(candidates, false, printRegion, output)
-	case outputCSV:
-		printAdvicesTable(candidates, true, printRegion, output)
-	default:
-		// Unreachable: validateRootFlags rejects an unknown format before any
-		// acquisition. Kept so a new format added to the flag but not here
-		// fails loudly instead of silently printing savings numbers.
-		return fmt.Errorf("%w: unsupported output format %q", cloud.ErrInvalidArgument, ctx.String(flagOutput))
-	}
-
-	return nil
-}
-
-// outputFormats is the --output vocabulary, shared by the flag validator and
-// the renderer switch.
-var outputFormats = []string{outputNumber, outputText, outputJSON, outputTable, outputCSV}
-
-// sortByNames maps the --sort vocabulary onto the neutral sort keys. The
-// provider translates them back into its own ordering, so a cloud that already
-// sorts its own data keeps deciding what each key means for it.
-var sortByNames = map[string]cloud.SortKey{
-	sortType:         cloud.SortByMachine,
-	sortInterruption: cloud.SortByRisk,
-	sortSavings:      cloud.SortBySavings,
-	sortPrice:        cloud.SortByPrice,
-	sortRegion:       cloud.SortByRegion,
-	sortScore:        cloud.SortByPlacementScore,
-}
-
-func parseSortBy(value string) (cloud.SortKey, error) {
-	if sortBy, ok := sortByNames[value]; ok {
-		return sortBy, nil
-	}
-
-	names := slices.Sorted(maps.Keys(sortByNames))
-
-	return "", fmt.Errorf("%w: unknown sort %q, want one of %s",
-		cloud.ErrInvalidArgument, value, strings.Join(names, "|"))
-}
-
-// awsQueryProvider builds the neutral provider the query command acquires
-// through.
-//
-// It is built here from the acquisition client, not fetched from the registry,
-// and it is given no architecture lookup. Both are deliberate. The registry's
-// AWS factory also parses the architecture snapshot, and this command neither
-// filters nor renders an architecture — resolving through it made the command
-// inherit an input it never reads, so an unparsable architecture manifest failed
-// `spotinfo --machine t3.micro` with SNAPSHOT_UNAVAILABLE while the advisor and
-// price data it does read were intact. Construction stays cheap; the legacy
-// client still verifies the advisor and price payloads against their manifests
-// at acquisition, which is where a genuinely broken snapshot must fail.
-//
-// Without the lookup the provider stops declaring any architecture, so a request
-// that filtered on one would be refused rather than answered from an
-// unclassified catalogue. This command has no such flag.
-func awsQueryProvider(client spotClient) (cloud.Provider, error) {
-	provider, err := awsprovider.New(client, nil)
-	if err != nil {
-		return nil, fmt.Errorf("build aws provider: %w", err)
-	}
-
-	return provider, nil
-}
-
-// rootQuery maps the query command's flags onto the neutral query. Every filter
-// here is the one the legacy options carried; the AWS provider re-applies each
-// exactly against the mapped candidate.
-func rootQuery(ctx *cli.Context, sortKey cloud.SortKey) (*cloud.Query, error) {
-	requested := ctx.StringSlice(flagRegion)
-	regions := make([]cloud.Region, 0, len(requested))
-	for _, region := range requested {
-		regions = append(regions, cloud.Region(region))
-	}
-
-	query := &cloud.Query{
-		Regions: regions,
-		// Folded, not validated. The capability check compares against the
-		// lowercase neutral constants exactly, so casting the raw flag refused
-		// `--os Linux` and `--os Windows` — spellings the legacy client accepted
-		// with EqualFold and the recommend path still folds the same way. An
-		// operating system outside the vocabulary survives the fold unchanged and
-		// stays the provider's error to report, in its own wording.
-		OS:             cloud.OperatingSystem(foldVocabulary(ctx.String(flagOS))),
-		MachinePattern: ctx.String(flagType),
-		MinVCPU:        ctx.Int(flagCPU),
-		MinMemoryGiB:   float64(ctx.Int(flagMemory)),
-		Sort: cloud.SortOrder{
-			Key:        sortKey,
-			Descending: strings.EqualFold(ctx.String(flagOrder), orderDesc),
-		},
-	}
-
-	if maxPrice := ctx.Float64(flagPrice); maxPrice > 0 {
-		// A ceiling, not a measured price. Truncating to the fixed-point scale can
-		// only tighten it, where MoneyFromFloat would reject a value the float
-		// comparison this replaces accepted.
-		ceiling, err := cloud.MoneyCeilingFromFloat(maxPrice)
-		if err != nil {
-			return nil, err
-		}
-		query.MaxPrice = &ceiling
-	}
-
-	// Scores are fetched under --with-score; --min-score filters whatever scores
-	// are present. validateRootFlags already rejects the second without the first.
-	if ctx.Bool(flagWithScore) {
-		query.Placement.Enabled = true
-		query.Placement.SingleZone = ctx.Bool(flagAZ)
-		if timeout := ctx.Int(flagScoreTimeout); timeout > 0 {
-			query.Placement.Timeout = time.Duration(timeout) * time.Second
-		}
-	}
-	if minScore := ctx.Int(flagMinScore); minScore > 0 {
-		query.Placement.MinScore = minScore
-	}
-
-	return query, nil
-}
-
-// validateRootFlags rejects input the query would otherwise answer wrongly and
-// silently. Each case below produced a plausible-looking result rather than an
-// error, which is worse than failing: a wrong answer that exits 0 is acted on.
-func validateRootFlags(ctx *cli.Context, cpu, memory, minScore int, withScore bool) error {
-	if !slices.Contains(outputFormats, ctx.String(flagOutput)) {
-		return fmt.Errorf("%w: unknown output format %q, want one of %s",
-			cloud.ErrInvalidArgument, ctx.String(flagOutput), strings.Join(outputFormats, "|"))
-	}
-
-	if order := ctx.String(flagOrder); !strings.EqualFold(order, orderAsc) && !strings.EqualFold(order, orderDesc) {
-		return fmt.Errorf("%w: unknown order %q, want %s or %s",
-			cloud.ErrInvalidArgument, order, orderAsc, orderDesc)
-	}
-
-	// A negative minimum is not a filter anyone means, and it was accepted
-	// while --price -1 was rejected — the same mistake, two different answers.
-	if cpu < 0 {
-		return fmt.Errorf("%w: cpu must be zero or a positive number of vCPU cores", cloud.ErrInvalidArgument)
-	}
-
-	if memory < 0 {
-		return fmt.Errorf("%w: memory must be zero or a positive number of GiB", cloud.ErrInvalidArgument)
-	}
-
-	// Scores are only fetched under --with-score, so this filter compared every
-	// candidate against an absent score and dropped all of them: zero bytes on
-	// stdout, zero on stderr, exit 0.
-	if minScore != 0 && !withScore {
-		return fmt.Errorf("%w: --%s needs --%s, which is what fetches the placement scores it filters on",
-			cloud.ErrInvalidArgument, flagMinScore, flagWithScore)
-	}
-
-	if minScore < 0 || minScore > maxPlacementScore {
-		return fmt.Errorf("%w: --%s must be between 1 and %d",
-			cloud.ErrInvalidArgument, flagMinScore, maxPlacementScore)
-	}
-
-	return nil
-}
-
-// describeRootFilters reports the filters that were actually set, so an empty
-// result names what narrowed it rather than repeating the whole flag set.
-func describeRootFilters(ctx *cli.Context) []string {
-	var set []string
-	for _, name := range []string{flagType, flagRegion, flagOS, flagCPU, flagMemory, flagPrice, flagMinScore} {
-		if lineageIsSet(ctx, name) {
-			set = append(set, name+"="+lineageContextValue(ctx, name))
-		}
-	}
-
-	return set
-}
-
-func lineageContextValue(ctx *cli.Context, name string) string {
-	resolved := flagLineageContext(ctx, name)
-	if values := resolved.StringSlice(name); len(values) > 0 {
-		return strings.Join(values, ",")
-	}
-
-	return resolved.String(name)
+func lineageInt(ctx *cli.Context, name string) int {
+	return flagLineageContext(ctx, name).Int(name)
 }
 
 // candidateSavings renders the savings column. SavingsPercent is absent when the
@@ -672,6 +459,25 @@ func candidateLivePrice(candidate *cloud.Candidate) bool {
 	return candidate.Spot != nil && candidate.Spot.Live
 }
 
+// candidateRisk renders the risk column from the neutral observation.
+//
+// A cloud that publishes no risk figure prints its status — "unavailable" —
+// never a blank cell and never a zero. A browse table that left the column empty
+// reads as "no interruptions", and a zero reads as a measurement of none; both
+// are claims nothing measured. A provider that somehow reports neither label nor
+// status is still described as unavailable rather than as nothing at all.
+func candidateRisk(candidate *cloud.Candidate) string {
+	if candidate.Risk.Label != "" {
+		return candidate.Risk.Label
+	}
+
+	if candidate.Risk.Status != "" {
+		return string(candidate.Risk.Status)
+	}
+
+	return string(cloud.RiskStatusUnavailable)
+}
+
 func printAdvicesText(candidates []cloud.Candidate, region bool, output io.Writer) {
 	for i := range candidates {
 		candidate := &candidates[i]
@@ -686,11 +492,11 @@ func printAdvicesText(candidates []cloud.Candidate, region bool, output io.Write
 		if region {
 			fmt.Fprintf(output, "region=%s, type=%s, vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s', price=%s%s\n", //nolint:errcheck
 				candidate.Location.Region, candidate.Machine.ID, candidate.Machine.VCPU, candidate.Machine.MemoryGiB,
-				candidateSavings(candidate), candidate.Risk.Label, priceStr, scoreStr)
+				candidateSavings(candidate), candidateRisk(candidate), priceStr, scoreStr)
 		} else {
 			fmt.Fprintf(output, "type=%s, vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s', price=%s%s\n", //nolint:errcheck
 				candidate.Machine.ID, candidate.Machine.VCPU, candidate.Machine.MemoryGiB,
-				candidateSavings(candidate), candidate.Risk.Label, priceStr, scoreStr)
+				candidateSavings(candidate), candidateRisk(candidate), priceStr, scoreStr)
 		}
 	}
 }
@@ -913,7 +719,7 @@ func buildTableRow(candidate *cloud.Candidate, scoreInfo scoreTypeInfo, region, 
 	}
 	row := table.Row{
 		string(candidate.Machine.ID), candidate.Machine.VCPU, candidate.Machine.MemoryGiB,
-		candidateSavings(candidate), candidate.Risk.Label, priceValue,
+		candidateSavings(candidate), candidateRisk(candidate), priceValue,
 	}
 	if csv {
 		row = append(row, priceSource(live))
@@ -1086,83 +892,92 @@ func defaultRecommendAction(ctx *cli.Context) error {
 //nolint:funlen // CLI flag declarations are intentionally kept together.
 func recommendCommand(action cli.ActionFunc) *cli.Command {
 	return &cli.Command{
-		Name:   recommendCommandName,
-		Usage:  "recommend individual Spot instances by architecture and workload",
-		Action: action,
+		Name: recommendCommandName,
+		Usage: "rank the best Spot machines for a stated requirement " +
+			"(requires --" + flagArchitecture + ", --" + flagMinVCPU + " and --" + flagMinMemoryGiB + ")",
+		Action:       action,
+		OnUsageError: renameHint,
 		Flags: append([]cli.Flag{
 			cloudFlag(),
 			// Required, but checked in execRecommendCmd rather than declared to
 			// urfave/cli. Its own check prints the whole help to *stdout* before
 			// returning the error, so `spotinfo recommend > out.json` wrote a help
 			// page into the file. See requireRecommendFlags.
-			&cli.StringFlag{Name: flagArchitecture, Usage: "required instance architecture: x86_64|arm64"},
+			&cli.StringFlag{Name: flagArchitecture, Usage: "required machine architecture: x86_64|arm64"},
 			&cli.StringFlag{
-				Name:    flagInstance,
-				Aliases: []string{flagMachine},
-				Usage:   "machine type RE2 regexp (combined with architecture)",
+				Name:  flagMachine,
+				Usage: "machine type RE2 regexp (combined with architecture)",
 			},
-			// DefaultText, not the bare Value: the declared default is an AWS
-			// region name that no other cloud publishes, and requestedRegions
-			// substitutes every published region when --region is unset on
-			// GCP or Azure. Rendering "us-east-1" alone documented a value that
-			// fails on two of the three clouds it is offered for.
 			&cli.StringSliceFlag{
-				Name:        flagRegion,
-				Usage:       regionFlagUsage,
-				Value:       cli.NewStringSlice(defaultAWSRegion),
-				DefaultText: defaultAWSRegion + " on AWS; every published region on GCP and Azure",
+				Name:  flagRegion,
+				Usage: regionFlagUsage,
+				Value: cli.NewStringSlice(defaultRegion),
 			},
 			// Required too, like the MCP tool, which declares all three in its
 			// input schema. They used to be optional flags with a default of 0
 			// that the validator then rejected — so the help said "(default: 0)"
-			// while `--cpu 4` alone failed deep in the request vocabulary with
-			// "min_memory_gib must be a positive number", naming a wire field
-			// rather than the --memory flag the caller had omitted.
+			// while `--min-vcpu 4` alone failed deep in the request vocabulary
+			// with "min_memory_gib must be a positive number", naming a wire
+			// field rather than the flag the caller had omitted.
 			// DefaultText because urfave/cli renders an int flag's zero Value as
 			// "(default: 0)" with no way to suppress it, which read as "optional,
 			// defaults to no minimum" beside a Usage line saying "required".
 			&cli.IntFlag{
-				Name: flagCPU, Aliases: []string{flagVCPU},
+				Name:  flagMinVCPU,
 				Usage: "required minimum vCPU cores", DefaultText: requiredFlagDefaultText,
 			},
 			&cli.IntFlag{
-				Name: flagMemory, Aliases: []string{flagMemoryGiB},
+				Name:  flagMinMemoryGiB,
 				Usage: "required minimum memory GiB", DefaultText: requiredFlagDefaultText,
 			},
 			&cli.Float64Flag{
-				Name:        flagBudget,
-				Usage:       "positive maximum USD per candidate instance-hour",
+				Name:        flagMaxPrice,
+				Usage:       "positive maximum USD per candidate machine-hour",
 				DefaultText: unfilteredDefaultText,
 			},
-			&cli.StringFlag{Name: flagOS, Usage: "instance operating system: linux|windows", Value: spot.OperatingSystemLinux},
-			// No default value: "not set" must stay distinguishable from "set to
-			// web", because the default depends on the provider. A cloud that
-			// publishes no risk cannot honestly claim an interruption ceiling, so
-			// it defaults to the risk-free cost policy instead.
+			&cli.StringFlag{Name: flagOS, Usage: osFlagUsage, Value: defaultOS},
+			// cost by default, on every cloud: it is the only policy a provider
+			// without risk data can serve honestly, and one default on both
+			// surfaces is what makes the same question return the same document.
 			&cli.StringFlag{
 				Name:  flagWorkload,
-				Usage: "ranking policy: cost|web|ci|batch (default: web on a cloud with interruption data, otherwise cost)",
+				Usage: "ranking policy: cost|web|ci|batch (web, ci and batch cap interruption and need a cloud that publishes it)",
+				Value: defaultWorkload,
 			},
-			&cli.IntFlag{Name: flagTop, Usage: "maximum recommendations to return", Value: spot.DefaultRecommendationTop},
+			&cli.IntFlag{Name: flagTop, Usage: "maximum recommendations to return", Value: defaultTop},
+			&cli.StringFlag{
+				Name:        flagSort,
+				Usage:       "print the ranked page ordered by " + strings.Join(sortKeyNames(), "|"),
+				DefaultText: "the ranking policy's own order",
+			},
+			&cli.StringFlag{
+				Name:        flagOrder,
+				Usage:       "sort order " + orderAsc + "|" + orderDesc,
+				DefaultText: orderAsc,
+			},
 			&cli.BoolFlag{
 				Name:  flagOffline,
-				Usage: "answer from the embedded snapshot instead of fetching the live AWS feeds",
+				Usage: offlineFlagUsage,
 			},
 			&cli.BoolFlag{
 				Name:  flagRefresh,
 				Usage: refreshFlagUsage,
 			},
-			&cli.StringFlag{Name: flagOutput, Usage: "format output: table|json", Value: outputTable},
+			&cli.StringFlag{Name: flagOutput, Usage: "format output: table|json", Value: defaultOutput},
 		}, liveRiskFlags()...),
 	}
 }
 
-// newSpotinfoApp assembles the production root and recommend command wiring.
-// Actions are injected so assembly tests exercise the production flags and commands
-// without opening network clients or writing to process stdout.
+// newSpotinfoApp assembles the production command wiring: a root that selects a
+// mode, and the two commands that ask a question. The command actions are
+// injected so assembly tests exercise the production flags and commands without
+// opening network clients or writing to process stdout.
 //
-//nolint:funlen // CLI flag declarations are intentionally kept together.
-func newSpotinfoApp(rootAction, recommendationAction cli.ActionFunc) *cli.App {
+// The root carries only the mode and logging flags. Every flag that describes a
+// question lives on the command that answers it — a query flag on the root could
+// be given before a subcommand that never reads it, which is how `--machine`
+// once parsed cleanly into a value `recommend` ignored.
+func newSpotinfoApp(listAction, recommendationAction cli.ActionFunc) *cli.App {
 	return &cli.App{
 		Before: func(ctx *cli.Context) error {
 			// Update logger based on flags
@@ -1191,7 +1006,6 @@ func newSpotinfoApp(rootAction, recommendationAction cli.ActionFunc) *cli.App {
 			return nil
 		},
 		Flags: []cli.Flag{
-			cloudFlag(),
 			&cli.BoolFlag{
 				Name:  flagMCP,
 				Usage: "run as MCP server instead of CLI",
@@ -1208,90 +1022,16 @@ func newSpotinfoApp(rootAction, recommendationAction cli.ActionFunc) *cli.App {
 				Name:  flagJSONLog,
 				Usage: "output logs in JSON format",
 			},
-			&cli.StringFlag{
-				Name:    flagType,
-				Aliases: []string{flagMachine},
-				Usage:   "EC2 instance type (can be RE2 regexp pattern)",
-			},
-			&cli.StringFlag{
-				Name:  flagOS,
-				Usage: "instance operating system (windows/linux)",
-				Value: defaultOS,
-			},
-			&cli.StringSliceFlag{
-				Name:  flagRegion,
-				Usage: regionFlagUsage,
-				Value: cli.NewStringSlice(defaultAWSRegion),
-			},
-			&cli.StringFlag{
-				Name:  flagOutput,
-				Usage: "format output: number|text|json|table|csv",
-				Value: outputTable,
-			},
-			// These filters are off when unset, and urfave/cli renders that as
-			// "(default: 0)" — which reads as a ceiling of zero dollars or a
-			// floor of zero cores rather than as "not filtering".
-			&cli.IntFlag{
-				Name:        flagCPU,
-				Usage:       "filter: minimal vCPU cores",
-				DefaultText: unfilteredDefaultText,
-			},
-			&cli.IntFlag{
-				Name:        flagMemory,
-				Usage:       "filter: minimal memory GiB",
-				DefaultText: unfilteredDefaultText,
-			},
-			&cli.Float64Flag{
-				Name:        flagPrice,
-				Usage:       "filter: positive maximum USD price per hour",
-				DefaultText: unfilteredDefaultText,
-			},
-			&cli.StringFlag{
-				Name:  flagSort,
-				Usage: "sort results by interruption|type|savings|price|region|score",
-				Value: sortInterruption,
-			},
-			&cli.StringFlag{
-				Name:  flagOrder,
-				Usage: "sort order asc|desc",
-				Value: orderAsc,
-			},
-			&cli.BoolFlag{
-				Name:  flagWithScore,
-				Usage: "include AWS spot placement scores (experimental)",
-			},
-			&cli.BoolFlag{
-				Name:  flagOffline,
-				Usage: "answer from the embedded AWS snapshot instead of fetching the live feeds",
-			},
-			&cli.BoolFlag{
-				Name:  flagRefresh,
-				Usage: refreshFlagUsage,
-			},
-			&cli.IntFlag{
-				Name:        flagMinScore,
-				Usage:       "filter: minimum spot placement score (1-10, needs --with-score)",
-				DefaultText: unfilteredDefaultText,
-			},
-			&cli.BoolFlag{
-				Name:  flagAZ,
-				Usage: "request AZ-level scores instead of region-level (use with --with-score)",
-			},
-			&cli.IntFlag{
-				Name:  flagScoreTimeout,
-				Usage: "timeout for score enrichment in seconds",
-				Value: spot.DefaultScoreTimeoutSeconds,
-			},
 		},
-		Name: appName,
-		// Names all three clouds: the root query command is AWS-only, but
-		// `recommend --cloud gcp|azure` has been served from committed snapshots
-		// since v2, and a one-line summary that says "AWS" is where a caller
-		// stops looking.
-		Usage:    "explore Spot instance prices across AWS, GCP and Azure",
-		Action:   rootAction,
-		Commands: []*cli.Command{recommendCommand(recommendationAction)},
-		Version:  Version,
+		OnUsageError: renameHint,
+		Name:         appName,
+		Usage:        "explore Spot machine prices across AWS, GCP and Azure",
+		Action:       rootCmd,
+		Commands: []*cli.Command{
+			listCommand(listAction),
+			recommendCommand(recommendationAction),
+		},
+		Version: Version,
 	}
 }
 
@@ -1318,7 +1058,7 @@ func printVersion(_ *cli.Context) {
 }
 
 func main() {
-	app := newSpotinfoApp(mainCmd, defaultRecommendAction)
+	app := newSpotinfoApp(listCmd, defaultRecommendAction)
 	cli.VersionPrinter = printVersion
 
 	if err := app.Run(os.Args); err != nil {

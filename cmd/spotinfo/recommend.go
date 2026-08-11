@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -88,6 +89,14 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, registry provid
 		return fmt.Errorf("%w: top must be between 1 and %d", cloud.ErrInvalidArgument, cloud.MaxTop)
 	}
 
+	sortKey, err := parseSortBy(ctx.String(flagSort))
+	if err != nil {
+		return err
+	}
+	if invalid := validateOrder(ctx.String(flagOrder)); invalid != nil {
+		return invalid
+	}
+
 	provider, err := resolveProviderForRecommend(ctx, registry)
 	if err != nil {
 		return err
@@ -97,7 +106,7 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, registry provid
 		return liveRiskErr
 	}
 
-	workload, err := recommendWorkload(ctx, provider.Capabilities())
+	workload, err := recommendWorkload(ctx)
 	if err != nil {
 		return err
 	}
@@ -106,10 +115,22 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, registry provid
 	// keeps its own acquisition path. Everything else is answered by the neutral
 	// engine, including AWS under the cost policy, which v1 never had.
 	if provider.ID() == cloud.ProviderAWS && workload != cloud.WorkloadCost {
+		// The v1 report publishes its own fixed ranking and cannot honour a sort
+		// key. Refused rather than accepted and ignored — the same flag on the
+		// same command must not mean two things depending on which schema
+		// happens to answer. Task 5 deletes this path and the refusal with it.
+		if lineageIsSet(ctx, flagSort) || lineageIsSet(ctx, flagOrder) {
+			return fmt.Errorf("%w: --%s and --%s do not apply to the AWS %s report; "+
+				"use --%s cost, which is the default", cloud.ErrInvalidArgument,
+				flagSort, flagOrder, recommendationSchemaVersion, flagWorkload)
+		}
+
 		return execAWSRecommendV1(ctx, execCtx, provider, client, workload, outputFormat, output)
 	}
 
-	return execNeutralRecommendV2(ctx, execCtx, provider, workload, outputFormat, output)
+	return execNeutralRecommendV2(ctx, execCtx, provider, workload,
+		cloud.SortOrder{Key: sortKey, Descending: strings.EqualFold(ctx.String(flagOrder), orderDesc)},
+		outputFormat, output)
 }
 
 // requireRecommendFlags rejects a request that omits one of the three
@@ -123,7 +144,7 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, registry provid
 // what the caller should add.
 func requireRecommendFlags(ctx *cli.Context) error {
 	var missing []string
-	for _, name := range []string{flagArchitecture, flagCPU, flagMemory} {
+	for _, name := range []string{flagArchitecture, flagMinVCPU, flagMinMemoryGiB} {
 		if !lineageIsSet(ctx, name) {
 			missing = append(missing, "--"+name)
 		}
@@ -158,18 +179,17 @@ func resolveProviderForRecommend(ctx *cli.Context, registry providerRegistry) (c
 	return registry.Get(id)
 }
 
-// recommendWorkload resolves the policy. An explicit value is taken as given.
-// An unset --workload defaults to the interruption-capped web policy on a
-// provider that publishes risk, and to the risk-free cost policy on one that
-// does not — a provider without risk data cannot honestly claim an
-// interruption ceiling.
-func recommendWorkload(ctx *cli.Context, capabilities cloud.Capabilities) (cloud.Workload, error) {
+// recommendWorkload resolves the policy.
+//
+// The default is cost on every cloud, and the same value over MCP. It used to
+// depend on the provider — web where risk was published, cost where it was not —
+// which meant the same question returned a different document depending on which
+// cloud answered it, and a different one again on the other surface. cost is
+// also the only policy every cloud can serve honestly: an interruption ceiling
+// is a claim a provider without risk data cannot make.
+func recommendWorkload(ctx *cli.Context) (cloud.Workload, error) {
 	value := strings.TrimSpace(lineageString(ctx, flagWorkload))
 	if value == "" {
-		if capabilities.Has(cloud.CapabilityRisk) {
-			return cloud.WorkloadWeb, nil
-		}
-
 		return cloud.WorkloadCost, nil
 	}
 
@@ -246,25 +266,121 @@ func foldVocabulary(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
-// validBudget reports whether a --budget value can act as a price ceiling.
+// validCeiling reports whether a --max-price value can act as a price ceiling.
 //
 // Both non-finite values have to be named explicitly. NaN fails every
-// comparison, so `budget <= 0` alone lets it through as a set-but-unenforceable
+// comparison, so `ceiling <= 0` alone lets it through as a set-but-unenforceable
 // ceiling; +Inf passes that check too and would be stored raw as a ceiling no
 // price can exceed, making the filter a silent no-op. The same three terms guard
-// --price in main.go — see the comment there.
-func validBudget(budget float64) bool {
-	return !math.IsNaN(budget) && !math.IsInf(budget, 0) && budget > 0
+// the flag on `list` — see validateListFlags.
+func validCeiling(ceiling float64) bool {
+	return !math.IsNaN(ceiling) && !math.IsInf(ceiling, 0) && ceiling > 0
+}
+
+// sortRecommendations orders the ranked page for presentation.
+//
+// Selection is not affected: which candidates appear is decided by the canonical
+// ranking policy, published in ranking_policy, and Rank keeps naming each row's
+// position in it. A row labelled rank 3 printed first is honest; renumbering
+// would be a claim about the policy that is not true. The sort is applied here
+// rather than through Query.Sort because the recommender re-sorts every
+// candidate by that policy, which would make the key a silent no-op.
+//
+// An unset key leaves the policy order alone.
+func sortRecommendations(recommendations []cloud.RecommendationDTO, order cloud.SortOrder) error {
+	if order.Key == "" {
+		if order.Descending {
+			slices.Reverse(recommendations)
+		}
+
+		return nil
+	}
+
+	compare, err := recommendationComparator(order.Key)
+	if err != nil {
+		return err
+	}
+
+	slices.SortStableFunc(recommendations, func(left, right cloud.RecommendationDTO) int {
+		if order.Descending {
+			return compare(&right, &left)
+		}
+
+		return compare(&left, &right)
+	})
+
+	return nil
+}
+
+// recommendationComparator resolves a neutral sort key against the fields a
+// recommendation publishes. A placement score is not one of them yet, so that
+// key is refused rather than silently ignored.
+func recommendationComparator(key cloud.SortKey) (func(left, right *cloud.RecommendationDTO) int, error) {
+	switch key {
+	case cloud.SortByMachine:
+		return func(left, right *cloud.RecommendationDTO) int {
+			return cmp.Compare(left.Machine, right.Machine)
+		}, nil
+	case cloud.SortByRegion:
+		return func(left, right *cloud.RecommendationDTO) int {
+			return cmp.Compare(left.Region, right.Region)
+		}, nil
+	case cloud.SortByPrice:
+		return comparePrices, nil
+	case cloud.SortBySavings:
+		return func(left, right *cloud.RecommendationDTO) int {
+			return compareOptionalFloat(left.SavingsPercent, right.SavingsPercent)
+		}, nil
+	case cloud.SortByRisk:
+		return func(left, right *cloud.RecommendationDTO) int {
+			return compareOptionalFloat(left.Risk.MaxPercent, right.Risk.MaxPercent)
+		}, nil
+	case cloud.SortByPlacementScore:
+		return nil, fmt.Errorf("%w: --%s %s needs a placement score, which %s does not publish",
+			cloud.ErrInvalidArgument, flagSort, sortScore, recommendCommandName)
+	default:
+		return nil, fmt.Errorf("%w: unknown sort %q", cloud.ErrInvalidArgument, key)
+	}
+}
+
+// comparePrices orders the fixed-point wire amounts numerically. They are
+// nine-decimal strings, so a lexicographic comparison would sort 10.000000000
+// below 2.000000000.
+func comparePrices(left, right *cloud.RecommendationDTO) int {
+	leftAmount, leftErr := cloud.ParseMoney(left.SpotUSDPerHour)
+	rightAmount, rightErr := cloud.ParseMoney(right.SpotUSDPerHour)
+	if leftErr != nil || rightErr != nil {
+		return 0
+	}
+
+	return cmp.Compare(leftAmount.Nanos(), rightAmount.Nanos())
+}
+
+// compareOptionalFloat orders a figure a provider may not publish. An absent
+// value sorts last under either order, because "not measured" is not a position
+// on the scale.
+func compareOptionalFloat(left, right *float64) int {
+	switch {
+	case left == nil && right == nil:
+		return 0
+	case left == nil:
+		return 1
+	case right == nil:
+		return -1
+	default:
+		return cmp.Compare(*left, *right)
+	}
 }
 
 // legacyRecommendationOptions builds and validates the v1 constraint set.
 func legacyRecommendationOptions(ctx *cli.Context, workload cloud.Workload) (*spot.RecommendationOptions, error) {
-	budget := ctx.Float64(flagBudget)
-	// NaN fails every comparison, so `budget <= 0` alone would let it through as
+	budget := ctx.Float64(flagMaxPrice)
+	// NaN fails every comparison, so `ceiling <= 0` alone would let it through as
 	// a set-but-unenforceable ceiling. +Inf passes it too, and would be stored raw
 	// as a ceiling nothing can exceed, making the filter a silent no-op.
-	if ctx.IsSet(flagBudget) && !validBudget(budget) {
-		return nil, fmt.Errorf("%w: budget must be a positive USD instance-hour price", spot.ErrInvalidRecommendationInput)
+	if ctx.IsSet(flagMaxPrice) && !validCeiling(budget) {
+		return nil, fmt.Errorf("%w: --%s must be a positive USD machine-hour price",
+			spot.ErrInvalidRecommendationInput, flagMaxPrice)
 	}
 	if ctx.IsSet(flagTop) && ctx.Int(flagTop) <= 0 {
 		return nil, fmt.Errorf("%w: top must be positive", spot.ErrInvalidRecommendationInput)
@@ -278,8 +394,8 @@ func legacyRecommendationOptions(ctx *cli.Context, workload cloud.Workload) (*sp
 		Architecture: spot.Architecture(foldVocabulary(ctx.String(flagArchitecture))),
 		Instance:     machineFilter(ctx),
 		OS:           foldVocabulary(lineageString(ctx, flagOS)),
-		CPU:          lineageInt(ctx, flagCPU, "vcpu"),
-		Memory:       lineageInt(ctx, flagMemory, "memory-gib"),
+		CPU:          lineageInt(ctx, flagMinVCPU),
+		Memory:       lineageInt(ctx, flagMinMemoryGiB),
 		Budget:       budget,
 		Workload:     spot.Workload(workload),
 		Top:          ctx.Int(flagTop),
@@ -311,7 +427,7 @@ func legacyQueryOptions(opts *spot.RecommendationOptions, regions []string) []sp
 // execNeutralRecommendV2 answers with the provider-neutral engine and the
 // spotinfo.recommend/v2 report.
 func execNeutralRecommendV2(ctx *cli.Context, execCtx context.Context, provider cloud.Provider,
-	workload cloud.Workload, outputFormat string, output io.Writer,
+	workload cloud.Workload, order cloud.SortOrder, outputFormat string, output io.Writer,
 ) error {
 	request, err := neutralRecommendRequest(ctx, provider.ID(), workload)
 	if err != nil {
@@ -325,6 +441,10 @@ func execNeutralRecommendV2(ctx *cli.Context, execCtx context.Context, provider 
 
 	report, err := cloud.Recommend(execCtx, provider, request)
 	if err != nil {
+		return err
+	}
+
+	if err := sortRecommendations(report.Recommendations, order); err != nil {
 		return err
 	}
 
@@ -349,9 +469,10 @@ func neutralRecommendRequest(ctx *cli.Context, id cloud.ProviderID, workload clo
 		return nil, err
 	}
 
-	budget := ctx.Float64(flagBudget)
-	if ctx.IsSet(flagBudget) && !validBudget(budget) {
-		return nil, fmt.Errorf("%w: budget must be a positive USD machine-hour price", cloud.ErrInvalidArgument)
+	budget := ctx.Float64(flagMaxPrice)
+	if ctx.IsSet(flagMaxPrice) && !validCeiling(budget) {
+		return nil, fmt.Errorf("%w: --%s must be a positive USD machine-hour price",
+			cloud.ErrInvalidArgument, flagMaxPrice)
 	}
 
 	// IsSet, not a zero check: an explicit --top 0 must reach the request
@@ -368,13 +489,13 @@ func neutralRecommendRequest(ctx *cli.Context, id cloud.ProviderID, workload clo
 		Architecture: architecture,
 		OS:           instanceOS,
 		Workload:     workload,
-		Regions:      requestedRegions(ctx, id),
-		MinMemoryGiB: float64(lineageInt(ctx, flagMemory, "memory-gib")),
-		MinVCPU:      lineageInt(ctx, flagCPU, "vcpu"),
+		Regions:      neutralRegions(lineageStringSlice(ctx, flagRegion)),
+		MinMemoryGiB: float64(lineageInt(ctx, flagMinMemoryGiB)),
+		MinVCPU:      lineageInt(ctx, flagMinVCPU),
 		Top:          top,
 	}
 	if budget > 0 {
-		// A ceiling, not a measured price: --budget is routinely a monthly figure
+		// A ceiling, not a measured price: --max-price is routinely a monthly figure
 		// divided by 720, which carries more fractional digits than the scale.
 		// Truncating can only tighten it, where MoneyFromFloat would reject the
 		// request outright — and the v1 path already accepts that same value.
@@ -386,18 +507,6 @@ func neutralRecommendRequest(ctx *cli.Context, id cloud.ProviderID, workload clo
 	}
 
 	return request, nil
-}
-
-// requestedRegions resolves --region for the neutral path. The declared default
-// is an AWS region name, which no other cloud publishes, so an unset --region on
-// another provider means every region that provider publishes rather than an
-// AWS region it will never match. An explicit --region is always honoured.
-func requestedRegions(ctx *cli.Context, id cloud.ProviderID) []cloud.Region {
-	if id != cloud.ProviderAWS && !lineageIsSet(ctx, flagRegion) {
-		return []cloud.Region{cloud.RegionAll}
-	}
-
-	return neutralRegions(lineageStringSlice(ctx, flagRegion))
 }
 
 // neutralRegions trims and deduplicates repeated --region flags. It rejects

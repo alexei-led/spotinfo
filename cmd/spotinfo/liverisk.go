@@ -51,18 +51,26 @@ func rejectLiveRiskOffGCP(ctx *cli.Context, id cloud.ProviderID) error {
 	return unsupportedLiveRisk(id)
 }
 
-// liveRiskFlags are declared on recommend, where risk is published.
+// liveRiskFlags are declared on recommend, where risk is ranked against. The
+// project flag is declared on both commands, so it is separate.
 func liveRiskFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.BoolFlag{
 			Name:  flagLiveRisk,
 			Usage: "fetch live preemption risk from the provider's authenticated API (GCP only; needs credentials)",
 		},
-		&cli.StringFlag{
-			Name:    flagGCPProject,
-			Usage:   "Google Cloud project to bill --live-risk calls to",
-			EnvVars: []string{gcpProjectEnv},
-		},
+		gcpProjectFlag(),
+	}
+}
+
+// gcpProjectFlag names the project an authenticated GCP call is billed to. Both
+// commands carry it: the authenticated paths are per-command, but the project
+// they bill is one concept and must have one name.
+func gcpProjectFlag() *cli.StringFlag {
+	return &cli.StringFlag{
+		Name:    flagGCPProject,
+		Usage:   "Google Cloud project to bill authenticated GCP calls to",
+		EnvVars: []string{gcpProjectEnv},
 	}
 }
 

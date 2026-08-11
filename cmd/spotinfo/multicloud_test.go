@@ -108,7 +108,7 @@ func TestOfflineCloudsRegisterFromTheirCommittedSnapshots(t *testing.T) {
 
 func TestAnUnregisteredCloudIsReportedRatherThanAnsweredByAnotherCloud(t *testing.T) {
 	_, err := runRecommendWith(t, gcpOnlyRegistry(t),
-		"--cloud", "azure", "--architecture", "x86_64", "--cpu", "2", "--memory", "8")
+		"--cloud", "azure", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8")
 
 	require.ErrorIs(t, err, cloud.ErrDataUnavailable)
 }
@@ -117,7 +117,7 @@ func TestAnUnregisteredCloudIsReportedRatherThanAnsweredByAnotherCloud(t *testin
 // The declared default is an AWS region name, which GCP would never match.
 func TestGCPRecommendationServesTheV2ContractOffline(t *testing.T) {
 	output, err := runMulticloudRecommend(t,
-		"--cloud", "gcp", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
+		"--cloud", "gcp", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
 		"--top", "3", "--output", "json")
 	require.NoError(t, err)
 
@@ -154,8 +154,8 @@ func TestGCPRecommendationServesTheV2ContractOffline(t *testing.T) {
 // accepts that same value, and rejecting it here would split the two.
 func TestRecommendationAcceptsABudgetFinerThanTheScale(t *testing.T) {
 	output, err := runMulticloudRecommend(t,
-		"--cloud", "gcp", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
-		"--budget", "0.041666666666666664", "--top", "3", "--output", "json")
+		"--cloud", "gcp", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
+		"--max-price", "0.041666666666666664", "--top", "3", "--output", "json")
 	require.NoError(t, err)
 
 	var report cloud.RecommendReport
@@ -179,7 +179,7 @@ func TestRecommendationAcceptsABudgetFinerThanTheScale(t *testing.T) {
 
 func TestGCPRecommendationHonoursAnExplicitRegion(t *testing.T) {
 	_, err := runMulticloudRecommend(t,
-		"--cloud", "gcp", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
+		"--cloud", "gcp", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
 		"--region", "europe-west1", "--output", "json")
 	require.ErrorIs(t, err, cloud.ErrNoCandidates,
 		"the committed snapshot covers one region and never substitutes another")
@@ -187,14 +187,14 @@ func TestGCPRecommendationHonoursAnExplicitRegion(t *testing.T) {
 
 func TestGCPRecommendationRejectsARiskAwareWorkload(t *testing.T) {
 	_, err := runMulticloudRecommend(t,
-		"--cloud", "gcp", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
+		"--cloud", "gcp", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
 		"--workload", "web")
 	require.ErrorIs(t, err, cloud.ErrUnsupportedCapability)
 }
 
 func TestGCPRecommendationRejectsWindows(t *testing.T) {
 	_, err := runMulticloudRecommend(t,
-		"--cloud", "gcp", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
+		"--cloud", "gcp", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
 		"--os", "windows")
 	require.ErrorIs(t, err, cloud.ErrUnsupportedCapability)
 }
@@ -203,7 +203,7 @@ func TestGCPRecommendationRejectsWindows(t *testing.T) {
 // from more than one of them and rank them together by price.
 func TestAzureRecommendationServesTheV2ContractOffline(t *testing.T) {
 	output, err := runMulticloudRecommend(t,
-		"--cloud", "azure", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
+		"--cloud", "azure", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
 		"--top", "5", "--output", "json")
 	require.NoError(t, err)
 
@@ -232,7 +232,7 @@ func TestAzureRecommendationServesTheV2ContractOffline(t *testing.T) {
 
 func TestAzureRecommendationHonoursAnExplicitRegion(t *testing.T) {
 	output, err := runMulticloudRecommend(t,
-		"--cloud", "azure", "--architecture", "arm64", "--cpu", "2", "--memory", "8",
+		"--cloud", "azure", "--architecture", "arm64", "--min-vcpu", "2", "--min-memory-gib", "8",
 		"--region", "westeurope", "--top", "3", "--output", "json")
 	require.NoError(t, err)
 
@@ -248,7 +248,7 @@ func TestAzureRecommendationHonoursAnExplicitRegion(t *testing.T) {
 
 func TestAzureRecommendationNeverSubstitutesAnUncoveredRegion(t *testing.T) {
 	_, err := runMulticloudRecommend(t,
-		"--cloud", "azure", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
+		"--cloud", "azure", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
 		"--region", "nowhere-north-1", "--output", "json")
 
 	require.ErrorIs(t, err, cloud.ErrNoCandidates)
@@ -258,7 +258,7 @@ func TestAzureRecommendationNeverSubstitutesAnUncoveredRegion(t *testing.T) {
 // neutral path must not read it as "unset" and answer with the default instead.
 func TestAnExplicitZeroTopIsRejected(t *testing.T) {
 	_, err := runMulticloudRecommend(t,
-		"--cloud", "gcp", "--architecture", "x86_64", "--cpu", "2", "--memory", "8", "--top", "0")
+		"--cloud", "gcp", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8", "--top", "0")
 
 	require.ErrorIs(t, err, cloud.ErrInvalidArgument)
 }
@@ -268,7 +268,7 @@ func TestAzureRecommendationRejectsWhatItCannotAnswer(t *testing.T) {
 		"risk-aware workload": {"--workload", "web"},
 		"windows":             {"--os", "windows"},
 	} {
-		base := []string{"--cloud", "azure", "--architecture", "x86_64", "--cpu", "2", "--memory", "8"}
+		base := []string{"--cloud", "azure", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8"}
 
 		_, err := runMulticloudRecommend(t, append(base, args...)...)
 		require.ErrorIs(t, err, cloud.ErrUnsupportedCapability, name)

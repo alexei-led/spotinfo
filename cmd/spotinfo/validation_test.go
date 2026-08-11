@@ -22,44 +22,48 @@ import (
 //
 // Not parallel: these run a cli.App, and urfave/cli appends its package-level
 // HelpFlag to every command it parses.
-func TestRootRejectsInputItUsedToAnswerSilently(t *testing.T) {
+func TestListRejectsInputItUsedToAnswerSilently(t *testing.T) {
 	for name, test := range map[string]struct {
 		args []string
 		want string
 	}{
 		"unknown sort": {
-			args: []string{"--sort", "bogus", "--type", "m5.large"},
+			args: []string{"--sort", "bogus", "--machine", "m5.large"},
 			want: `unknown sort "bogus"`,
 		},
 		"unknown output format": {
-			args: []string{"--output", "jsonn", "--type", "m5.large"},
+			args: []string{"--output", "jsonn", "--machine", "m5.large"},
 			want: `unknown output format "jsonn"`,
 		},
 		"unknown order": {
-			args: []string{"--order", "sideways", "--type", "m5.large"},
+			args: []string{"--order", "sideways", "--machine", "m5.large"},
 			want: `unknown order "sideways"`,
 		},
-		"negative cpu": {
-			args: []string{"--cpu", "-5", "--type", "m5.large"},
-			want: "cpu must be zero or a positive number",
+		"negative vcpu floor": {
+			args: []string{"--min-vcpu", "-5", "--machine", "m5.large"},
+			want: "--min-vcpu must be zero or a positive number",
 		},
-		"negative memory": {
-			args: []string{"--memory", "-5", "--type", "m5.large"},
-			want: "memory must be zero or a positive number",
+		"negative memory floor": {
+			args: []string{"--min-memory-gib", "-5", "--machine", "m5.large"},
+			want: "--min-memory-gib must be zero or a positive number",
+		},
+		"unparsable architecture": {
+			args: []string{"--architecture", "riscv64", "--machine", "m5.large"},
+			want: "architecture must be x86_64 or arm64",
 		},
 		// The filter compares against scores that are only fetched under
 		// --with-score, so on its own it dropped every row and printed nothing.
 		"min-score without with-score": {
-			args: []string{"--min-score", "5", "--type", "m5.large"},
+			args: []string{"--min-score", "5", "--machine", "m5.large"},
 			want: "--min-score needs --with-score",
 		},
 		"min-score above the scale": {
-			args: []string{"--min-score", "11", "--with-score", "--type", "m5.large"},
+			args: []string{"--min-score", "11", "--with-score", "--machine", "m5.large"},
 			want: "--min-score must be between 1 and 10",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := runRoot(t, awsOnlyRegistry(), test.args...)
+			err := runList(t, awsOnlyRegistry(), test.args...)
 			require.Error(t, err)
 			assert.ErrorIs(t, err, cloud.ErrInvalidArgument)
 			assert.Contains(t, err.Error(), test.want)
@@ -69,7 +73,7 @@ func TestRootRejectsInputItUsedToAnswerSilently(t *testing.T) {
 
 // The valid vocabulary must still be accepted, or the check above would be
 // indistinguishable from rejecting everything.
-func TestRootAcceptsEveryDocumentedSortAndFormat(t *testing.T) {
+func TestListAcceptsEveryDocumentedSortAndFormat(t *testing.T) {
 	run := func(t *testing.T, args ...string) {
 		t.Helper()
 
@@ -79,23 +83,27 @@ func TestRootAcceptsEveryDocumentedSortAndFormat(t *testing.T) {
 		var output bytes.Buffer
 		app := newSpotinfoApp(
 			func(ctx *cli.Context) error {
-				return execMainCmd(ctx, context.Background(), awsOnlyRegistry(), client, &output)
+				return execListCmd(ctx, context.Background(), awsOnlyRegistry(), client, &output)
 			},
 			func(*cli.Context) error { return nil },
 		)
-		require.NoError(t, app.Run(append([]string{appName}, args...)))
+		require.NoError(t, app.Run(append([]string{appName, listCommandName}, args...)))
 		assert.NotEmpty(t, output.String())
 	}
 
-	for _, sortBy := range []string{sortType, sortInterruption, sortSavings, sortPrice, sortRegion, sortScore} {
-		t.Run("sort/"+sortBy, func(t *testing.T) {
-			run(t, "--sort", sortBy, "--type", "m5.large")
-		})
+	// Every key in both orders: the order is what decides which end of the
+	// column a caller reads first, and it was never covered.
+	for _, sortBy := range sortKeyNames() {
+		for _, order := range []string{orderAsc, orderDesc} {
+			t.Run("sort/"+sortBy+"/"+order, func(t *testing.T) {
+				run(t, "--sort", sortBy, "--order", order, "--machine", "m5.large")
+			})
+		}
 	}
 
 	for _, format := range outputFormats {
 		t.Run("output/"+format, func(t *testing.T) {
-			run(t, "--output", format, "--type", "m5.large")
+			run(t, "--output", format, "--machine", "m5.large")
 		})
 	}
 }
@@ -108,9 +116,15 @@ func TestRecommendNamesTheFlagsItRequires(t *testing.T) {
 		args []string
 		want []string
 	}{
-		"no memory":   {args: []string{"--architecture", "x86_64", "--cpu", "4"}, want: []string{"--memory"}},
-		"no cpu":      {args: []string{"--architecture", "x86_64", "--memory", "8"}, want: []string{"--cpu"}},
-		"no anything": {args: nil, want: []string{"--architecture", "--cpu", "--memory"}},
+		"no memory": {
+			args: []string{"--architecture", "x86_64", "--min-vcpu", "4"},
+			want: []string{"--min-memory-gib"},
+		},
+		"no vcpu": {
+			args: []string{"--architecture", "x86_64", "--min-memory-gib", "8"},
+			want: []string{"--min-vcpu"},
+		},
+		"no anything": {args: nil, want: []string{"--architecture", "--min-vcpu", "--min-memory-gib"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := runRecommend(t, awsOnlyRegistry(), append([]string{recommendCommandName}, test.args...)...)
@@ -123,14 +137,14 @@ func TestRecommendNamesTheFlagsItRequires(t *testing.T) {
 	}
 }
 
-// The root query command cannot serve a non-AWS cloud. Saying only that a
-// capability is missing left the caller to conclude GCP publishes no spot
-// prices, when the answer is one subcommand away.
-func TestRootRefusalPointsAtTheRecommendCommand(t *testing.T) {
-	err := runRoot(t, shippedRegistry(t), "--cloud", "gcp", "--type", "n2")
-	require.Error(t, err)
-	assert.ErrorIs(t, err, cloud.ErrUnsupportedCapability)
-	assert.Contains(t, err.Error(), "spotinfo recommend --cloud gcp")
+// list is cloud-neutral: the command that replaced the AWS-only query answers
+// for a cloud that publishes no interruption figure, rather than sending the
+// caller to a different command.
+func TestListAnswersACloudWithNoRiskData(t *testing.T) {
+	output, err := runListCapturing(t, shippedRegistry(t),
+		"--cloud", "gcp", "--machine", "^n2-standard-4$", "--output", outputJSON)
+	require.NoError(t, err)
+	assert.Contains(t, output, "n2-standard-4")
 }
 
 // A price column that reads 0.042496000 beside AWS's 0.0502 is the wire format
@@ -237,8 +251,8 @@ func TestRecommendTablesAlignRowsWiderThanTheirHeaders(t *testing.T) {
 // silently ignored it while Azure errored on the same flag.
 func TestLiveRiskIsRefusedOffGCPOnBothReportPaths(t *testing.T) {
 	for name, args := range map[string][]string{
-		"aws v1 path": {"--architecture", "x86_64", "--cpu", "2", "--memory", "8", "--workload", "web"},
-		"aws v2 path": {"--architecture", "x86_64", "--cpu", "2", "--memory", "8", "--workload", "cost"},
+		"aws v1 path": {"--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8", "--workload", "web"},
+		"aws v2 path": {"--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8", "--workload", "cost"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := runRecommend(t, awsOnlyRegistry(),
@@ -256,7 +270,7 @@ func TestLiveRiskNeedsAnExplicitProject(t *testing.T) {
 	t.Setenv(gcpProjectEnv, "")
 
 	err := runRecommend(t, shippedRegistry(t), recommendCommandName,
-		"--cloud", "gcp", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
+		"--cloud", "gcp", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
 		"--"+flagLiveRisk)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, cloud.ErrInvalidArgument)
@@ -278,7 +292,7 @@ func TestLiveRiskRefusesAProjectThatIsNotOne(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := runRecommend(t, shippedRegistry(t), recommendCommandName,
-				"--cloud", "gcp", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
+				"--cloud", "gcp", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
 				"--"+flagLiveRisk, "--"+flagGCPProject, project)
 			require.Error(t, err)
 			assert.ErrorIs(t, err, cloud.ErrInvalidArgument)
@@ -293,7 +307,7 @@ func TestLiveRiskRefusesABadProjectFromTheEnvironment(t *testing.T) {
 	t.Setenv(gcpProjectEnv, "p/regions/us-central1/instances")
 
 	err := runRecommend(t, shippedRegistry(t), recommendCommandName,
-		"--cloud", "gcp", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
+		"--cloud", "gcp", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
 		"--"+flagLiveRisk)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, gcpprovider.ErrBadProject)

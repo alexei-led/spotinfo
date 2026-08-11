@@ -128,25 +128,27 @@ func (r failingRegistry) Get(id cloud.ProviderID) (cloud.Provider, error) {
 
 var errRegistryConsulted = errors.New("registry consulted")
 
-// The root query command acquires through the legacy client and never queries a
-// provider, so it must not build one. Building it made the command inherit
-// inputs it never reads — the architecture snapshot and the sidecar manifests —
-// and an unparsable one failed `spotinfo --type t3.micro` with
-// SNAPSHOT_UNAVAILABLE while the advisor and price data were intact.
-func TestRootQueryDoesNotBuildTheAWSProvider(t *testing.T) {
-	t.Parallel()
-
+// `spotinfo list --cloud aws` builds its provider from the acquisition client,
+// so it must not ask the registry for one. Resolving through the registry made
+// the command inherit inputs it never reads — the architecture snapshot and the
+// sidecar manifests — and an unparsable one failed
+// `spotinfo list --machine t3.micro` with SNAPSHOT_UNAVAILABLE while the advisor
+// and price data were intact.
+func TestListDoesNotBuildTheAWSProviderThroughTheRegistry(t *testing.T) {
 	var captured *cli.Context
 	app := newSpotinfoApp(
 		func(ctx *cli.Context) error { captured = ctx; return nil },
 		func(*cli.Context) error { return nil },
 	)
-	require.NoError(t, app.Run([]string{appName, "--type", "t3.micro"}))
+	require.NoError(t, app.Run([]string{appName, listCommandName, "--machine", "t3.micro"}))
 	require.NotNil(t, captured)
 
 	// Production flag parsing and the production capability request, against a
 	// registry that fails the test if it is consulted.
-	require.NoError(t, resolveAWSProvider(captured, failingRegistry{t: t}, rootCapabilityRequest(captured)))
+	provider, err := resolveListProvider(captured, failingRegistry{t: t}, stubSavingsClient{},
+		listCapabilityRequest(captured, ""))
+	require.NoError(t, err)
+	assert.Equal(t, cloud.ProviderAWS, provider.ID())
 }
 
 // errArchitectureSnapshotUnreadable is what the registry's AWS factory reports
@@ -179,12 +181,12 @@ func TestQueryAnswersWhenTheArchitectureSnapshotIsUnreadable(t *testing.T) {
 	var output bytes.Buffer
 	app := newSpotinfoApp(
 		func(ctx *cli.Context) error {
-			return execMainCmd(ctx, context.Background(), registry, client, &output)
+			return execListCmd(ctx, context.Background(), registry, client, &output)
 		},
 		func(*cli.Context) error { return nil },
 	)
 
-	require.NoError(t, app.Run([]string{appName, "--machine", "t3.micro", "--output", outputJSON}))
+	require.NoError(t, app.Run([]string{appName, listCommandName, "--machine", "t3.micro", "--output", outputJSON}))
 	assert.Contains(t, output.String(), "t3.micro")
 }
 
@@ -194,28 +196,52 @@ func TestQueryAnswersWhenTheArchitectureSnapshotIsUnreadable(t *testing.T) {
 func TestTheQueryProviderDeclaresNoArchitecture(t *testing.T) {
 	t.Parallel()
 
-	provider, err := awsQueryProvider(stubSavingsClient{})
+	provider, err := awsQueryProvider(stubSavingsClient{}, false)
 	require.NoError(t, err)
 	assert.Nil(t, provider.Capabilities().Architectures)
 	assert.True(t, provider.Capabilities().Has(cloud.CapabilityRisk),
-		"everything the query command does render must still be declared")
+		"everything the list command does render must still be declared")
 }
 
-// runRoot and runRecommend drive the production app assembly. The mock client
+// The other half of the same rule: --architecture is a declared list flag, so
+// asking for it must read the snapshot rather than refuse the request. Without
+// the lookup the provider declares no architecture and the request would be
+// rejected with UNSUPPORTED_CAPABILITY — which is the correct answer only when
+// nobody asked.
+func TestTheQueryProviderLoadsArchitecturesWhenTheFlagAsksForThem(t *testing.T) {
+	t.Parallel()
+
+	provider, err := awsQueryProvider(stubSavingsClient{}, true)
+	require.NoError(t, err)
+	assert.Contains(t, provider.Capabilities().Architectures, cloud.ArchitectureARM64)
+}
+
+// runList and runRecommend drive the production app assembly. The mock client
 // fails the test if it is called, so every assertion below also proves the
 // failure happened before acquisition.
-func runRoot(t *testing.T, registry providerRegistry, args ...string) error {
+func runList(t *testing.T, registry providerRegistry, args ...string) error {
+	t.Helper()
+
+	_, err := runListCapturing(t, registry, args...)
+
+	return err
+}
+
+// runListCapturing returns the rendered page as well as the error, for
+// assertions about what was answered rather than about how it failed.
+func runListCapturing(t *testing.T, registry providerRegistry, args ...string) (string, error) {
 	t.Helper()
 
 	var output bytes.Buffer
 	app := newSpotinfoApp(
 		func(ctx *cli.Context) error {
-			return execMainCmd(ctx, context.Background(), registry, newQueryClient(t), &output)
+			return execListCmd(ctx, context.Background(), registry, newQueryClient(t), &output)
 		},
 		func(*cli.Context) error { return nil },
 	)
+	err := app.Run(append([]string{appName, listCommandName}, args...))
 
-	return app.Run(append([]string{appName}, args...))
+	return output.String(), err
 }
 
 func runRecommend(t *testing.T, registry providerRegistry, args ...string) error {
@@ -248,7 +274,7 @@ func runRecommendCapturing(t *testing.T, registry providerRegistry, args ...stri
 // deliberately runs first.
 func validRecommendArgs(extra ...string) []string {
 	args := make([]string, 0, 7+len(extra))
-	args = append(args, recommendCommandName, "--architecture", "x86_64", "--cpu", "2", "--memory", "8")
+	args = append(args, recommendCommandName, "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8")
 
 	return append(args, extra...)
 }
@@ -259,8 +285,8 @@ func TestUnknownCloudIsRejectedBeforeAcquisition(t *testing.T) {
 		run  func(*testing.T) error
 	}{
 		{
-			name: "root",
-			run:  func(t *testing.T) error { return runRoot(t, awsOnlyRegistry(), "--cloud", "ibm") },
+			name: "list",
+			run:  func(t *testing.T) error { return runList(t, awsOnlyRegistry(), "--cloud", "ibm") },
 		},
 		{
 			name: "recommend",
@@ -282,7 +308,7 @@ func TestUnknownCloudIsRejectedBeforeAcquisition(t *testing.T) {
 func TestUnregisteredCloudReportsDataUnavailableWithItsReasonCode(t *testing.T) {
 	for _, id := range []cloud.ProviderID{cloud.ProviderGCP, cloud.ProviderAzure} {
 		t.Run(string(id), func(t *testing.T) {
-			err := runRoot(t, awsOnlyRegistry(), "--cloud", string(id))
+			err := runList(t, awsOnlyRegistry(), "--cloud", string(id))
 			require.ErrorIs(t, err, cloud.ErrDataUnavailable)
 			assert.Equal(t, cloud.CodeDataUnavailable, cloud.CodeOf(err))
 			assert.Contains(t, err.Error(), string(providers.ReasonNotRegistered))
@@ -305,8 +331,8 @@ func TestUnsupportedCapabilitiesFailBeforeAcquisition(t *testing.T) {
 		capabilities cloud.Capabilities
 	}{
 		{
-			name: "risk column", want: string(cloud.CapabilityRisk),
-			args: []string{"--cloud", "gcp"}, capabilities: offlineLinuxCapabilities(),
+			name: "risk sort on a cloud with no risk figure", want: string(cloud.CapabilityRisk),
+			args: []string{"--cloud", "gcp", "--sort", sortRisk}, capabilities: offlineLinuxCapabilities(),
 		},
 		{
 			name: "placement score", want: string(cloud.CapabilityPlacementScore),
@@ -328,7 +354,7 @@ func TestUnsupportedCapabilitiesFailBeforeAcquisition(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			registry := mustRegistry(registrationOf(stubProvider{id: cloud.ProviderGCP, capabilities: test.capabilities}))
 
-			err := runRoot(t, registry, test.args...)
+			err := runList(t, registry, test.args...)
 			require.ErrorIs(t, err, cloud.ErrUnsupportedCapability)
 			assert.Equal(t, cloud.CodeUnsupportedCapability, cloud.CodeOf(err))
 			assert.Contains(t, err.Error(), test.want)
@@ -398,34 +424,40 @@ func TestRecommendRejectsARiskFreeProviderForEveryCappedWorkload(t *testing.T) {
 	}
 }
 
-// A provider that satisfies every capability but is not AWS still must not be
-// served from the legacy AWS acquisition path.
-func TestNonAWSProviderIsNotServedFromTheAWSPath(t *testing.T) {
-	registry := mustRegistry(registrationOf(stubProvider{id: cloud.ProviderAzure, capabilities: awsCapabilities()}))
+// A non-AWS cloud is answered from its own provider, never from the AWS
+// acquisition path. The stub returns no candidates, so reaching AWS data would
+// show up as rows this provider never published.
+func TestNonAWSCloudIsAnsweredFromItsOwnProvider(t *testing.T) {
+	registry := mustRegistry(registrationOf(stubProvider{
+		id:           cloud.ProviderAzure,
+		capabilities: offlineLinuxCapabilities(),
+	}))
 
-	err := runRoot(t, registry, "--cloud", "azure")
-	require.ErrorIs(t, err, cloud.ErrUnsupportedCapability)
-	assert.Contains(t, err.Error(), "not served by this command yet")
+	output, err := runListCapturing(t, registry, "--cloud", "azure", "--output", outputJSON)
+	require.NoError(t, err)
+	assert.Equal(t, "[]\n", output, "an azure query must not be answered with AWS candidates")
 }
 
-// --cloud may be given on either side of the subcommand. The flag that was
-// actually set wins; the subcommand's own declaration must not shadow it.
-func TestCloudFlagResolvesAcrossContextLineage(t *testing.T) {
+// --cloud is declared on both commands, so an explicit value must win over the
+// documented AWS default on either of them.
+func TestCloudFlagIsHonouredOnBothCommands(t *testing.T) {
 	for _, test := range []struct {
 		name string
-		args []string
+		run  func(*testing.T) error
 	}{
 		{
-			name: "before the subcommand",
-			args: append([]string{"--cloud", "gcp"}, validRecommendArgs()...),
+			name: "list",
+			run:  func(t *testing.T) error { return runList(t, awsOnlyRegistry(), "--cloud", "gcp") },
 		},
 		{
-			name: "after the subcommand",
-			args: validRecommendArgs("--cloud", "gcp"),
+			name: "recommend",
+			run: func(t *testing.T) error {
+				return runRecommend(t, awsOnlyRegistry(), validRecommendArgs("--cloud", "gcp")...)
+			},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			err := runRecommend(t, awsOnlyRegistry(), test.args...)
+			err := test.run(t)
 			require.ErrorIs(t, err, cloud.ErrDataUnavailable,
 				"an explicit --cloud gcp must never resolve to the aws default")
 			assert.Contains(t, err.Error(), string(cloud.ProviderGCP))
@@ -458,67 +490,25 @@ func TestProviderIDDefaultsToAWS(t *testing.T) {
 				},
 				func(*cli.Context) error { return nil },
 			)
-			require.NoError(t, app.Run(append([]string{appName}, test.args...)))
+			require.NoError(t, app.Run(append([]string{appName, listCommandName}, test.args...)))
 			require.NoError(t, err)
 			assert.Equal(t, test.want, got)
 		})
 	}
 }
 
-// --machine is the neutral spelling of the machine-type filter. The AWS
-// spellings stay primary, so every documented AWS invocation keeps working and
-// both names reach the same value.
-func TestMachineFlagIsAnAliasOfTheAWSSpellings(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		read string
-		args []string
-	}{
-		{name: "root --type", read: flagType, args: []string{"--type", "m5.large"}},
-		{name: "root --machine", read: flagType, args: []string{"--machine", "m5.large"}},
-		{name: "recommend --instance", read: flagInstance, args: validRecommendArgs("--instance", "m5.large")},
-		{name: "recommend --machine", read: flagInstance, args: validRecommendArgs("--machine", "m5.large")},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			var got string
-			record := func(ctx *cli.Context) error {
-				got = ctx.String(test.read)
-
-				return nil
-			}
-			require.NoError(t, newSpotinfoApp(record, record).Run(append([]string{appName}, test.args...)))
-			assert.Equal(t, "m5.large", got)
-		})
-	}
-}
-
-// --machine aliases two different primary names, so placing it before the
-// subcommand sets root's --type while recommend reads --instance. The filter
-// must survive that placement rather than being dropped in silence.
-func TestMachineFilterResolvesAcrossContextLineage(t *testing.T) {
+// One concept, one name: --machine is the machine-type filter on both commands,
+// and machineFilter reads the same flag whichever one was invoked.
+func TestMachineFilterReadsTheOneFlagOnBothCommands(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		want string
 		args []string
 	}{
-		{name: "unset", want: "", args: validRecommendArgs()},
-		{name: "after the subcommand", want: "m5.large", args: validRecommendArgs("--machine", "m5.large")},
-		{name: "recommend --instance", want: "m5.large", args: validRecommendArgs("--instance", "m5.large")},
-		{
-			name: "before the subcommand",
-			want: "m5.large",
-			args: append([]string{"--machine", "m5.large"}, validRecommendArgs()...),
-		},
-		{
-			name: "root --type",
-			want: "m5.large",
-			args: append([]string{"--type", "m5.large"}, validRecommendArgs()...),
-		},
-		{
-			name: "the nearest context wins",
-			want: "m5.large",
-			args: append([]string{"--machine", "root-value"}, validRecommendArgs("--instance", "m5.large")...),
-		},
+		{name: "list unset", want: "", args: []string{listCommandName}},
+		{name: "list", want: "m5.large", args: []string{listCommandName, "--machine", "m5.large"}},
+		{name: "recommend unset", want: "", args: validRecommendArgs()},
+		{name: "recommend", want: "m5.large", args: validRecommendArgs("--machine", "m5.large")},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var got string

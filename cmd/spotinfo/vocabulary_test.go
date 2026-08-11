@@ -24,9 +24,8 @@ var autoFlags = []string{"help", "h", "version", "v"}
 // commandScope binds one command in the built tree to the vocabulary it must
 // carry.
 //
-// The root currently carries the list vocabulary because the query command has
-// not been renamed yet. Task 4 moves it to a `list` subcommand and leaves the
-// root with the mode flags alone, which is two lines here.
+// The root carries the mode and logging flags and nothing else: every flag that
+// describes a question lives on the command that answers it.
 type commandScope struct {
 	path     string
 	commands commandSet
@@ -34,7 +33,8 @@ type commandScope struct {
 }
 
 var commandScopes = []commandScope{
-	{path: rootCommandPath, commands: onList, globals: true},
+	{path: rootCommandPath, globals: true},
+	{path: listCommandName, commands: onList},
 	{path: recommendCommandName, commands: onRecommend},
 }
 
@@ -56,42 +56,18 @@ type flagGap struct {
 }
 
 var vocabularyGaps = map[string]flagGap{
-	rootCommandPath: {
+	listCommandName: {
 		missing: map[string]string{
-			flagArchitecture:  "task 4 moves this command to `list` with the vocabulary flags",
-			flagMinVCPU:       "task 4 renames --cpu",
-			flagMinMemoryGiB:  "task 4 renames --memory",
-			flagMaxPrice:      "task 4 renames --price",
-			flagGCPProject:    "task 4 moves this command to `list` with the vocabulary flags",
 			flagGCPBillingKey: "task 13 declares the flag",
-		},
-		extra: map[string]string{
-			flagType:   "task 4 renames it to --machine",
-			flagCPU:    "task 4 renames it to --min-vcpu",
-			flagMemory: "task 4 renames it to --min-memory-gib",
-			flagPrice:  "task 4 renames it to --max-price",
 		},
 	},
 	recommendCommandName: {
 		missing: map[string]string{
-			flagMinVCPU:       "task 4 renames --cpu",
-			flagMinMemoryGiB:  "task 4 renames --memory",
-			flagMaxPrice:      "task 4 renames --budget",
-			flagSort:          "task 4 adds sorting to both commands",
-			flagOrder:         "task 4 adds sorting to both commands",
 			flagWithScore:     "task 11 puts the score flags on recommend",
 			flagMinScore:      "task 11 puts the score flags on recommend",
 			flagAZ:            "task 11 puts the score flags on recommend",
 			flagScoreTimeout:  "task 11 puts the score flags on recommend",
 			flagGCPBillingKey: "task 13 declares the flag",
-		},
-		extra: map[string]string{
-			flagInstance:  "task 4 renames it to --machine",
-			flagCPU:       "task 4 renames it to --min-vcpu",
-			flagVCPU:      "task 4 drops the --min-vcpu alias",
-			flagMemory:    "task 4 renames it to --min-memory-gib",
-			flagMemoryGiB: "task 4 drops the --min-memory-gib alias",
-			flagBudget:    "task 4 renames it to --max-price",
 		},
 	},
 }

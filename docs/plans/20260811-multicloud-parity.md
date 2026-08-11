@@ -597,25 +597,83 @@ before tagging.
 - Modify: `cmd/spotinfo/multicloud_test.go`
 - Modify: `cmd/spotinfo/validation_test.go`
 
-- [ ] move the migrated query command under a `list` subcommand carrying the vocabulary flags
-- [ ] render the risk column from the neutral risk observation, so a cloud without risk data
+- [x] move the migrated query command under a `list` subcommand carrying the vocabulary flags
+- [x] render the risk column from the neutral risk observation, so a cloud without risk data
       prints its status rather than a blank or a zero
-- [ ] make bare `spotinfo` print help and exit non-zero **only when no mode flag is set** —
+- [x] make bare `spotinfo` print help and exit non-zero **only when no mode flag is set** —
       `--mcp` is dispatched from the root Action at `main.go:164` and `--version` from the same
       command; both must keep working
-- [ ] move the five output formats onto `list`; `number` stays list-only, because one savings
+- [x] move the five output formats onto `list`; `number` stays list-only, because one savings
       percent has no meaning for a ranked page
-- [ ] add `--sort` and `--order` to both commands, over neutral fields only
-- [ ] apply the unified defaults from the vocabulary section to both commands
-- [ ] write tests for `list` on a stub provider per cloud, including a cloud with no risk data
-- [ ] write tests for every sort key and both orders
-- [ ] write a test asserting `spotinfo --mcp` and `spotinfo --version` still work and bare
+- [x] add `--sort` and `--order` to both commands, over neutral fields only
+- [x] apply the unified defaults from the vocabulary section to both commands
+- [x] write tests for `list` on a stub provider per cloud, including a cloud with no risk data
+- [x] write tests for every sort key and both orders
+- [x] write a test asserting `spotinfo --mcp` and `spotinfo --version` still work and bare
       `spotinfo` does not run a query
 - ➕ point `commandScopes` in `cmd/spotinfo/vocabulary_test.go` at the new `list` command —
   it currently records the list vocabulary as living on the root — and delete every
   `vocabularyGaps` row marked "task 4". The command-tree test fails if a flag lands and
-  its row stays
-- [ ] run `go test ./... -skip 'E2E'` — must pass before Task 5
+  its row stays — **done**; the root scope now carries the globals alone and only the task 11
+  and task 13 rows remain
+- [x] run `go test ./... -skip 'E2E'` — must pass before Task 5
+
+➕ **`--sort` has no default, and that is what keeps the command cloud-neutral.** The old
+default was `interruption`, which under the neutral vocabulary is `--sort risk` — and
+`Query.CapabilityNeeds()` demands `CapabilityRisk` for that key, so a defaulted risk sort would
+refuse `spotinfo list --cloud gcp` before acquisition for a column the command renders as a
+status. An unset key leaves the order to the provider, which is also what keeps the AWS goldens
+byte-identical: `legacySortBy("")` is `spot.SortByRange`, the same ordering the old default
+produced. `--order` alone is accepted and means ascending.
+
+➕ **The sort key names are the neutral field names.** `type` became `machine` and
+`interruption` became `risk`, so the CLI word and the `cloud.SortKey` it maps to are spelled the
+same — that is what "over neutral fields only" buys. `savings`, `price`, `region` and `score`
+were already neutral.
+
+➕ **On `recommend`, `--sort` reorders the ranked page and never re-selects it.** Selection stays
+the canonical ranking policy published in `ranking_policy`, which acceptance criterion 2 requires
+both surfaces to agree on, and `Rank` keeps naming each row's position in that policy — a row
+labelled rank 3 printed first is honest, renumbering would not be. Threading the key into
+`RecommendRequest.Query()` instead would be a silent no-op, because `rank()` re-sorts every
+candidate unconditionally. `--sort score` is refused there: a recommendation publishes no
+placement score until Task 11.
+
+➕ **The surviving AWS `spotinfo.recommend/v1` path refuses `--sort` and `--order`.** That report
+publishes a fixed ranking and cannot honour them, and accepting them there would make the same
+flag on the same command mean two things depending on which schema answered. Task 5 deletes the
+path and the refusal with it.
+
+➕ **`--architecture` is a list flag now, so the AWS architecture snapshot is read on demand.**
+`awsQueryProvider(client, withArchitecture)` loads the lookup only when the flag is set, which
+keeps Task 3's guard intact — an unreadable architecture snapshot must not fail a query that
+never mentions an architecture — while making the flag act rather than be refused.
+
+➕ **A retired flag name is answered by an `OnUsageError` handler, not by a declaration.** The
+names are gone from the tree, so urfave/cli would otherwise print "Incorrect Usage" plus the whole
+help page **to stdout** and report `flag provided but not defined: -type`. `renameHint` in
+`cmd/spotinfo/main.go` maps the name through `renamedFlags` and returns the error printing
+nothing; it is set on the app **and** on both commands, because `Command.Run` consults
+`c.OnUsageError` and never the app's. Anything outside `renamedFlags` is returned unchanged.
+
+➕ **The root command lost `--cloud`, `--offline` and `--refresh` along with the query flags, and
+two invocations stop parsing.** `spotinfo --cloud gcp recommend …` must now pass `--cloud` after
+the subcommand, and `spotinfo --offline --mcp` is no longer accepted — `CLAUDE.md` states that
+composition explicitly, so **Task 16 must correct that sentence**. The MCP surface gets an
+`offline` tool argument in Task 6; until then the server answers from the live feeds with the
+snapshot as fallback, which is what `cmd/spotinfo/e2e_test.go` already exercises through its
+dead proxy.
+
+➕ **`--workload` now defaults to `cost` on every cloud, which changes what AWS answers by
+default.** `spotinfo recommend --cloud aws` with no workload is served by the neutral engine and
+`spotinfo.recommend/v2`, where it used to default to `web` and be served by the v1 schema. That
+is the unified default the plan asks for; the v1 report is still reachable with an explicit
+`--workload web|ci|batch` until Task 5 deletes it.
+
+⚠️ **`--gcp-project` is declared on `list` and nothing on that command reads it yet.** The
+vocabulary marks it for both commands and the command-tree test enforces that, but the only
+authenticated GCP path today is `--live-risk`, which is recommend-only. Task 8 refuses it off
+GCP; Task 12 gives `list` a use for it through obtainability.
 
 ### Task 5: Retire `spotinfo.recommend/v1` and publish one schema family
 

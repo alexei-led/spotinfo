@@ -42,7 +42,7 @@ func newQueryClient(t *testing.T) *mockspotClient {
 func candidatesFrom(t *testing.T, advices []spot.Advice) []cloud.Candidate {
 	t.Helper()
 
-	provider, err := awsQueryProvider(&fixedSpotClient{advices: advices})
+	provider, err := awsQueryProvider(&fixedSpotClient{advices: advices}, false)
 	require.NoError(t, err)
 
 	result, err := provider.Query(context.Background(), &cloud.Query{OS: cloud.OSLinux})
@@ -164,24 +164,28 @@ func setupFilteredSpotClient(t *testing.T, expectedAdvices []spot.Advice) *mocks
 	return mockClient
 }
 
-// createTestApp creates a CLI app for testing (following existing patterns)
+// createTestApp creates a CLI app carrying the list vocabulary, so a rendering
+// test can drive execListCmd without building the whole production tree.
 func createTestApp(action func(*cli.Context) error) *cli.App {
 	return &cli.App{
 		Action: action,
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "type"},
-			&cli.StringFlag{Name: "os", Value: "linux"},
-			&cli.StringSliceFlag{Name: "region", Value: cli.NewStringSlice("us-east-1")},
-			&cli.StringFlag{Name: "output", Value: "table"},
-			&cli.IntFlag{Name: "cpu"},
-			&cli.IntFlag{Name: "memory"},
-			&cli.Float64Flag{Name: "price"},
-			&cli.StringFlag{Name: "sort", Value: "interruption"},
-			&cli.StringFlag{Name: "order", Value: "asc"},
-			&cli.BoolFlag{Name: "with-score"},
-			&cli.IntFlag{Name: "min-score"},
-			&cli.BoolFlag{Name: "az"},
-			&cli.IntFlag{Name: "score-timeout"},
+			&cli.StringFlag{Name: flagCloud},
+			&cli.StringFlag{Name: flagMachine},
+			&cli.StringFlag{Name: flagArchitecture},
+			&cli.StringFlag{Name: flagOS, Value: defaultOS},
+			&cli.StringSliceFlag{Name: flagRegion, Value: cli.NewStringSlice("us-east-1")},
+			&cli.StringFlag{Name: flagOutput, Value: defaultOutput},
+			&cli.IntFlag{Name: flagMinVCPU},
+			&cli.IntFlag{Name: flagMinMemoryGiB},
+			&cli.Float64Flag{Name: flagMaxPrice},
+			&cli.StringFlag{Name: flagSort},
+			&cli.StringFlag{Name: flagOrder},
+			&cli.BoolFlag{Name: flagWithScore},
+			&cli.IntFlag{Name: flagMinScore},
+			&cli.BoolFlag{Name: flagAZ},
+			&cli.IntFlag{Name: flagScoreTimeout},
+			&cli.BoolFlag{Name: flagOffline},
 		},
 	}
 }
@@ -267,13 +271,13 @@ func TestExecMainCmd_OutputFormats(t *testing.T) {
 
 			// Create CLI app and run it with test args
 			app := createTestApp(func(ctx *cli.Context) error {
-				return execMainCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
+				return execListCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
 			})
 
 			// Build command line arguments
 			args := make([]string, 0, 9) //nolint:mnd
 			args = append(args, "spotinfo")
-			args = append(args, "--type", tt.instanceType)
+			args = append(args, "--machine", tt.instanceType)
 			args = append(args, "--os", "linux")
 			args = append(args, "--region", tt.region)
 			args = append(args, "--output", tt.outputFormat)
@@ -322,8 +326,8 @@ func TestExecMainCmd_SortingAndOrdering(t *testing.T) {
 			},
 		},
 		{
-			name:   "sort by instance type ascending",
-			sortBy: "type",
+			name:   "sort by machine name ascending",
+			sortBy: "machine",
 			order:  "asc",
 			validate: func(t *testing.T, advices []spot.Advice) {
 				require.Len(t, advices, 2, "Should have 2 results")
@@ -342,7 +346,7 @@ func TestExecMainCmd_SortingAndOrdering(t *testing.T) {
 			switch tt.sortBy {
 			case "savings":
 				sortBy = spot.SortBySavings
-			case "type":
+			case "machine":
 				sortBy = spot.SortByInstance
 			}
 
@@ -353,13 +357,13 @@ func TestExecMainCmd_SortingAndOrdering(t *testing.T) {
 
 			// Create CLI app and run it with test args
 			app := createTestApp(func(ctx *cli.Context) error {
-				return execMainCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
+				return execListCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
 			})
 
 			// Build command line arguments
 			args := make([]string, 0, 9) //nolint:mnd
 			args = append(args, "spotinfo")
-			args = append(args, "--type", "t2.*")
+			args = append(args, "--machine", "t2.*")
 			args = append(args, "--sort", tt.sortBy)
 			args = append(args, "--order", tt.order)
 			args = append(args, "--output", "json")
@@ -466,19 +470,19 @@ func TestExecMainCmd_FilteringOptions(t *testing.T) {
 
 			// Create CLI app and run it with test args
 			app := createTestApp(func(ctx *cli.Context) error {
-				return execMainCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
+				return execListCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
 			})
 
 			// Build command line arguments
 			args := []string{"spotinfo", "--output", "json"}
 			if tt.cpu > 0 {
-				args = append(args, "--cpu", fmt.Sprintf("%d", tt.cpu))
+				args = append(args, "--min-vcpu", fmt.Sprintf("%d", tt.cpu))
 			}
 			if tt.memory > 0 {
-				args = append(args, "--memory", fmt.Sprintf("%d", tt.memory))
+				args = append(args, "--min-memory-gib", fmt.Sprintf("%d", tt.memory))
 			}
 			if tt.price > 0 {
-				args = append(args, "--price", fmt.Sprintf("%.2f", tt.price))
+				args = append(args, "--max-price", fmt.Sprintf("%.2f", tt.price))
 			}
 
 			err := app.Run(args)
@@ -505,12 +509,12 @@ func TestExecMainCmdRejectsOnlyAnUnusablePriceCeiling(t *testing.T) {
 		args    []string
 		wantErr bool
 	}{
-		{name: "not a number", args: []string{"--price", "NaN"}, wantErr: true},
-		{name: "positive infinity", args: []string{"--price", "+Inf"}, wantErr: true},
-		{name: "negative infinity", args: []string{"--price", "-Inf"}, wantErr: true},
-		{name: "explicit zero", args: []string{"--price", "0"}, wantErr: true},
-		{name: "negative", args: []string{"--price", "-0.01"}, wantErr: true},
-		{name: "positive", args: []string{"--price", "0.05"}},
+		{name: "not a number", args: []string{"--max-price", "NaN"}, wantErr: true},
+		{name: "positive infinity", args: []string{"--max-price", "+Inf"}, wantErr: true},
+		{name: "negative infinity", args: []string{"--max-price", "-Inf"}, wantErr: true},
+		{name: "explicit zero", args: []string{"--max-price", "0"}, wantErr: true},
+		{name: "negative", args: []string{"--max-price", "-0.01"}, wantErr: true},
+		{name: "positive", args: []string{"--max-price", "0.05"}},
 		{name: "unset", args: nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -523,12 +527,12 @@ func TestExecMainCmdRejectsOnlyAnUnusablePriceCeiling(t *testing.T) {
 			var output bytes.Buffer
 			app := newSpotinfoApp(
 				func(ctx *cli.Context) error {
-					return execMainCmd(ctx, context.Background(), awsOnlyRegistry(), client, &output)
+					return execListCmd(ctx, context.Background(), awsOnlyRegistry(), client, &output)
 				},
 				func(*cli.Context) error { return nil },
 			)
 
-			err := app.Run(append([]string{appName, "--region", "us-east-1"}, test.args...))
+			err := app.Run(append([]string{appName, listCommandName, "--region", "us-east-1"}, test.args...))
 			if test.wantErr {
 				require.ErrorIs(t, err, cloud.ErrInvalidArgument)
 
@@ -563,7 +567,7 @@ func TestExecMainCmd_ErrorConditions(t *testing.T) {
 		},
 		{
 			name:        "client returns regex error",
-			args:        []string{"--type", "[invalid-regex"},
+			args:        []string{"--machine", "[invalid-regex"},
 			clientErr:   errors.New("failed to match instance type: [invalid-regex"),
 			errorSubstr: "failed to match instance type",
 		},
@@ -582,7 +586,7 @@ func TestExecMainCmd_ErrorConditions(t *testing.T) {
 
 			// Create CLI app and run it with test args
 			app := createTestApp(func(ctx *cli.Context) error {
-				return execMainCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
+				return execListCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
 			})
 
 			err := app.Run(append([]string{"spotinfo"}, tt.args...))
@@ -600,7 +604,7 @@ func TestExecMainCmd_ErrorConditions(t *testing.T) {
 // exactly, while the legacy client it replaced compared with EqualFold. Casting
 // the raw flag into the neutral query therefore turned `--os Linux` and
 // `--os Windows` — spellings that answered before the seam — into a refusal
-// before acquisition. Driving execMainCmd covers the whole path the bug lived
+// before acquisition. Driving execListCmd covers the whole path the bug lived
 // on: the capability gate, then the provider's own SupportsOS.
 //
 // Serial: it builds a cli.App.
@@ -611,10 +615,10 @@ func TestExecMainCmdAcceptsAnyOSSpelling(t *testing.T) {
 
 			mockClient := setupSuccessfulSpotClient(t, "us-east-1", "t2.micro", 50)
 			app := createTestApp(func(ctx *cli.Context) error {
-				return execMainCmd(ctx, context.Background(), awsOnlyRegistry(), mockClient, &output)
+				return execListCmd(ctx, context.Background(), awsOnlyRegistry(), mockClient, &output)
 			})
 
-			err := app.Run([]string{appName, "--region", "us-east-1", "--type", "t2.micro", "--os", spelling})
+			err := app.Run([]string{appName, "--region", "us-east-1", "--machine", "t2.micro", "--os", spelling})
 
 			require.NoError(t, err, "%q must be accepted as an operating system", spelling)
 			assert.Contains(t, output.String(), "t2.micro")
@@ -668,11 +672,11 @@ func TestExecMainCmd_RegionHandling(t *testing.T) {
 
 			// Create CLI app and run it with test args
 			app := createTestApp(func(ctx *cli.Context) error {
-				return execMainCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
+				return execListCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
 			})
 
 			// Build command line arguments
-			args := []string{"spotinfo", "--output", "json", "--type", "t2.micro"}
+			args := []string{"spotinfo", "--output", "json", "--machine", "t2.micro"}
 			for _, region := range tt.regions {
 				args = append(args, "--region", region)
 			}
@@ -690,8 +694,8 @@ func TestExecMainCmd_RegionHandling(t *testing.T) {
 	}
 }
 
-func TestMainCmd_Integration(t *testing.T) {
-	// Test that mainCmd delegates to execMainCmd properly
+func TestListCmd_Integration(t *testing.T) {
+	// Test that listCmd delegates to execListCmd properly
 	oldMainCtx := mainCtx
 	testCtx := context.WithValue(context.Background(), "key", "test-value")
 	mainCtx = testCtx
@@ -699,9 +703,14 @@ func TestMainCmd_Integration(t *testing.T) {
 
 	// Driven through app.Run rather than a hand-built cli.NewContext: that
 	// context carries no parsed flag set, so its ctx.Set calls silently failed
-	// and nothing under test ever saw --type or --output.
-	err := createTestApp(mainCmd).Run([]string{appName, "--type", "t2.micro", "--output", "json"})
-	require.NoError(t, err, "mainCmd should execute without error")
+	// and nothing under test ever saw --machine or --output.
+	//
+	// --offline because this opens the production client: without it the test
+	// fetches both AWS feeds.
+	err := createTestApp(listCmd).Run([]string{
+		appName, "--offline", "--machine", "t2.micro", "--output", "json",
+	})
+	require.NoError(t, err, "listCmd should execute without error")
 }
 
 func TestVersionPrinter(t *testing.T) {
@@ -1309,7 +1318,7 @@ func TestMainCmd_MCPModeIntegration(t *testing.T) {
 	}{
 		{
 			name:       "normal CLI mode",
-			args:       []string{"spotinfo", "--type", "t3.micro"},
+			args:       []string{"spotinfo", "--machine", "t3.micro"},
 			setupEnv:   func() {},
 			cleanupEnv: func() {},
 			expectMCP:  false,
@@ -1334,7 +1343,7 @@ func TestMainCmd_MCPModeIntegration(t *testing.T) {
 		},
 		{
 			name: "CLI mode overrides environment",
-			args: []string{"spotinfo", "--type", "t3.micro"},
+			args: []string{"spotinfo", "--machine", "t3.micro"},
 			setupEnv: func() {
 				os.Setenv(mcpModeEnv, "false") // Not "mcp"
 			},
@@ -1358,10 +1367,10 @@ func TestMainCmd_MCPModeIntegration(t *testing.T) {
 			app := &cli.App{
 				Name: "spotinfo",
 				Flags: []cli.Flag{
-					&cli.BoolFlag{Name: "mcp"},
-					&cli.StringFlag{Name: "type"},
-					&cli.StringFlag{Name: "output", Value: "table"},
-					&cli.StringSliceFlag{Name: "region", Value: cli.NewStringSlice("us-east-1")},
+					&cli.BoolFlag{Name: flagMCP},
+					&cli.StringFlag{Name: flagMachine},
+					&cli.StringFlag{Name: flagOutput, Value: defaultOutput},
+					&cli.StringSliceFlag{Name: flagRegion, Value: cli.NewStringSlice("us-east-1")},
 				},
 				Action: func(ctx *cli.Context) error {
 					if isMCPMode(ctx) {
@@ -1573,12 +1582,12 @@ func TestExecMainCmd_VisualFormattingBehavior(t *testing.T) {
 
 			// Create CLI app and run it with test args
 			app := createTestApp(func(ctx *cli.Context) error {
-				return execMainCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
+				return execListCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
 			})
 
 			// Build command line arguments
 			args := []string{"spotinfo"}
-			args = append(args, "--type", tt.instanceType)
+			args = append(args, "--machine", tt.instanceType)
 			args = append(args, "--os", "linux")
 			args = append(args, "--region", tt.region)
 			args = append(args, "--output", tt.outputFormat)
@@ -1668,7 +1677,7 @@ func TestMainCmd_ErrorHandling(t *testing.T) {
 // proves none was made.
 func TestOfflineClientAnswersWithoutTheNetwork(t *testing.T) {
 	app := newSpotinfoApp(
-		func(ctx *cli.Context) error {
+		func(ctx *cli.Context) error { //nolint:contextcheck // the cancelled context is the point
 			cancelled, cancel := context.WithCancel(context.Background())
 			cancel()
 
@@ -1681,5 +1690,5 @@ func TestOfflineClientAnswersWithoutTheNetwork(t *testing.T) {
 		},
 		func(*cli.Context) error { return nil },
 	)
-	require.NoError(t, app.Run([]string{appName, "--offline", "--type", "t3.micro"}))
+	require.NoError(t, app.Run([]string{appName, listCommandName, "--offline", "--machine", "t3.micro"}))
 }

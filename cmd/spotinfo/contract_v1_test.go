@@ -49,7 +49,7 @@ func contractAdvices() []spot.Advice {
 // Every rendering is part of the contract, not just JSON. The interruption
 // column exists only in the human formats, so pinning JSON alone would let it
 // be renamed or dropped without a single test failing.
-func TestAWSRootOutputMatchesRecordedV1Contract(t *testing.T) {
+func TestAWSListOutputMatchesRecordedV1Contract(t *testing.T) {
 	text.DisableColors()
 	t.Cleanup(text.EnableColors)
 
@@ -67,12 +67,12 @@ func TestAWSRootOutputMatchesRecordedV1Contract(t *testing.T) {
 			var output bytes.Buffer
 			app := newSpotinfoApp(
 				func(ctx *cli.Context) error {
-					return execMainCmd(ctx, context.Background(), awsOnlyRegistry(), client, &output)
+					return execListCmd(ctx, context.Background(), awsOnlyRegistry(), client, &output)
 				},
 				func(*cli.Context) error { return nil },
 			)
 
-			require.NoError(t, app.Run([]string{"spotinfo", "--region", "all", "--output", format}))
+			require.NoError(t, app.Run([]string{appName, listCommandName, "--region", "all", "--output", format}))
 			assertGolden(t, golden, output.Bytes())
 		})
 	}
@@ -91,7 +91,7 @@ func TestAWSRecommendJSONMatchesRecordedV1Contract(t *testing.T) {
 	)
 
 	require.NoError(t, app.Run([]string{
-		"spotinfo", "recommend", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
+		appName, recommendCommandName, "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
 		"--region", "us-east-1", "--region", "us-west-2", "--workload", "ci", "--output", "json",
 	}))
 	assertGolden(t, "aws-recommend-v1.json", output.Bytes())
