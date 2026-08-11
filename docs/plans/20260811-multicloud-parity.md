@@ -2288,6 +2288,47 @@ Windows on both surfaces, and an unknown region is `NO_CANDIDATES` on `recommend
 (`no candidates: gcp publishes no machines in atlantis`) but exit 0 with an empty result on
 `list`. Both were rewritten to what was observed.
 
+➕ **`docs/clouds.md`, `docs/examples.md` and `docs/troubleshooting.md` are done.** The
+ten-file checkbox stays unticked until the rest land. Every command and every output block in
+the three files was run against `.bin/spotinfo` at `2f2b80b`; the counts in the `clouds.md`
+matrix were recounted out of `--output csv` rather than copied forward. `examples.md` was
+rewritten whole — seventeen of its twenty examples drove the retired root command, the other
+three used `--cpu`/`--memory` and advertised the retired v2 schema, and every `jq` expression
+assumed a bare top-level array with v1 field names. `troubleshooting.md` kept its
+multi-cloud half and replaced the rest, which was `--type=`/`--limit` root invocations and the
+three retired MCP tool names. This closes the `clouds.md` half of the debt at :1826-1829 and
+:1968-1972.
+
+➕ **Four `clouds.md` claims the binary contradicted.**
+(1) `clouds.md:7` reported **1,192** AWS machine types; the snapshot holds **1,155**
+(`list --offline --output csv | cut -d, -f2 | sort -u | wc -l`). (2) `clouds.md:49-50`
+described a root query command that "queries the Advisor, renders an interruption column, and
+reads placement scores" — bare `spotinfo` exits 1. (3) `clouds.md:116-120` printed a
+`--live-risk` table with `6.3% avg` and `17.5% avg` risk cells; no run on this machine could
+have produced them, and the block is gone rather than re-dressed. (4) `clouds.md:84`
+and `:147` said any uncovered region "returns `NO_CANDIDATES`" on both commands; measured, it
+is an empty page and a `WARN` at exit 0 on `list`, and `no candidates: <cloud> publishes no
+machines in <region>` at exit 1 on `recommend` — the same split :2282 above recorded, now
+documented per command in both files.
+
+➕ **The `--sort risk` asymmetry is documented as an asymmetry, not smoothed.**
+`list --sort risk` on gcp/azure exits 1 with `this cloud's catalogue carries no risk figure`,
+while `recommend --sort risk` on the same cloud exits 0 and prints the page. Both are quoted
+side by side in `troubleshooting.md`, with the reason: `list` is asked to order a catalogue by
+a column that is `unavailable` in every row, and `recommend` is asked to re-order a page the
+ranking policy already ordered. `clouds.md` carries the same pair under
+[What stays refused](../clouds.md#what-stays-refused-and-why).
+
+➕ **The plan's own `--sort score` note at :1673-1680 is disproved and was not re-imported.**
+It says `list --sort score` without `--with-score` "is still a silent no-op". Measured:
+`spotinfo list --offline --sort score` exits 1 with
+`--sort score needs --with-score, which is what fetches the placement figures it orders by`.
+On `--cloud gcp` the refusal is different again and arrives from the provider:
+`gcp cannot order a catalogue by obtainability, which it fetches for a ranked page instead`.
+Both are in `troubleshooting.md`. Also left undocumented on purpose: the two `--offline` /
+`--refresh` refusals in `cmd/spotinfo/provider_flags.go:228-238`, which are unreachable
+because all three providers declare `LiveEnrichment`.
+
 ---
 
 ## Phase 10 — Validate the shipped binary, not the packages
