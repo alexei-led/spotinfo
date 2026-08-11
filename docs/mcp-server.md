@@ -95,8 +95,8 @@ Rank Spot machines from the committed multi-cloud catalogue and return a `spotin
 **Cloud constraints:**
 
 - `gcp`: `us-central1` only, `linux` only, `--workload cost` only. `web`/`ci`/`batch` return `UNSUPPORTED_CAPABILITY`. `--os windows` returns `UNSUPPORTED_CAPABILITY`.
-- `azure`: eight regions (`australiaeast`, `eastus`, `eastus2`, `northeurope`, `southeastasia`,
-  `uksouth`, `westeurope`, `westus2`), `linux` only, `--workload cost` only. `web`/`ci`/`batch` and
+- `azure`: 55 regions (enumerated in [data-sources.md](data-sources.md#7-azure-retail-prices-api-and-microsoft-learn-vm-size-pages)),
+  `linux` only, `--workload cost` only. `web`/`ci`/`batch` and
   `os: windows` return `UNSUPPORTED_CAPABILITY`; any other region returns `NO_CANDIDATES`.
 - `find_spot_instances` and `list_spot_regions` are AWS-only.
 

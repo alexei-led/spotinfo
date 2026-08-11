@@ -14,12 +14,12 @@ requests to `https://cloud.google.com/spot-vms/pricing`, same URL and same
 User-Agent, alternated between price generations:
 
 | request | sha256 (first 12) | `n2-standard-4` |
-| --- | --- | --- |
-| 1 | `f5b4730f89b6` | $0.101336 |
-| 2 | `29dde0bdbd27` | $0.101336 |
-| 3 | `a2045bde734f` | $0.111472 |
-| 4 | `ff9a30e23b20` | $0.111472 |
-| 5 | `593091bf36fc` | $0.101336 |
+| ------- | ----------------- | --------------- |
+| 1       | `f5b4730f89b6`    | $0.101336       |
+| 2       | `29dde0bdbd27`    | $0.101336       |
+| 3       | `a2045bde734f`    | $0.111472       |
+| 4       | `ff9a30e23b20`    | $0.111472       |
+| 5       | `593091bf36fc`    | $0.101336       |
 
 A refresh during a rollout like this is a coin flip, and worse: the four
 contracted pages are fetched seconds apart, so one run can mix generations
@@ -52,6 +52,24 @@ not prove the source is stable; two different ones prove it is not, which is the
 case worth refusing. The `general-purpose` page was stable across the same
 window, so instability is per-page and every page is checked.
 
+**A second gate brackets the whole read window.** Comparing a page against itself
+cannot see a rollover that lands *between* two pages, and that is the one which
+actually corrupts a snapshot: a Spot price from one generation over an On-Demand
+price from the next. After the last page is read, the updater re-reads the first
+one and refuses when its hash moved:
+
+```text
+update-gcp-data: gcp pricing page is not serving a stable document:
+https://cloud.google.com/spot-vms/pricing hashed 8ab59daf3daf... before the other
+pages were read and 5bd608f1d6c6... after. The source rolled over mid-run; a
+snapshot taken now can pair prices from two generations. Retry when the hashes agree
+```
+
+One extra download per run covers every gap between the pages. Both gates are
+kept — the per-page read catches a flip inside one page's window, the bracket
+catches a flip between windows — and both report `ErrSourceUnstable`, so either
+exits 75.
+
 **Why the Azure updater does not do the same.** Azure's prices come from the
 Retail Prices API, a versioned endpoint whose rows carry `effectiveStartDate`
 and `effectiveEndDate`, and the parser already resolves all 55 regions against
@@ -81,6 +99,7 @@ The committed snapshot predates both defects, carries the correct 32 GiB for
 ## Primary Data Sources
 
 ### 1. AWS Spot Instance Advisor Data
+
 - **Source**: [AWS Spot Advisor JSON feed](https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json)
 - **Maintained by**: AWS team
 - **Update frequency**: Irregular — AWS republishes it every few months, so expect the
@@ -93,6 +112,7 @@ The committed snapshot predates both defects, carries the correct 32 GiB for
   - Regional availability data
 
 ### 2. AWS Spot Pricing Data
+
 - **Source**: [AWS spot pricing feed](https://website.spot.ec2.aws.a2z.com/spot.json) — the
   feed behind <https://aws.amazon.com/ec2/spot/pricing/>
 - **Maintained by**: AWS team
@@ -115,6 +135,7 @@ The committed snapshot predates both defects, carries the correct 32 GiB for
 > object (same ETag). Only `spot.**json**` is live.
 
 ### 3. AWS EC2 Live Spot Pricing API
+
 - **Source**: AWS `DescribeSpotPriceHistory` API
 - **Access**: Real-time API calls (requires `ec2:DescribeSpotPriceHistory` permission)
 - **Purpose**: Fills in pricing for instance types missing from the static feed — the newest
@@ -131,6 +152,7 @@ The committed snapshot predates both defects, carries the correct 32 GiB for
   - Results marked with `live_price: true` in output
 
 ### 4. Reviewed Instance-Family Architecture Snapshot
+
 - **Source**: `internal/spot/data/architecture-snapshot.json`, manually reviewed against AWS EC2 instance type processor architecture documentation
 - **Purpose**: Classifies Advisor instance families as `x86_64` or `arm64` for `spotinfo recommend`; it does not select an OS price stream
 - **Reviewed exceptions**: G6, G6e, G6f, and Hpc8a are AMD EPYC (`x86_64`), despite nearby family naming patterns that could be misleading. Arm families are listed explicitly too.
@@ -138,6 +160,7 @@ The committed snapshot predates both defects, carries the correct 32 GiB for
 - **Safety and freshness**: A family absent from the reviewed snapshot is not guessed and cannot become a recommendation. The snapshot is committed separately from the Advisor feed, so a newly published family may be omitted until a reviewed update is committed. `provenance` must be non-empty and `reviewed_at` must be a valid `YYYY-MM-DD` date; malformed snapshots are rejected. This manual review is the principal freshness limitation.
 
 ### 5. AWS Spot Placement Scores API
+
 - **Source**: AWS `GetSpotPlacementScores` API
 - **Access**: Real-time API calls (requires IAM permissions)
 - **Contains**:
@@ -149,6 +172,7 @@ The committed snapshot predates both defects, carries the correct 32 GiB for
 ## Google Cloud Data Sources
 
 ### 6. GCP Public Pricing Pages
+
 - **Sources** (all official, all server-rendered, all anonymous):
   - [Spot VM pricing](https://cloud.google.com/spot-vms/pricing) — Spot price, vCPU, memory
   - [General-purpose](https://cloud.google.com/products/compute/pricing/general-purpose),
@@ -190,10 +214,27 @@ The committed snapshot predates both defects, carries the correct 32 GiB for
   `manifest.json`. 224 VM sizes across 26 series in 55 regions, 11,204 prices, 88,272 compressed
   bytes.
 - **Update frequency**: weekly, through the `update-azure-data` workflow.
-- **Region coverage**: `australiaeast`, `eastus`, `eastus2`, `northeurope`, `southeastasia`,
-  `uksouth`, `westeurope`, `westus2`. These eight are a reviewed selection, not everything the
-  API serves; the API covers every Azure region, and widening the matrix is a contract edit plus
-  a refresh. A request for any other region returns `NO_CANDIDATES`; no region is substituted.
+- **Region coverage**: 55 regions. This is the canonical list; every other document states the
+  count and links here.
+
+  `australiacentral`, `australiacentral2`, `australiaeast`, `australiasoutheast`, `austriaeast`,
+  `belgiumcentral`, `brazilsouth`, `brazilsoutheast`, `canadacentral`, `canadaeast`,
+  `centralindia`, `centralus`, `eastasia`, `eastus`, `eastus2`, `francecentral`, `francesouth`,
+  `germanynorth`, `germanywestcentral`, `indonesiacentral`, `israelcentral`, `israelnorthwest`,
+  `italynorth`, `japaneast`, `japanwest`, `koreacentral`, `koreasouth`, `mexicocentral`,
+  `newzealandnorth`, `northcentralus`, `northeurope`, `norwayeast`, `norwaywest`, `polandcentral`,
+  `qatarcentral`, `southafricanorth`, `southafricawest`, `southcentralus`, `southeastasia`,
+  `southindia`, `spaincentral`, `swedencentral`, `swedensouth`, `switzerlandnorth`,
+  `switzerlandwest`, `uaecentral`, `uaenorth`, `uksouth`, `ukwest`, `westcentralus`, `westeurope`,
+  `westindia`, `westus`, `westus2`, `westus3`.
+
+  The list is **derived, not chosen**: 67 regions publish Spot meters for the 26 contracted
+  series, the join against the Learn size pages leaves 59 candidates, and 55 of those carry at
+  least `min_machines`. The four that fall short are excluded rather than accommodated — the
+  coverage floor is applied per region, so a healthy total cannot absorb a short one.
+  An unset `--region`, or `--region all`, enumerates exactly this set. A request for any other
+  region returns `NO_CANDIDATES`; no region is substituted.
+
 - **OS coverage**: Linux only. Meters whose `productName` contains `Windows` bundle a licence
   and are excluded.
 - **Risk**: none. Azure publishes eviction rates only through Resource Graph `SpotResources` and
@@ -205,7 +246,8 @@ The committed snapshot predates both defects, carries the correct 32 GiB for
 **Three source quirks the parser handles deliberately:**
 
 1. **`Low Priority` is not Spot.** The retired Batch meter is priced like Spot and sits beside
-   it under the same size. It is excluded; only a `skuName` ending in ` Spot` is Spot.
+   it under the same size. It is excluded; only a `skuName` ending in `" Spot"` — leading space
+   included — is Spot.
 2. **Cloud Services meters share the VM service name.** The legacy PaaS product is published
    under `serviceName = "Virtual Machines"` against the same `armSkuName` at a different rate,
    which made roughly 40 sizes per region ambiguous. Rows whose `productName` contains
@@ -228,6 +270,7 @@ is dropped and reported; a machine with two different prices in effect fails the
 - The Azure pricing calculator and any third-party aggregator.
 
 ### Excluded GCP sources
+
 - The 12 MB `AF_initDataCallback` blob that powers the region switcher: an undocumented
   positional array, not a published interface.
 - The Cloud Billing Catalog API: requires an API key.
@@ -262,6 +305,7 @@ graph TB
 ## Network Resilience
 
 ### Embedded Data
+
 - **Purpose**: Ensure functionality without network connectivity
 - **Implementation**: Data is [embedded](https://golang.org/pkg/embed) into the binary during build
 - **Coverage**: Complete spot advisor and pricing data snapshot
@@ -269,6 +313,7 @@ graph TB
   Builds are hermetic — they embed exactly what is committed and never fetch.
 
 ### Fallback Strategy
+
 1. **Primary**: Fetch fresh data from AWS feeds
 2. **Secondary**: Use embedded data if network unavailable
 3. **Live Pricing**: For instance types with $0 in the static feed, fetch current prices via EC2 `DescribeSpotPriceHistory` API (requires AWS credentials)
@@ -278,6 +323,7 @@ graph TB
 ## Data Processing Pipeline
 
 ### 1. Data Fetching
+
 ```go
 // Pseudo-code flow
 func fetchData() {
@@ -285,7 +331,7 @@ func fetchData() {
     if advisorData == nil {
         advisorData = loadEmbeddedAdvisorData()
     }
-    
+
     pricingData := fetchFromURL("https://website.spot.ec2.aws.a2z.com/spot.json")
     if pricingData == nil {
         pricingData = loadEmbeddedPricingData()
@@ -294,12 +340,14 @@ func fetchData() {
 ```
 
 ### 2. Data Transformation
+
 - **JSON parsing**: Convert AWS JSON format to internal structures
 - **Price extraction**: Parse JavaScript callback format for pricing
 - **Data normalization**: Standardize formats across sources
 - **Validation**: Ensure data integrity and completeness
 
 ### 3. Data Enrichment
+
 - **Instance type mapping**: Combine advisor and pricing data
 - **Score integration**: Add placement scores when requested
 - **Regional filtering**: Apply user-specified region constraints
@@ -308,12 +356,14 @@ func fetchData() {
 ## Cache Strategy
 
 ### Placement Score Caching
+
 - **Cache duration**: 10 minutes
 - **Cache key format**: `region:az_flag:instance_types`
 - **Purpose**: Reduce AWS API calls and improve performance
 - **Implementation**: LRU cache with expiration
 
 ### Data Freshness Tracking
+
 - **Timestamp tracking**: Record when data was last fetched
 - **Freshness indicators**: Visual indicators for stale data (>30 minutes)
 - **JSON metadata**: Include `score_fetched_at` timestamps in output
@@ -321,13 +371,15 @@ func fetchData() {
 ## Data Accuracy and Limitations
 
 ### Spot Advisor Data
+
 - **Accuracy**: High - directly from AWS
-- **Limitations**: 
+- **Limitations**:
   - Static snapshot updated periodically by AWS
   - May not reflect real-time market conditions
   - Regional variations in update frequency
 
 ### Spot Pricing Data
+
 - **Accuracy**: High - current market prices
 - **Limitations**:
   - Prices change frequently
@@ -335,6 +387,7 @@ func fetchData() {
   - Embedded data becomes stale over time
 
 ### Live Spot Pricing (EC2 API)
+
 - **Accuracy**: Real-time from AWS API
 - **Limitations**:
   - Requires `ec2:DescribeSpotPriceHistory` IAM permission
@@ -343,6 +396,7 @@ func fetchData() {
   - Prices marked with `live_price: true` in output to distinguish from static data
 
 ### Placement Scores
+
 - **Accuracy**: Real-time from AWS API
 - **Limitations**:
   - Requires proper IAM permissions
@@ -353,6 +407,7 @@ func fetchData() {
 ## Data Update Process
 
 ### Refreshing the embedded data
+
 Normally you do not do this by hand: the `update-data` GitHub Actions workflow runs weekly,
 refreshes both feeds, and opens a PR. To do it manually:
 
@@ -375,6 +430,7 @@ architecture documentation, add the reviewed family mapping to
 committed review evidence; no runtime metadata call or automatic unreviewed generator exists.
 
 ### Refreshing the embedded Azure catalogue
+
 The `update-azure-data` workflow runs weekly and opens a PR. To do it manually:
 
 ```bash
@@ -390,24 +446,25 @@ committed snapshot exactly as it was.
 
 Failures are deliberate, not transient noise. Expect to see:
 
-| Message | Meaning |
-| --- | --- |
-| `region X prices N machines, contract requires at least M` | One region returned short. The floor is applied per region so a healthy total cannot absorb it. Retry; if it persists, the size list changed. |
-| `page publishes no processor architecture marker` | A Learn page dropped its `[x86-64]`/`[Arm64]` marker. The parser refuses to guess — an Arm size labelled `x86_64` passes every other gate. |
-| `page mixes X and Y processors` | One page now documents two architectures. The series needs splitting, or the page changed shape. |
-| `page publishes no size table` | A contracted header was renamed, including a third memory-unit label. |
-| `two different current prices for one machine` | Two intervals are in force at once for an in-scope size. There is no safe way to choose; review the meters. |
-| `serviceName is "X", the contracted request returns only "Virtual Machines"` | The request filter stopped selecting what it was reviewed to select. |
-| `needs N fractional digits, contract allows 6` | A price got finer. Raise `max_fractional_digits` deliberately after review; never round. |
-| `priced in only one class` | Informational. The size is skipped rather than published with a savings figure that has no denominator. |
-| `is not a size name this parser reads` | A page listed a constrained-vCPU size such as `Standard_E32-8as_v5`. None does today. Decide explicitly whether to support the hyphenated form; the refresh fails rather than skipping the row. |
-| `belongs to unapproved series` | Microsoft added a series to a contracted page. Add it to `support.machine_series` and rerun. Architecture comes from the page, so unlike GCP there is no ordering trap here. |
+| Message                                                                      | Meaning                                                                                                                                                                                         |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `region X prices N machines, contract requires at least M`                   | One region returned short. The floor is applied per region so a healthy total cannot absorb it. Retry; if it persists, the size list changed.                                                   |
+| `page publishes no processor architecture marker`                            | A Learn page dropped its `[x86-64]`/`[Arm64]` marker. The parser refuses to guess — an Arm size labelled `x86_64` passes every other gate.                                                      |
+| `page mixes X and Y processors`                                              | One page now documents two architectures. The series needs splitting, or the page changed shape.                                                                                                |
+| `page publishes no size table`                                               | A contracted header was renamed, including a third memory-unit label.                                                                                                                           |
+| `two different current prices for one machine`                               | Two intervals are in force at once for an in-scope size. There is no safe way to choose; review the meters.                                                                                     |
+| `serviceName is "X", the contracted request returns only "Virtual Machines"` | The request filter stopped selecting what it was reviewed to select.                                                                                                                            |
+| `needs N fractional digits, contract allows 6`                               | A price got finer. Raise `max_fractional_digits` deliberately after review; never round.                                                                                                        |
+| `priced in only one class`                                                   | Informational. The size is skipped rather than published with a savings figure that has no denominator.                                                                                         |
+| `is not a size name this parser reads`                                       | A page listed a constrained-vCPU size such as `Standard_E32-8as_v5`. None does today. Decide explicitly whether to support the hyphenated form; the refresh fails rather than skipping the row. |
+| `belongs to unapproved series`                                               | Microsoft added a series to a contracted page. Add it to `support.machine_series` and rerun. Architecture comes from the page, so unlike GCP there is no ordering trap here.                    |
 
 Apart from the last two, any of these means reviewing the sources and, if they really changed
 shape, bumping `parser_version` in both the parser and the source contract. Do not widen the
 parser to make a changed source fit.
 
 ### Refreshing the embedded GCP catalogue
+
 The `update-gcp-data` workflow runs weekly and opens a PR. To do it manually:
 
 ```bash
@@ -422,20 +479,21 @@ writing anything. A failed run therefore leaves the committed snapshot exactly a
 
 Failures are deliberate, not transient noise. Expect to see:
 
-| Message | Meaning |
-| --- | --- |
-| `coverage below the manifest floor` | Google served a partially rendered page. Retry; if it persists, the pages changed. |
-| `no machine-type table rendered for region us-central1` | A contracted header was renamed. |
-| `no region selector` | The ARIA listbox moved. The parser cannot attribute a table to a region. |
-| `exceeds 9 fractional digits` | A price needs more precision than `cloud.MoneyScale`. Raise the scale deliberately; never round. |
-| `spot price with no on-demand pair` | Informational. The machine is skipped rather than published with no denominator. |
-| `belongs to unapproved series` | Google added a machine series. This is routine, not a no-go: add the series to `support.machine_series` in the source contract — and to `armSeries` in `internal/providers/gcp/parser.go` **first** if it is Arm — then rerun. Contract-first would ship an Arm series labelled `x86_64`, because an unlisted series defaults to x86_64. |
+| Message                                                 | Meaning                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `coverage below the manifest floor`                     | Google served a partially rendered page. Retry; if it persists, the pages changed.                                                                                                                                                                                                                                                                                                                 |
+| `no machine-type table rendered for region us-central1` | A contracted header was renamed.                                                                                                                                                                                                                                                                                                                                                                   |
+| `no region selector`                                    | The ARIA listbox moved. The parser cannot attribute a table to a region.                                                                                                                                                                                                                                                                                                                           |
+| `exceeds 9 fractional digits`                           | A price needs more precision than `cloud.MoneyScale`. Raise the scale deliberately; never round.                                                                                                                                                                                                                                                                                                   |
+| `spot price with no on-demand pair`                     | Informational. The machine is skipped rather than published with no denominator.                                                                                                                                                                                                                                                                                                                   |
+| `belongs to unapproved series`                          | Google added a machine series. This is routine, not a no-go: add it to `support.machine_series` in the source contract **and** to `seriesArchitecture` in `internal/providers/gcp/classify.go`, then rerun. Order does not matter — the map is total, so an unclassified series fails rather than defaulting to `x86_64`, and `TestEveryContractedSeriesIsClassified` pins the two lists together. |
 
 Apart from the last two, any of these means reviewing the pages and, if they really changed
 shape, bumping `parser_version` in both the parser and the source contract. Do not widen the
 parser to make a changed page fit.
 
 ### Runtime Data Flow
+
 1. **Startup**: Load embedded data as baseline
 2. **Network fetch**: Attempt to fetch fresh data from AWS feeds
 3. **Merge**: Combine fresh data with embedded fallback
@@ -445,11 +503,13 @@ parser to make a changed page fit.
 ## Monitoring and Observability
 
 ### Data Source Health
+
 - **Connection testing**: Verify AWS feed accessibility
 - **Data validation**: Ensure JSON structure integrity
 - **Fallback detection**: Log when embedded data is used
 
 ### Performance Metrics
+
 - **Fetch duration**: Monitor AWS feed response times
 - **Cache hit rate**: Track placement score cache effectiveness
 - **API quota usage**: Monitor placement score API consumption
@@ -457,12 +517,14 @@ parser to make a changed page fit.
 ## Security Considerations
 
 ### API Access
+
 - **IAM permissions**: `ec2:DescribeSpotPriceHistory` (live pricing), `ec2:GetSpotPlacementScores` (placement scores)
 - **Credential management**: Uses AWS SDK default credential chain
 - **Network security**: HTTPS for all AWS, GCP, and Azure source pages and APIs
 - **Optional**: AWS API features degrade gracefully without credentials; GCP and Azure catalogue refreshes use public endpoints
 
 ### Data Privacy
+
 - **No personal data**: All catalogues contain public cloud pricing and machine specifications
 - **No data retention**: Only temporary caching for performance
 - **No runtime external transmission**: Embedded catalogues are read locally; refresh commands fetch public source data only
@@ -472,23 +534,27 @@ parser to make a changed page fit.
 ### Common Problems
 
 **Stale pricing data:**
+
 ```bash
 # Refresh the embedded feeds, verify, then rebuild
 make update-data update-price verify-data build
 ```
 
 **Missing placement scores:**
+
 ```bash
 # Verify API permissions
 aws ec2 get-spot-placement-scores --instance-types t3.micro --target-capacity 1 --region us-east-1
 ```
 
 **Network connectivity issues:**
+
 - Tool automatically falls back to embedded data
 - Check network connectivity to `spot-bid-advisor.s3.amazonaws.com`
 - Verify firewall settings for outbound HTTPS
 
 **Permission errors:**
+
 - Check IAM policy includes `ec2:GetSpotPlacementScores`
 - Verify no Service Control Policy blocks the action
 - Test with AWS CLI: `aws sts get-caller-identity`

@@ -102,7 +102,7 @@ Sources 1-2 are embedded in the binary during build for offline capability.
 
 `--offline` answers from those embedded snapshots and makes no request at all —
 including no DescribeSpotPriceHistory, which is why the flag also clears the live-price
-provider. Without that it was *slower* than the live path, because every instance the
+provider. Without that it was _slower_ than the live path, because every instance the
 snapshot does not price fell through to an AWS API call that blocks for the live-price
 timeout. It is worth having because the feeds dominate an invocation: the advisor
 document alone takes over a second, against roughly 40 ms to answer from embedded data.
@@ -120,9 +120,9 @@ rewritten through the day and transfer in a tenth of a second, so they are cache
 re-downloading — both feeds serve ETags, and a 304 costs one round trip and no payload.
 `--refresh` ignores any cached copy for the run.
 
-Resolution order is: fresh cache, then the origin, then an *expired* cache entry, then
+Resolution order is: fresh cache, then the origin, then an _expired_ cache entry, then
 the committed snapshot. The expired entry outranks the snapshot because it is AWS data
-that is merely old, while the snapshot is AWS data that is old *and* frozen at build
+that is merely old, while the snapshot is AWS data that is old _and_ frozen at build
 time. Every cache failure is non-fatal — a read-only filesystem costs time, not answers.
 
 **This added a third data-source state, and that is a deliberate contract change.**
@@ -131,7 +131,7 @@ time. Every cache failure is non-fatal — a read-only filesystem costs time, no
 unchanged, only established recency differs). Reporting a cached answer as `live` would
 have been a claim about recency that nothing verified, which is the same class of silent
 substitution the provider seam exists to prevent. A copy the origin confirmed with a 304
-*is* `live`: it matches AWS right now.
+_is_ `live`: it matches AWS right now.
 
 **`live_price` in the v1 root JSON lost its `omitempty`, which is a second deliberate
 contract change.** The field is now always emitted. Price provenance is carried by every
@@ -151,7 +151,7 @@ without the other fails a test rather than a consumer.
 
 **Live GCP preemption risk is opt-in and never enters a snapshot.** `--live-risk`
 calls `compute/beta advice.capacityHistory` with Application Default Credentials and
-attaches a `preemption_rate` risk to the *ranked page* — one request per
+attaches a `preemption_rate` risk to the _ranked page_ — one request per
 recommendation, never per catalogue entry. The figure is per-project advisory data,
 so it is not redistributable and `internal/providers/gcp/data/source-contract.json`
 does not name it; the contract governs the committed snapshot, and this never
@@ -161,7 +161,7 @@ names.
 
 `RiskKindPreemptionRate` is deliberately **absent** from `interruptionCappableKinds`.
 Google measures (preempted Spots) / (Spots that stopped running); AWS measures the
-fraction of *running* instances interrupted. `acceptsRisk` rejects a kind that is not
+fraction of _running_ instances interrupted. `acceptsRisk` rejects a kind that is not
 listed, so `--workload web|ci|batch` keeps refusing GCP even when the number is
 available. Live risk makes the figure visible, not filterable — that asymmetry is the
 whole point of the kind vocabulary.
@@ -175,7 +175,7 @@ slice: **+240,768 bytes** (0.59%).
 
 GCP: Google's public server-rendered Spot and Compute pricing pages, `us-central1` only.
 Azure: the anonymous Azure Retail Prices API for amounts, joined to Microsoft Learn VM size
-pages for vCPU, memory and processor architecture; eight reviewed regions, 26 machine series.
+pages for vCPU, memory and processor architecture; 55 reviewed regions, 26 machine series.
 
 Every non-AWS snapshot is governed by an approved
 `internal/providers/<cloud>/data/source-contract.json` that enumerates its exact source URLs,
@@ -316,13 +316,22 @@ contracted URL. Two identical reads do not prove stability; two different ones d
 it, and that is the case worth refusing (`ErrSourceUnstable`). It costs one extra
 download per page on a weekly build-time job and nothing at runtime.
 
+**The per-page double read is not enough on its own, and `confirmWindowStable` is the
+other half.** Comparing a page against itself cannot, by construction, see a rollover
+that lands *between* two pages — which is precisely the cross-page mixing described
+above. `fetchSources` therefore re-reads the first downloaded page after the last one and
+refuses when its hash moved, bracketing every interval between the pages for one extra
+download per run. Both halves are load-bearing: the per-page read catches a flip inside
+one page's window, the bracket catches a flip between windows. Do not remove either
+because the other exists.
+
 `update-gcp-data: gcp pricing page is not serving a stable document` therefore means
 wait and retry, not investigate the parser — and the updater says so with **exit 75**
 (`EX_TEMPFAIL`) against 1 for every other failure. The weekly workflow branches on that
 code and reports a notice instead of a red run. Neither `go run` nor `make` preserves an
 exit code, so the workflow builds the binary and calls it directly; `make update-gcp-data`
 stays the human-facing command. A machine whose two pages disagree about its
-*shape* is a different failure — excluded and reported, not fatal — and that is a
+_shape_ is a different failure — excluded and reported, not fatal — and that is a
 defence against one stale cell, not against an unstable source.
 
 Two rules matter most:

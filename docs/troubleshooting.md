@@ -441,6 +441,35 @@ spotinfo recommend --cloud gcp --architecture x86_64 --cpu 2 --memory 4
 
 **Solution:** Omit `--region` (expands to `us-central1`) or use `--region us-central1` explicitly.
 
+### `--live-risk` returns `unavailable` for every machine
+
+**Cause:** The flag is opt-in and fails soft — the ranked page is complete without risk — so the answer
+looks the same whether Google has no preemption history for these machines or the call could not be made
+at all. Distinguish them by the warning on stderr:
+
+| stderr | Meaning |
+| --- | --- |
+| `live risk unavailable ... all N preemption lookups failed, first: ... 403` | Credentials resolved, but the project cannot read `compute.advice`. Enable the Compute Engine API on it, or grant the caller `compute.instances.get`-level access. |
+| `live risk unavailable ... all N preemption lookups failed, first: ... 404` | The project exists but the region has no advice endpoint, or the project id names something else. |
+| `live risk unavailable ... no Google Cloud credentials` | Application Default Credentials are not set. Run `gcloud auth application-default login`, or use a service account or the GCE metadata server. |
+| nothing on stderr | Every lookup succeeded and Google genuinely reports no history for those machines in that region. Run with the verbose flag to see the per-machine detail at `Debug`. |
+
+A batch where *some* lookups fail is not reported: those machines keep `unavailable` while the rest
+carry their measured rate, which the `risk` column already shows per row.
+
+**Note:** the rate is per project. Two callers asking about the same machine in the same region get
+different numbers, which is why it is never baked into the committed snapshot.
+
+### `invalid argument: not a Google Cloud project id`
+
+**Cause:** `--gcp-project`, or `GOOGLE_CLOUD_PROJECT`, holds something that is not a project identifier.
+The value is interpolated into the advice API path, so an unchecked one would silently redirect the call
+and every machine would then report `unavailable` for a reason nothing named.
+
+**Solution:** Pass the project **id**, not its number, display name, or a resource path. The rule is
+quoted in the error: 6-30 characters, starting with a lowercase letter, then lowercase letters, digits
+and hyphens, not ending in a hyphen.
+
 ### "azure: unsupported capability: risk" (`UNSUPPORTED_CAPABILITY`)
 
 **Cause:** Either of:
@@ -470,10 +499,10 @@ bundle a licence and are excluded from it.
 ### "no candidates for architecture ... and workload cost" (`NO_CANDIDATES`) on Azure
 
 **Cause:** An explicit `--region` was given that the embedded Azure catalogue does not cover. It covers
-eight reviewed regions: `australiaeast`, `eastus`, `eastus2`, `northeurope`, `southeastasia`, `uksouth`,
-`westeurope`, `westus2`.
+55 reviewed regions, enumerated in [data-sources.md](data-sources.md#7-azure-retail-prices-api-and-microsoft-learn-vm-size-pages) and in `support.regions` of
+`internal/providers/azure/data/source-contract.json`.
 
-**Solution:** Use one of those regions, or omit `--region` to rank across all eight. Widening the matrix
+**Solution:** Use one of those regions, or omit `--region` to rank across all 55. Widening the matrix
 is a source-contract change plus a data refresh, not a runtime option.
 
 ### "data unavailable: cloud provider ... is unavailable (PROVIDER_NOT_REGISTERED)" (`DATA_UNAVAILABLE`)

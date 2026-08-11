@@ -13,53 +13,60 @@ spotinfo [global options]
 ## Global Options
 
 ### Cloud Provider
-| Flag | Description | Example |
-|------|-------------|---------|
+
+| Flag            | Description                                                                                                                                                                                | Example                              |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------ |
 | `--cloud value` | Cloud provider: `aws`, `gcp`, `azure`. The root query command is AWS-only — it renders an interruption column no other cloud publishes — so `--cloud` selects the provider for `recommend` | `spotinfo --cloud gcp recommend ...` |
 
 ### Instance Selection
-| Flag | Description | Example |
-|------|-------------|---------|
-| `--type value, --machine value` | EC2 instance type (supports RE2 regex) | `--type "m5.large"` or `--type "t3.*"` |
-| `--os value` | Operating system filter | `--os linux` (default) or `--os windows` |
+
+| Flag                            | Description                            | Example                                  |
+| ------------------------------- | -------------------------------------- | ---------------------------------------- |
+| `--type value, --machine value` | EC2 instance type (supports RE2 regex) | `--type "m5.large"` or `--type "t3.*"`   |
+| `--os value`                    | Operating system filter                | `--os linux` (default) or `--os windows` |
 
 ### Geographic Filtering
-| Flag | Description | Example |
-|------|-------------|---------|
+
+| Flag             | Description                              | Example                                 |
+| ---------------- | ---------------------------------------- | --------------------------------------- |
 | `--region value` | AWS regions (can be used multiple times) | `--region us-east-1 --region us-west-2` |
-| | Use "all" for all regions | `--region all` |
+|                  | Use "all" for all regions                | `--region all`                          |
 
 ### Resource Filtering
-| Flag | Description | Example |
-|------|-------------|---------|
-| `--cpu value` | Minimum vCPU cores | `--cpu 4` |
-| `--memory value` | Minimum memory in GiB | `--memory 16` |
-| `--price value` | Maximum price per hour (USD, must be positive) | `--price 0.50` |
+
+| Flag             | Description                                    | Example        |
+| ---------------- | ---------------------------------------------- | -------------- |
+| `--cpu value`    | Minimum vCPU cores                             | `--cpu 4`      |
+| `--memory value` | Minimum memory in GiB                          | `--memory 16`  |
+| `--price value`  | Maximum price per hour (USD, must be positive) | `--price 0.50` |
 
 ### AWS Spot Placement Scores
-| Flag | Description | Example |
-|------|-------------|---------|
-| `--with-score` | Enable placement score fetching | `--with-score` |
-| `--az` | Request AZ-level scores (use with --with-score) | `--with-score --az` |
-| `--min-score value` | Minimum placement score (1-10) | `--min-score 7` |
-| `--score-timeout value` | Timeout for score API in seconds | `--score-timeout 30` |
+
+| Flag                    | Description                                     | Example              |
+| ----------------------- | ----------------------------------------------- | -------------------- |
+| `--with-score`          | Enable placement score fetching                 | `--with-score`       |
+| `--az`                  | Request AZ-level scores (use with --with-score) | `--with-score --az`  |
+| `--min-score value`     | Minimum placement score (1-10)                  | `--min-score 7`      |
+| `--score-timeout value` | Timeout for score API in seconds                | `--score-timeout 30` |
 
 ### Sorting and Output
-| Flag | Description | Example |
-|------|-------------|---------|
-| `--sort value` | Sort by: interruption, type, savings, price, region, score | `--sort score` |
-| `--order value` | Sort order: asc or desc | `--order desc` |
-| `--output value` | Output format: table, json, csv, text, number | `--output json` |
+
+| Flag             | Description                                                | Example         |
+| ---------------- | ---------------------------------------------------------- | --------------- |
+| `--sort value`   | Sort by: interruption, type, savings, price, region, score | `--sort score`  |
+| `--order value`  | Sort order: asc or desc                                    | `--order desc`  |
+| `--output value` | Output format: table, json, csv, text, number              | `--output json` |
 
 ### System Options
-| Flag | Description | Example |
-|------|-------------|---------|
-| `--mcp` | Run as MCP server instead of CLI | `--mcp` |
-| `--debug` | Enable debug logging | `--debug` |
-| `--quiet` | Quiet mode (errors only) | `--quiet` |
-| `--json-log` | Output logs in JSON format | `--json-log` |
-| `--help, -h` | Show help | `--help` |
-| `--version, -v` | Print version | `--version` |
+
+| Flag            | Description                      | Example      |
+| --------------- | -------------------------------- | ------------ |
+| `--mcp`         | Run as MCP server instead of CLI | `--mcp`      |
+| `--debug`       | Enable debug logging             | `--debug`    |
+| `--quiet`       | Quiet mode (errors only)         | `--quiet`    |
+| `--json-log`    | Output logs in JSON format       | `--json-log` |
+| `--help, -h`    | Show help                        | `--help`     |
+| `--version, -v` | Print version                    | `--version`  |
 
 ## Recommendations
 
@@ -69,21 +76,21 @@ spotinfo [global options]
 spotinfo recommend --architecture <x86_64|arm64> --cpu N --memory N [flags]
 ```
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--cloud aws|gcp|azure` | Cloud provider | `aws` |
-| `--architecture x86_64|arm64` | Required processor architecture | none |
-| `--instance REGEXP, --machine REGEXP` | RE2 machine-type filter; combined with architecture using AND semantics | none |
-| `--region REGION` | One or more regions; `all` uses all regions the selected cloud publishes | `us-east-1` (AWS name; unset on non-AWS clouds expands to all their published regions) |
-| `--cpu N`, `--vcpu N` | Required positive minimum vCPU count | none |
-| `--memory N`, `--memory-gib N` | Required positive minimum GiB of memory | none |
-| `--budget USD` | Positive maximum USD per candidate instance-hour | none |
-| `--os linux|windows` | Operating-system price stream | `linux` |
-| `--workload cost|web|ci|batch` | Ranking policy; `cost` applies no risk constraint and requires no risk data | `web` on clouds with risk data; `cost` otherwise |
-| `--top N` | Maximum candidates returned; the v2 path (any non-AWS cloud, or AWS with `--workload cost`) caps it at 50 | `3` |
-| `--output table|json` | Recommendation output format | `table` |
+| Flag                                  | Description                                                                                               | Default                                                                                |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `--cloud aws\|gcp\|azure`             | Cloud provider                                                                                            | `aws`                                                                                  |
+| `--architecture x86_64\|arm64`        | Required processor architecture                                                                           | none                                                                                   |
+| `--instance REGEXP, --machine REGEXP` | RE2 machine-type filter; combined with architecture using AND semantics                                   | none                                                                                   |
+| `--region REGION`                     | One or more regions; `all` uses all regions the selected cloud publishes                                  | `us-east-1` (AWS name; unset on non-AWS clouds expands to all their published regions) |
+| `--cpu N`, `--vcpu N`                 | Required positive minimum vCPU count                                                                      | none                                                                                   |
+| `--memory N`, `--memory-gib N`        | Required positive minimum GiB of memory                                                                   | none                                                                                   |
+| `--budget USD`                        | Positive maximum USD per candidate instance-hour                                                          | none                                                                                   |
+| `--os linux\|windows`                 | Operating-system price stream                                                                             | `linux`                                                                                |
+| `--workload cost\|web\|ci\|batch`     | Ranking policy; `cost` applies no risk constraint and requires no risk data                               | `web` on clouds with risk data; `cost` otherwise                                       |
+| `--top N`                             | Maximum candidates returned; the v2 path (any non-AWS cloud, or AWS with `--workload cost`) caps it at 50 | `3`                                                                                    |
+| `--output table\|json`                | Recommendation output format                                                                              | `table`                                                                                |
 
-`cost` applies no interruption constraint and works on every cloud. v1 ranks by price, then interruption cap, then right-sizing excess. v2 ranks by price, then excess vCPU, excess memory, region, and machine; it never ranks or compares unavailable risk. The caps are applied to a risk bucket's *maximum* percentage: `web` admits a bucket whose maximum is at most 5%, `ci` at most 16%, `batch` at most 22%. On AWS the reachable Advisor buckets make those effective ceilings 5%, 15% and 20% — `web` accepts only `<5%`, `ci` accepts through `10-15%`, and `batch` accepts through `15-20%`. `web`, `ci`, and `batch` require a cloud that publishes interruption or preemption risk; requesting them on GCP or Azure returns `UNSUPPORTED_CAPABILITY`. `--cpu` and `--memory` are inclusive minima, as is `--budget`; a supplied budget must be greater than zero. A budget finer than nine decimal places — what dividing a monthly figure by 720 produces — is truncated to nine, which can only tighten the ceiling. Prices of zero, missing prices, and non-finite prices are never candidates; existing live-price enrichment can provide a usable positive price. `--os` selects Linux or Windows pricing before ranking. Repeated `--region` values are trimmed, deduplicated, and sorted before fetching and reporting; repeated `--region all` becomes one `all`, while `all` combined with an explicit region (or an empty region value) is rejected before fetching.
+`cost` applies no interruption constraint and works on every cloud. v1 ranks by price, then interruption cap, then right-sizing excess. v2 ranks by price, then excess vCPU, excess memory, region, and machine; it never ranks or compares unavailable risk. The caps are applied to a risk bucket's _maximum_ percentage: `web` admits a bucket whose maximum is at most 5%, `ci` at most 16%, `batch` at most 22%. On AWS the reachable Advisor buckets make those effective ceilings 5%, 15% and 20% — `web` accepts only `<5%`, `ci` accepts through `10-15%`, and `batch` accepts through `15-20%`. `web`, `ci`, and `batch` require a cloud that publishes interruption or preemption risk; requesting them on GCP or Azure returns `UNSUPPORTED_CAPABILITY`. `--cpu` and `--memory` are inclusive minima, as is `--budget`; a supplied budget must be greater than zero. A budget finer than nine decimal places — what dividing a monthly figure by 720 produces — is truncated to nine, which can only tighten the ceiling. Prices of zero, missing prices, and non-finite prices are never candidates; existing live-price enrichment can provide a usable positive price. `--os` selects Linux or Windows pricing before ranking. Repeated `--region` values are trimmed, deduplicated, and sorted before fetching and reporting; repeated `--region all` becomes one `all`, while `all` combined with an explicit region (or an empty region value) is rejected before fetching.
 
 The shared root `--cloud`, `--os`, `--region`, `--output`, `--cpu`, `--memory`, and the machine filter (`--machine`, spelled `--type` on the root command and `--instance` on `recommend`) can be placed before `recommend` (for example, `spotinfo --cloud gcp --output json --cpu 2 --memory 8 recommend --architecture x86_64`). Explicit flags after `recommend` take precedence; if neither is set, the command defaults apply. `--architecture`, `--budget`, `--workload`, and `--top` remain command-local.
 
@@ -114,8 +121,27 @@ The following JSON example abridges each recommendation item to its identifying 
     "workload": "ci",
     "top": 2
   },
-  "ranking_policy": ["price_usd_per_hour_ascending", "interruption_frequency_ascending", "excess_vcpu_ascending", "excess_memory_gib_ascending", "region_ascending", "instance_ascending"],
-  "recommendations": [{"instance": "m7g.large", "rationale_codes": ["ARCHITECTURE_MATCH", "BUDGET_CAP_MET", "KNOWN_POSITIVE_PRICE", "MEMORY_MINIMUM_MET", "VCPU_MINIMUM_MET", "WORKLOAD_CI_CAP_MET"]}]
+  "ranking_policy": [
+    "price_usd_per_hour_ascending",
+    "interruption_frequency_ascending",
+    "excess_vcpu_ascending",
+    "excess_memory_gib_ascending",
+    "region_ascending",
+    "instance_ascending"
+  ],
+  "recommendations": [
+    {
+      "instance": "m7g.large",
+      "rationale_codes": [
+        "ARCHITECTURE_MATCH",
+        "BUDGET_CAP_MET",
+        "KNOWN_POSITIVE_PRICE",
+        "MEMORY_MINIMUM_MET",
+        "VCPU_MINIMUM_MET",
+        "WORKLOAD_CI_CAP_MET"
+      ]
+    }
+  ]
 }
 ```
 
@@ -127,11 +153,11 @@ The v2 `table` output is a different shape from the v1 table above: `RANK CLOUD 
 
 ## Cloud Capability Matrix
 
-| Cloud | Entry point | Regions | OS | Architectures | Risk data | Workloads |
-|-------|-------------|---------|-----|---------------|-----------|-----------|
-| `aws` | root + `recommend` | all Advisor regions | linux, windows | x86_64, arm64 | interruption buckets | cost, web, ci, batch |
-| `gcp` | `recommend` only | `us-central1` | linux | x86_64, arm64 | unavailable | cost |
-| `azure` | `recommend` only | 8 regions | linux | x86_64, arm64 | unavailable | cost |
+| Cloud   | Entry point        | Regions             | OS             | Architectures | Risk data            | Workloads            |
+| ------- | ------------------ | ------------------- | -------------- | ------------- | -------------------- | -------------------- |
+| `aws`   | root + `recommend` | all Advisor regions | linux, windows | x86_64, arm64 | interruption buckets | cost, web, ci, batch |
+| `gcp`   | `recommend` only   | `us-central1`       | linux          | x86_64, arm64 | unavailable          | cost                 |
+| `azure` | `recommend` only   | 55 regions          | linux          | x86_64, arm64 | unavailable          | cost                 |
 
 **GCP notes:**
 
@@ -146,9 +172,9 @@ The v2 `table` output is a different shape from the v1 table above: `RANK CLOUD 
 
 - The root query command (`spotinfo --cloud azure ...`) is not supported; it requires interruption data
   and returns `UNSUPPORTED_CAPABILITY`.
-- Eight regions are served: `australiaeast`, `eastus`, `eastus2`, `northeurope`, `southeastasia`,
-  `uksouth`, `westeurope`, `westus2`. Naming any other region returns `NO_CANDIDATES`. An unset
-  `--region` expands to all eight.
+- 55 regions are served, enumerated in [data-sources.md](data-sources.md#7-azure-retail-prices-api-and-microsoft-learn-vm-size-pages) and in
+  `support.regions` of `internal/providers/azure/data/source-contract.json`. Naming any other
+  region returns `NO_CANDIDATES`. An unset `--region` expands to all 55.
 - 224 VM sizes across 26 machine series (37 arm64 sizes in `bpsv2`, `dpsv5`, `dpdsv5`, `dpsv6`,
   `epsv5`). `--machine` accepts the full Azure size name, for example `Standard_D2s_v5`.
 - Azure publishes eviction rates only through Resource Graph and Resource SKUs, both of which need a
@@ -159,10 +185,13 @@ The v2 `table` output is a different shape from the v1 table above: `RANK CLOUD 
 ## Output Formats
 
 ### Table Format (Default)
+
 Human-readable table with visual indicators:
+
 ```bash
 spotinfo --type "t3.micro" --with-score
 ```
+
 ```
 ┌───────────────┬──────┬────────────┬────────────────────────┬──────────┬────────────────────────────┐
 │ INSTANCE INFO │ VCPU │ MEMORY GIB │ SAVINGS OVER ON-DEMAND │ USD/HOUR │ PLACEMENT SCORE (REGIONAL) │
@@ -172,10 +201,13 @@ spotinfo --type "t3.micro" --with-score
 ```
 
 ### JSON Format
+
 Structured data for automation:
+
 ```bash
 spotinfo --type "t3.micro" --with-score --output json
 ```
+
 ```json
 [
   {
@@ -203,29 +235,38 @@ spotinfo --type "t3.micro" --with-score --output json
 > The `live_price` field is always present. It is `true` when the price was fetched from the EC2 `DescribeSpotPriceHistory` API (for newer instance types missing from the static pricing feed) and `false` when it came from the embedded static feed.
 
 ### CSV Format
+
 Data-only format without visual indicators:
+
 ```bash
 spotinfo --type "t3.micro" --with-score --output csv
 ```
+
 ```
 Instance Info,vCPU,Memory GiB,Savings over On-Demand,Frequency of interruption,USD/Hour,Price Source,Placement Score (Regional)
 t3.micro,2,1,68,<5%,0.0043,static,9
 ```
 
 ### Text Format
+
 Plain text for scripting:
+
 ```bash
 spotinfo --type "t3.micro" --with-score --output text
 ```
+
 ```
 type=t3.micro, vCPU=2, memory=1GiB, saving=68%, interruption='<5%', price=0.0043, score=9
 ```
 
 ### Number Format
+
 Single value for automation:
+
 ```bash
 spotinfo --type "t3.micro" --output number
 ```
+
 ```
 68
 ```
@@ -233,6 +274,7 @@ spotinfo --type "t3.micro" --output number
 ## Usage Patterns
 
 ### Quick Instance Assessment
+
 ```bash
 # Basic instance information
 spotinfo --type "m5.large"
@@ -242,6 +284,7 @@ spotinfo --type "m5.large" --with-score
 ```
 
 ### Production Planning
+
 ```bash
 # High-reliability instances
 spotinfo --type "m5.*" --with-score --min-score 8 --region "us-east-1"
@@ -251,6 +294,7 @@ spotinfo --type "c5.xlarge" --with-score --region "us-east-1" --region "eu-west-
 ```
 
 ### Cost Optimization
+
 ```bash
 # Cheapest instances with good reliability
 spotinfo --type "t3.*" --with-score --min-score 6 --sort price --order asc
@@ -260,6 +304,7 @@ spotinfo --cpu 4 --memory 16 --price 0.20 --with-score
 ```
 
 ### Advanced Filtering
+
 ```bash
 # Regex patterns
 spotinfo --type "^(m5|c5)\.(large|xlarge)$" --with-score
@@ -269,6 +314,7 @@ spotinfo --type "r5.*" --cpu 8 --memory 64 --with-score --min-score 7
 ```
 
 ### Availability Zone Analysis
+
 ```bash
 # AZ-level placement scores
 spotinfo --type "m5.large" --with-score --az --region "us-east-1"
@@ -281,6 +327,7 @@ spotinfo --type "c5.xlarge" --with-score --az --region "us-east-1"
 ## Automation Examples
 
 ### Shell Scripts
+
 ```bash
 #!/bin/bash
 # Find best instance for requirements
@@ -290,6 +337,7 @@ echo "Recommended instance: $BEST_INSTANCE"
 ```
 
 ### CI/CD Integration
+
 ```bash
 # Cost validation in deployment pipeline
 MAX_COST="0.50"
@@ -301,6 +349,7 @@ fi
 ```
 
 ### Infrastructure as Code
+
 ```bash
 # Generate Terraform variables
 spotinfo --type "c5.*" --with-score --min-score 7 --output json > spot_instances.json
@@ -308,18 +357,18 @@ spotinfo --type "c5.*" --with-score --min-score 7 --output json > spot_instances
 
 ## Exit Codes
 
-| Code | Description |
-|------|-------------|
-| 0 | Success |
-| 1 | General error (invalid arguments, API failure, etc.) |
+| Code | Description                                          |
+| ---- | ---------------------------------------------------- |
+| 0    | Success                                              |
+| 1    | General error (invalid arguments, API failure, etc.) |
 
 ## Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
+| Variable        | Description                            | Default  |
+| --------------- | -------------------------------------- | -------- |
 | `SPOTINFO_MODE` | Set to "mcp" to enable MCP server mode | CLI mode |
-| `MCP_TRANSPORT` | MCP transport method | "stdio" |
-| `MCP_PORT` | Port for SSE transport | "8080" |
+| `MCP_TRANSPORT` | MCP transport method                   | "stdio"  |
+| `MCP_PORT`      | Port for SSE transport                 | "8080"   |
 
 ## Performance Considerations
 

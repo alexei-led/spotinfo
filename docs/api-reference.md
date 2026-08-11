@@ -31,6 +31,7 @@ All tools follow the [Model Context Protocol (MCP) specification](https://modelc
 Search for AWS EC2 Spot Instance options based on specified requirements.
 
 #### Description
+
 This tool searches the embedded AWS Spot Instance data and returns matching instances with pricing, savings, and interruption frequency information. It supports filtering by instance specifications, price constraints, and reliability requirements.
 
 #### Input Schema
@@ -56,13 +57,7 @@ This tool searches the embedded AWS Spot Instance data and returns matching inst
     "instance_types": {
       "type": "string",
       "description": "Instance type pattern - exact type (e.g., 'm5.large') or pattern (e.g., 't3.*', 'm5.*')",
-      "examples": [
-        "t3.micro",
-        "m5.large",
-        "t3.*",
-        "m5.*",
-        "r5.xlarge"
-      ]
+      "examples": ["t3.micro", "m5.large", "t3.*", "m5.*", "r5.xlarge"]
     },
     "min_vcpu": {
       "type": "number",
@@ -119,7 +114,7 @@ This tool searches the embedded AWS Spot Instance data and returns matching inst
       "default": 0
     },
     "az": {
-      "type": "boolean", 
+      "type": "boolean",
       "description": "Request AZ-level scores instead of region-level (use with with_score)",
       "default": false
     },
@@ -280,7 +275,7 @@ This tool searches the embedded AWS Spot Instance data and returns matching inst
       },
       "required": [
         "total_results",
-        "regions_searched", 
+        "regions_searched",
         "query_time_ms",
         "data_source",
         "data_freshness"
@@ -294,6 +289,7 @@ This tool searches the embedded AWS Spot Instance data and returns matching inst
 #### Example Requests
 
 ##### Basic Search
+
 ```json
 {
   "name": "find_spot_instances",
@@ -305,6 +301,7 @@ This tool searches the embedded AWS Spot Instance data and returns matching inst
 ```
 
 ##### Advanced Filtering
+
 ```json
 {
   "name": "find_spot_instances",
@@ -321,6 +318,7 @@ This tool searches the embedded AWS Spot Instance data and returns matching inst
 ```
 
 ##### Global Search
+
 ```json
 {
   "name": "find_spot_instances",
@@ -371,6 +369,7 @@ This tool searches the embedded AWS Spot Instance data and returns matching inst
 List all AWS regions where EC2 Spot Instances are available.
 
 #### Description
+
 This tool returns a list of all AWS regions that have spot instance data available. The list is dynamically generated from the embedded spot instance data.
 
 #### Input Schema
@@ -420,7 +419,7 @@ This tool returns a list of all AWS regions that have spot instance data availab
 {
   "regions": [
     "ap-northeast-1",
-    "ap-northeast-2", 
+    "ap-northeast-2",
     "ap-south-1",
     "ap-southeast-1",
     "ap-southeast-2",
@@ -475,15 +474,31 @@ them.
   "additionalProperties": false,
   "required": ["architecture", "min_vcpu", "min_memory_gib"],
   "properties": {
-    "cloud": { "type": "string", "enum": ["aws", "gcp", "azure"], "default": "aws" },
-    "regions": { "type": "array", "items": { "type": "string" }, "default": ["all"] },
+    "cloud": {
+      "type": "string",
+      "enum": ["aws", "gcp", "azure"],
+      "default": "aws"
+    },
+    "regions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": ["all"]
+    },
     "machine": { "type": "string", "default": "" },
     "architecture": { "type": "string", "enum": ["x86_64", "arm64"] },
-    "os": { "type": "string", "enum": ["linux", "windows"], "default": "linux" },
+    "os": {
+      "type": "string",
+      "enum": ["linux", "windows"],
+      "default": "linux"
+    },
     "min_vcpu": { "type": "integer", "minimum": 1 },
     "min_memory_gib": { "type": "number", "exclusiveMinimum": 0 },
     "max_price_per_hour": { "type": "number", "exclusiveMinimum": 0 },
-    "workload": { "type": "string", "enum": ["cost", "web", "ci", "batch"], "default": "cost" },
+    "workload": {
+      "type": "string",
+      "enum": ["cost", "web", "ci", "batch"],
+      "default": "cost"
+    },
     "top": { "type": "integer", "minimum": 1, "maximum": 50, "default": 3 }
   }
 }
@@ -502,6 +517,7 @@ them.
   returns `UNSUPPORTED_CAPABILITY` before acquisition.
 
 **GCP capability constraints:**
+
 - Region: `us-central1` only. Any other explicit region returns `NO_CANDIDATES`.
 - OS: `linux` only. `os: "windows"` returns `UNSUPPORTED_CAPABILITY`.
 - Workload: `cost` only. `web`, `ci`, `batch` return `UNSUPPORTED_CAPABILITY`.
@@ -510,8 +526,9 @@ them.
 - The root query command (`find_spot_instances`, `list_spot_regions`) is AWS-only.
 
 **Azure capability constraints:**
-- Regions: `australiaeast`, `eastus`, `eastus2`, `northeurope`, `southeastasia`, `uksouth`,
-  `westeurope`, `westus2`. Any other explicit region returns `NO_CANDIDATES`.
+
+- Regions: 55, enumerated in [data-sources.md](data-sources.md#7-azure-retail-prices-api-and-microsoft-learn-vm-size-pages). Any other explicit region
+  returns `NO_CANDIDATES`.
 - OS: `linux` only. `os: "windows"` returns `UNSUPPORTED_CAPABILITY`.
 - Workload: `cost` only. `web`, `ci`, `batch` return `UNSUPPORTED_CAPABILITY`.
 - Risk: always `status: "unavailable"`. Azure eviction rates need a subscription.
@@ -618,13 +635,13 @@ An error result has `isError=true` and a single text content item containing:
 }
 ```
 
-| Code | Meaning |
-| --- | --- |
-| `INVALID_ARGUMENT` | A value outside the documented vocabulary or bounds, or an argument of the wrong JSON type |
-| `UNSUPPORTED_CAPABILITY` | A valid request the selected cloud cannot answer |
-| `DATA_UNAVAILABLE` | A recognised cloud whose snapshot is missing or unusable |
-| `NO_CANDIDATES` | A served request with no matching machine |
-| `INTERNAL` | An unclassified failure |
+| Code                     | Meaning                                                                                    |
+| ------------------------ | ------------------------------------------------------------------------------------------ |
+| `INVALID_ARGUMENT`       | A value outside the documented vocabulary or bounds, or an argument of the wrong JSON type |
+| `UNSUPPORTED_CAPABILITY` | A valid request the selected cloud cannot answer                                           |
+| `DATA_UNAVAILABLE`       | A recognised cloud whose snapshot is missing or unusable                                   |
+| `NO_CANDIDATES`          | A served request with no matching machine                                                  |
+| `INTERNAL`               | An unclassified failure                                                                    |
 
 `cloud` echoes the value the caller supplied, or `null` when it could not be read. The MCP
 host rejects a `cloud` outside the input enum before the handler runs.
@@ -653,6 +670,7 @@ The v1 tools return standard MCP error responses when issues occur.
 ### Common Error Scenarios
 
 #### Invalid Parameters
+
 ```json
 {
   "error": {
@@ -666,6 +684,7 @@ The v1 tools return standard MCP error responses when issues occur.
 ```
 
 #### No Results Found
+
 When no instances match the search criteria, the tool returns a successful response with empty results:
 
 ```json
@@ -684,22 +703,26 @@ When no instances match the search criteria, the tool returns a successful respo
 ## Data Sources and Freshness
 
 ### Embedded Data
+
 The spotinfo MCP server uses embedded data included in the binary at build time:
 
 **AWS:**
+
 - **Spot Advisor Data**: Instance interruption frequency from the AWS Spot Instance Advisor feed
 - **Spot Pricing Data**: Static spot pricing from the AWS pricing page feed
 - **Update Frequency**: Refreshed weekly by the `update-data` workflow
 
 **GCP:**
+
 - **Spot VM Catalogue**: Machine types, Spot prices, and On-Demand prices parsed from `cloud.google.com/spot-vms/pricing` and family-specific pricing pages
 - **Update Frequency**: Refreshed weekly by the `update-gcp-data` workflow (`make update-gcp-data`)
 - **Coverage**: `us-central1` only (other GCP regions require JavaScript rendering not performed by spotinfo)
 
 **Azure:**
+
 - **Spot VM Catalogue**: Spot and On-Demand prices from the anonymous Azure Retail Prices API, joined to vCPU, memory and processor architecture parsed from the Microsoft Learn VM size pages
 - **Update Frequency**: Refreshed weekly by the `update-azure-data` workflow (`make update-azure-data`)
-- **Coverage**: 224 VM sizes across 26 series in 8 regions (Linux only)
+- **Coverage**: 224 VM sizes across 26 series in 55 regions (Linux only)
 
 ### Data Limitations
 
@@ -713,16 +736,19 @@ The spotinfo MCP server uses embedded data included in the binary at build time:
 ## Performance Characteristics
 
 ### Response Times
+
 - **Single Region**: < 50ms typical
-- **Multiple Regions**: < 100ms typical  
+- **Multiple Regions**: < 100ms typical
 - **Global Search**: < 200ms typical
 
 ### Result Limits
+
 - **Default Limit**: 10 results
 - **Maximum Limit**: 50 results
 - **Recommendation**: Use filters to reduce result set for better performance
 
 ### Memory Usage
+
 - **Server Memory**: ~10MB typical
 - **Per Request**: ~1MB additional during processing
 
@@ -731,6 +757,7 @@ The spotinfo MCP server uses embedded data included in the binary at build time:
 ### Typical Usage Flows
 
 #### 1. Cost Optimization
+
 ```
 1. Call list_spot_regions to see available regions
 2. Call find_spot_instances with price constraints
@@ -738,6 +765,7 @@ The spotinfo MCP server uses embedded data included in the binary at build time:
 ```
 
 #### 2. Reliability-First
+
 ```
 1. Call find_spot_instances with max_interruption_rate filter
 2. Sort by reliability to find most stable instances
@@ -745,6 +773,7 @@ The spotinfo MCP server uses embedded data included in the binary at build time:
 ```
 
 #### 3. Requirements-Based
+
 ```
 1. Call find_spot_instances with min_vcpu and min_memory_gb
 2. Apply price and interruption constraints
@@ -779,6 +808,7 @@ list_spot_regions {}
 ### Validation Examples
 
 #### Valid Parameter Combinations
+
 ```json
 // Minimal request
 {"instance_types": "t3.micro"}
@@ -799,6 +829,7 @@ list_spot_regions {}
 ```
 
 #### Invalid Parameter Examples
+
 ```json
 // Invalid sort option
 {"sort_by": "invalid"}
@@ -816,10 +847,12 @@ list_spot_regions {}
 ## Version Compatibility
 
 ### MCP Protocol
+
 - **Supported Version**: `2024-11-05`
 - **Backward Compatibility**: None (first MCP implementation)
 
 ### API Versioning
+
 - **Current Version**: 1.0
 - **Stability**: Stable (no breaking changes planned)
 - **Deprecation Policy**: 6-month notice for breaking changes

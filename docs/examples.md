@@ -410,8 +410,8 @@ RANK  CLOUD  REGION       MACHINE         ARCHITECTURE  vCPU  MEMORY GiB  USD/HO
 
 **Notes:**
 - Azure data is offline/embedded; no credential, subscription, or tenant needed.
-- Eight regions are covered: `australiaeast`, `eastus`, `eastus2`, `northeurope`, `southeastasia`,
-  `uksouth`, `westeurope`, `westus2`. An unset `--region` ranks across all of them.
+- 55 regions are covered, enumerated in [data-sources.md](data-sources.md#7-azure-retail-prices-api-and-microsoft-learn-vm-size-pages). An unset
+  `--region` ranks across all of them.
 - Risk is always `unavailable`; only `--workload cost` is supported.
 
 ```bash
