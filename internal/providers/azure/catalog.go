@@ -7,6 +7,7 @@ import (
 	"io"
 	"maps"
 	"slices"
+	"strings"
 
 	"spotinfo/internal/cloud"
 	"spotinfo/internal/snapshot"
@@ -27,12 +28,15 @@ const (
 //
 //nolint:govet // Metadata reads before the rows it describes in a review diff.
 type Catalog struct {
-	SchemaVersion string                `json:"schema_version"`
-	OS            cloud.OperatingSystem `json:"os"`
-	Currency      cloud.Currency        `json:"currency"`
-	BillingUnit   cloud.BillingUnit     `json:"billing_unit"`
-	Machines      []CatalogMachine      `json:"machines"`
-	Regions       []CatalogRegion       `json:"regions"`
+	SchemaVersion string `json:"schema_version"`
+	// OperatingSystems names every OS the rows below price. It is a list, not a
+	// single value: Azure sells one size twice, bare and with a Windows licence,
+	// and each price row names which one it is.
+	OperatingSystems []cloud.OperatingSystem `json:"operating_systems"`
+	Currency         cloud.Currency          `json:"currency"`
+	BillingUnit      cloud.BillingUnit       `json:"billing_unit"`
+	Machines         []CatalogMachine        `json:"machines"`
+	Regions          []CatalogRegion         `json:"regions"`
 }
 
 // CatalogMachine is one VM size's reviewed specification. Series is stored
@@ -53,13 +57,15 @@ type CatalogRegion struct {
 	Prices []CatalogPrice `json:"prices"`
 }
 
-// CatalogPrice is one machine's paired prices in one region. Both classes are
-// present by construction: a savings figure without its denominator is a number
-// no consumer can check.
+// CatalogPrice is one machine's paired prices in one region, for one operating
+// system. Both classes are present by construction: a savings figure without its
+// denominator is a number no consumer can check, and both must be the same OS or
+// the discount is a licence, not spare capacity.
 type CatalogPrice struct {
-	Machine  cloud.MachineID `json:"machine"`
-	Spot     cloud.Money     `json:"spot_usd_per_hour"`
-	OnDemand cloud.Money     `json:"on_demand_usd_per_hour"`
+	Machine  cloud.MachineID       `json:"machine"`
+	OS       cloud.OperatingSystem `json:"os"`
+	Spot     cloud.Money           `json:"spot_usd_per_hour"`
+	OnDemand cloud.Money           `json:"on_demand_usd_per_hour"`
 }
 
 // SavingsPercent is the whole-percent discount of the Spot price against the
@@ -84,40 +90,64 @@ type pair struct {
 	onDemand cloud.Money
 }
 
+// machineOS is a catalogue row's identity inside one region. Pairing on the
+// machine alone would join a Windows Spot price to a Linux list price and
+// publish the licence as a saving.
+type machineOS struct {
+	machine cloud.MachineID
+	os      cloud.OperatingSystem
+}
+
+// BuildReport names what the join read but did not publish, so a refresh that
+// shrinks says why.
+type BuildReport struct {
+	// Unpaired lists region/machine/os priced in only one class.
+	Unpaired []string
+	// Unspecified lists machines priced with no reviewed specification.
+	Unspecified []cloud.MachineID
+}
+
 // BuildCatalog joins reviewed specifications with resolved prices.
 //
-// A priced size with no specification is not in the approved matrix and is
-// skipped silently — the Retail API prices every size Azure sells, of which the
-// contracted series are a small part. A size that has a specification and a Spot
-// price but no On-Demand price in that region is returned as unpaired so the
-// caller can report it, rather than published with a missing denominator.
-func BuildCatalog(series []SeriesSpec, rows []PriceRow) (*Catalog, []string, error) {
+// A priced size with no specification cannot be published — the architecture and
+// resource figures come from the Learn pages, not from the price feed — so it is
+// dropped and named in the report. Callers filter with RetainSpecified first, so
+// a name arriving here means the two agree on nothing, which is worth seeing.
+// A size that has a specification and a Spot price but no On-Demand price for
+// the same OS in that region is reported as unpaired rather than published with
+// a missing denominator.
+func BuildCatalog(series []SeriesSpec, rows []PriceRow) (*Catalog, BuildReport, error) {
 	specs, err := indexSpecs(series)
 	if err != nil {
-		return nil, nil, err
+		return nil, BuildReport{}, err
 	}
 
-	byRegion := make(map[cloud.Region]map[cloud.MachineID]*pair)
+	byRegion := make(map[cloud.Region]map[machineOS]*pair)
+	unspecified := make(map[cloud.MachineID]struct{})
 
 	for i := range rows {
 		row := &rows[i]
 		if _, known := specs[row.Machine]; !known {
+			unspecified[row.Machine] = struct{}{}
+
 			continue
 		}
 
 		machines, seen := byRegion[row.Region]
 		if !seen {
-			machines = make(map[cloud.MachineID]*pair)
+			machines = make(map[machineOS]*pair)
 			byRegion[row.Region] = machines
 		}
-		if machines[row.Machine] == nil {
-			machines[row.Machine] = &pair{}
+
+		key := machineOS{machine: row.Machine, os: row.OS}
+		if machines[key] == nil {
+			machines[key] = &pair{}
 		}
 
 		if row.Class == cloud.PriceClassSpot {
-			machines[row.Machine].spot = row.Amount
+			machines[key].spot = row.Amount
 		} else {
-			machines[row.Machine].onDemand = row.Amount
+			machines[key].onDemand = row.Amount
 		}
 	}
 
@@ -129,18 +159,34 @@ func BuildCatalog(series []SeriesSpec, rows []PriceRow) (*Catalog, []string, err
 	}
 
 	return &Catalog{
-		SchemaVersion: CatalogSchemaVersion,
-		OS:            cloud.OSLinux,
-		Currency:      cloud.CurrencyUSD,
-		BillingUnit:   cloud.BillingUnitInstanceHour,
-		Machines:      machines,
-		Regions:       regions,
-	}, unpaired, nil
+			SchemaVersion:    CatalogSchemaVersion,
+			OperatingSystems: publishedOperatingSystems(regions),
+			Currency:         cloud.CurrencyUSD,
+			BillingUnit:      cloud.BillingUnitInstanceHour,
+			Machines:         machines,
+			Regions:          regions,
+		}, BuildReport{
+			Unpaired:    unpaired,
+			Unspecified: slices.Sorted(maps.Keys(unspecified)),
+		}, nil
+}
+
+// publishedOperatingSystems reads the operating systems out of the rows that
+// were actually published, so the catalogue cannot claim one it does not price.
+func publishedOperatingSystems(regions []CatalogRegion) []cloud.OperatingSystem {
+	seen := make(map[cloud.OperatingSystem]struct{}, pricesPerMachine)
+	for i := range regions {
+		for j := range regions[i].Prices {
+			seen[regions[i].Prices[j].OS] = struct{}{}
+		}
+	}
+
+	return slices.Sorted(maps.Keys(seen))
 }
 
 // buildRegions turns the collected pairs into sorted region price lists, and
 // reports which machines were priced in only one class.
-func buildRegions(byRegion map[cloud.Region]map[cloud.MachineID]*pair,
+func buildRegions(byRegion map[cloud.Region]map[machineOS]*pair,
 ) ([]CatalogRegion, map[cloud.MachineID]struct{}, []string) {
 	var (
 		regions  = make([]CatalogRegion, 0, len(byRegion))
@@ -152,16 +198,21 @@ func buildRegions(byRegion map[cloud.Region]map[cloud.MachineID]*pair,
 		machines := byRegion[region]
 		prices := make([]CatalogPrice, 0, len(machines))
 
-		for _, id := range slices.Sorted(maps.Keys(machines)) {
-			amounts := machines[id]
+		for _, key := range sortedRows(machines) {
+			amounts := machines[key]
 			if amounts.spot.IsZero() || amounts.onDemand.IsZero() {
-				unpaired = append(unpaired, fmt.Sprintf("%s/%s", region, id))
+				unpaired = append(unpaired, fmt.Sprintf("%s/%s/%s", region, key.machine, key.os))
 
 				continue
 			}
 
-			prices = append(prices, CatalogPrice{Machine: id, Spot: amounts.spot, OnDemand: amounts.onDemand})
-			priced[id] = struct{}{}
+			prices = append(prices, CatalogPrice{
+				Machine:  key.machine,
+				OS:       key.os,
+				Spot:     amounts.spot,
+				OnDemand: amounts.onDemand,
+			})
+			priced[key.machine] = struct{}{}
 		}
 
 		if len(prices) > 0 {
@@ -170,6 +221,21 @@ func buildRegions(byRegion map[cloud.Region]map[cloud.MachineID]*pair,
 	}
 
 	return regions, priced, unpaired
+}
+
+// sortedRows orders one region's rows by machine, then operating system, so a
+// refresh that changes no price produces the same catalogue bytes.
+func sortedRows(machines map[machineOS]*pair) []machineOS {
+	keys := slices.Collect(maps.Keys(machines))
+	slices.SortFunc(keys, func(left, right machineOS) int {
+		if order := strings.Compare(string(left.machine), string(right.machine)); order != 0 {
+			return order
+		}
+
+		return strings.Compare(string(left.os), string(right.os))
+	})
+
+	return keys
 }
 
 // RetainSpecified drops observations for machines outside the reviewed
@@ -266,8 +332,8 @@ func (c *Catalog) Verify(contract *snapshot.SourceContract) error {
 	if c.SchemaVersion != CatalogSchemaVersion {
 		return fmt.Errorf("%w: schema_version must be %q, got %q", ErrCatalog, CatalogSchemaVersion, c.SchemaVersion)
 	}
-	if !slices.Contains(contract.Support.OperatingSystems, c.OS) {
-		return fmt.Errorf("%w: operating system %q is not in the approved support matrix", ErrCatalog, c.OS)
+	if err := c.verifyOperatingSystems(contract); err != nil {
+		return err
 	}
 	if c.Currency != cloud.CurrencyUSD || c.BillingUnit != cloud.BillingUnitInstanceHour {
 		return fmt.Errorf("%w: catalogue is priced in %s per %s, not %s per %s",
@@ -280,6 +346,31 @@ func (c *Catalog) Verify(contract *snapshot.SourceContract) error {
 	}
 
 	return c.verifyRegions(contract, known)
+}
+
+// verifyOperatingSystems checks the declared operating systems both ways, the
+// same as verifyMachines does for series and architectures. Every declared OS
+// must be approved, and every approved OS must appear — the second half is what
+// makes the undocumented productName suffix load-bearing: a rename that stopped
+// producing Windows rows fails the refresh instead of quietly shipping a
+// Linux-only catalogue that still calls itself complete.
+func (c *Catalog) verifyOperatingSystems(contract *snapshot.SourceContract) error {
+	if len(c.OperatingSystems) == 0 {
+		return fmt.Errorf("%w: catalogue names no operating system", ErrCatalog)
+	}
+
+	for _, declared := range c.OperatingSystems {
+		if !slices.Contains(contract.Support.OperatingSystems, declared) {
+			return fmt.Errorf("%w: operating system %q is not in the approved support matrix", ErrCatalog, declared)
+		}
+	}
+	for _, approved := range contract.Support.OperatingSystems {
+		if !slices.Contains(c.OperatingSystems, approved) {
+			return fmt.Errorf("%w: catalogue prices no machine for approved operating system %q", ErrCatalog, approved)
+		}
+	}
+
+	return nil
 }
 
 func (c *Catalog) verifyMachines(contract *snapshot.SourceContract) (map[cloud.MachineID]struct{}, error) {
@@ -355,7 +446,7 @@ func (c *Catalog) verifyRegions(contract *snapshot.SourceContract, known map[clo
 				ErrCatalog, region.ID, len(region.Prices), contract.Thresholds.MinMachines)
 		}
 
-		if err := verifyPrices(region, known, contract.Thresholds.MaxFractionalDigits, referenced); err != nil {
+		if err := c.verifyPrices(region, known, contract.Thresholds.MaxFractionalDigits, referenced); err != nil {
 			return err
 		}
 	}
@@ -373,17 +464,26 @@ func (c *Catalog) verifyRegions(contract *snapshot.SourceContract, known map[clo
 	return nil
 }
 
-func verifyPrices(region *CatalogRegion, known map[cloud.MachineID]struct{},
+func (c *Catalog) verifyPrices(region *CatalogRegion, known map[cloud.MachineID]struct{},
 	maxDigits int, referenced map[cloud.MachineID]struct{},
 ) error {
-	priced := make(map[cloud.MachineID]struct{}, len(region.Prices))
+	priced := make(map[machineOS]struct{}, len(region.Prices))
 
 	for i := range region.Prices {
 		price := &region.Prices[i]
-		if _, duplicate := priced[price.Machine]; duplicate {
-			return fmt.Errorf("%w: %s is priced twice in %s", ErrCatalog, price.Machine, region.ID)
+		// Keyed by machine and OS: the same size priced for Linux and for
+		// Windows is two rows, and two rows for one pair is a duplicate.
+		row := machineOS{machine: price.Machine, os: price.OS}
+		if _, duplicate := priced[row]; duplicate {
+			return fmt.Errorf("%w: %s is priced twice for %s in %s",
+				ErrCatalog, price.Machine, price.OS, region.ID)
 		}
-		priced[price.Machine] = struct{}{}
+		priced[row] = struct{}{}
+
+		if !slices.Contains(c.OperatingSystems, price.OS) {
+			return fmt.Errorf("%w: %s in %s is priced for %q, which the catalogue does not declare",
+				ErrCatalog, price.Machine, region.ID, price.OS)
+		}
 
 		if _, described := known[price.Machine]; !described {
 			return fmt.Errorf("%w: %s is priced in %s with no specification",
@@ -432,7 +532,7 @@ func (c *Catalog) PriceRecords() []snapshot.PriceRecord {
 				records = append(records, snapshot.PriceRecord{
 					Region:   region.ID,
 					Machine:  price.Machine,
-					OS:       c.OS,
+					OS:       price.OS,
 					Class:    priced.class,
 					Currency: c.Currency,
 					Unit:     c.BillingUnit,

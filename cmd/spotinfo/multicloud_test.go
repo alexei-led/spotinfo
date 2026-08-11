@@ -268,12 +268,58 @@ func TestAnExplicitZeroTopIsRejected(t *testing.T) {
 func TestAzureRecommendationRejectsWhatItCannotAnswer(t *testing.T) {
 	for name, args := range map[string][]string{
 		"risk-aware workload": {"--workload", "web"},
-		"windows":             {"--os", "windows"},
 	} {
 		base := []string{"--cloud", "azure", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8"}
 
 		_, err := runMulticloudRecommend(t, append(base, args...)...)
 		require.ErrorIs(t, err, cloud.ErrUnsupportedCapability, name)
+	}
+}
+
+// TestWindowsIsAnsweredOnAzureAndRefusedOnGCP is the asymmetry the widened
+// catalogue key buys: Azure publishes a licence-bundled meter for most sizes,
+// Google publishes no Windows Spot price at all, and a cloud that has no figure
+// refuses rather than answering with the Linux one.
+func TestWindowsIsAnsweredOnAzureAndRefusedOnGCP(t *testing.T) {
+	base := []string{"--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
+		"--os", "windows", "--top", "3", "--output", "json"}
+
+	output, err := runMulticloudRecommend(t, append([]string{"--cloud", "azure"}, base...)...)
+	require.NoError(t, err)
+
+	var report cloud.RecommendReport
+	require.NoError(t, json.Unmarshal([]byte(output), &report))
+
+	assert.Equal(t, cloud.OSWindows, report.Request.OS)
+	require.Len(t, report.Recommendations, 3)
+
+	for _, recommendation := range report.Recommendations {
+		assert.Equal(t, cloud.ProviderAzure, recommendation.Cloud)
+		assert.NotEmpty(t, recommendation.SpotUSDPerHour)
+		assert.NotNil(t, recommendation.OnDemandUSDPerHour,
+			"the windows spot price is paired with the windows list price, never the linux one")
+	}
+
+	_, err = runMulticloudRecommend(t, append([]string{"--cloud", "gcp"}, base...)...)
+	require.ErrorIs(t, err, cloud.ErrUnsupportedCapability)
+}
+
+// TestListAnswersWindowsOnAzure covers the other command: --os is in both
+// vocabularies, and list renders the rows the same key selects.
+func TestListAnswersWindowsOnAzure(t *testing.T) {
+	output, err := runListWith(t, shippedRegistry(t), nil,
+		"--cloud", "azure", "--os", "windows", "--region", "westeurope", "--output", "json")
+	require.NoError(t, err)
+
+	var report cloud.ListReport
+	require.NoError(t, json.Unmarshal([]byte(output), &report))
+
+	assert.Equal(t, cloud.OSWindows, report.Request.OS)
+	require.NotEmpty(t, report.Candidates)
+
+	for _, candidate := range report.Candidates {
+		assert.Equal(t, cloud.ProviderAzure, candidate.Cloud)
+		assert.Equal(t, cloud.OSWindows, candidate.OS)
 	}
 }
 
@@ -423,12 +469,9 @@ func TestMCPRecommendReportsTheDocumentedAzureRefusals(t *testing.T) {
 			},
 			code: "UNSUPPORTED_CAPABILITY",
 		},
-		"windows": {
-			args: map[string]any{
-				"cloud": "azure", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8, "os": "windows",
-			},
-			code: "UNSUPPORTED_CAPABILITY",
-		},
+		// Windows is no longer here: the committed catalogue prices the
+		// licence-bundled meters, and TestWindowsIsAnsweredOnAzureAndRefusedOnGCP
+		// covers the answer and the refusal it is still paired with.
 		"uncovered region": {
 			args: map[string]any{
 				"cloud": "azure", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,

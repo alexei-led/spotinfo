@@ -31,18 +31,21 @@ func testCatalog(t *testing.T) *azure.Catalog {
 	onDemand, err := cloud.ParseMoney("0.096000")
 	require.NoError(t, err)
 
-	catalog, unpaired, err := azure.BuildCatalog(
+	catalog, report, err := azure.BuildCatalog(
 		[]azure.SeriesSpec{{
 			Series:       "dsv5",
 			Architecture: cloud.ArchitectureX8664,
 			Sizes:        []azure.SizeSpec{{ID: "Standard_D2s_v5", VCPU: 2, MemoryGiB: 8}},
 		}},
 		[]azure.PriceRow{
-			{Machine: "Standard_D2s_v5", Region: "eastus", Class: cloud.PriceClassSpot, Amount: spot},
-			{Machine: "Standard_D2s_v5", Region: "eastus", Class: cloud.PriceClassOnDemand, Amount: onDemand},
+			{Machine: "Standard_D2s_v5", Region: "eastus", OS: cloud.OSLinux,
+				Class: cloud.PriceClassSpot, Amount: spot},
+			{Machine: "Standard_D2s_v5", Region: "eastus", OS: cloud.OSLinux,
+				Class: cloud.PriceClassOnDemand, Amount: onDemand},
 		})
 	require.NoError(t, err)
-	require.Empty(t, unpaired)
+	require.Empty(t, report.Unpaired)
+	require.Empty(t, report.Unspecified)
 
 	return catalog
 }

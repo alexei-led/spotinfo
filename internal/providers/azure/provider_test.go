@@ -83,7 +83,73 @@ func TestCapabilitiesNeverClaimRisk(t *testing.T) {
 	assert.False(t, capabilities.ZoneDetail)
 	assert.False(t, capabilities.LiveEnrichment)
 	assert.True(t, capabilities.SupportsOS(cloud.OSLinux))
-	assert.False(t, capabilities.SupportsOS(cloud.OSWindows))
+	assert.True(t, capabilities.SupportsOS(cloud.OSWindows),
+		"the Retail API prices a licence-bundled meter for most sizes, and the catalogue carries it")
+}
+
+// TestWindowsAndLinuxAreSeparatelyPricedRows drives the widened key through the
+// committed snapshot: the same size answers both queries, at different prices,
+// and each candidate reports the OS its own row priced rather than the one the
+// question asked for.
+func TestWindowsAndLinuxAreSeparatelyPricedRows(t *testing.T) {
+	t.Parallel()
+
+	provider := newTestProvider(t)
+	ctx := t.Context()
+
+	byOS := make(map[cloud.OperatingSystem]map[cloud.MachineID]cloud.Money)
+
+	for _, instanceOS := range []cloud.OperatingSystem{cloud.OSLinux, cloud.OSWindows} {
+		result, err := provider.Query(ctx, &cloud.Query{
+			OS:      instanceOS,
+			Regions: []cloud.Region{provider.catalog.Regions[0].ID},
+		})
+		require.NoError(t, err)
+		require.NotEmpty(t, result.Candidates)
+
+		priced := make(map[cloud.MachineID]cloud.Money, len(result.Candidates))
+		for i := range result.Candidates {
+			candidate := &result.Candidates[i]
+			assert.Equal(t, instanceOS, candidate.OS)
+			priced[candidate.Machine.ID] = candidate.Spot.Amount
+		}
+		byOS[instanceOS] = priced
+	}
+
+	shared := 0
+
+	for machine, windows := range byOS[cloud.OSWindows] {
+		linux, both := byOS[cloud.OSLinux][machine]
+		if !both {
+			continue
+		}
+		shared++
+
+		assert.NotEqual(t, linux.Nanos(), windows.Nanos(),
+			"%s: a licence-bundled meter priced identically means the two rows collapsed", machine)
+	}
+
+	require.NotZero(t, shared, "most sizes are sold both ways, so the overlap cannot be empty")
+}
+
+// TestAnUnsetOperatingSystemAnswersWithEveryPricedRow pins the zero-value rule
+// cloud.Query documents: an unset filter is inactive, so both operating systems
+// answer rather than an accidental Linux default.
+func TestAnUnsetOperatingSystemAnswersWithEveryPricedRow(t *testing.T) {
+	t.Parallel()
+
+	provider := newTestProvider(t)
+	region := provider.catalog.Regions[0].ID
+
+	result, err := provider.Query(t.Context(), &cloud.Query{Regions: []cloud.Region{region}})
+	require.NoError(t, err)
+
+	seen := make(map[cloud.OperatingSystem]struct{})
+	for i := range result.Candidates {
+		seen[result.Candidates[i].OS] = struct{}{}
+	}
+
+	assert.Len(t, seen, 2)
 }
 
 func TestQueryServesEveryCoveredRegion(t *testing.T) {
@@ -230,7 +296,7 @@ func TestQueryRejectsWhatTheSnapshotCannotAnswer(t *testing.T) {
 	ctx := t.Context()
 
 	for name, query := range map[string]*cloud.Query{
-		"windows":              {OS: cloud.OSWindows},
+		"unknown os":           {OS: "plan9"},
 		"unknown architecture": {OS: cloud.OSLinux, Architecture: "riscv64"},
 		"bad pattern":          {OS: cloud.OSLinux, MachinePattern: "("},
 	} {

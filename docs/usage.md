@@ -165,11 +165,12 @@ Summary, so you do not have to leave this page:
 | ------- | ------------------ | ------------- | -------------- | ------------- | -------------------- | -------------------- |
 | `aws`   | root + `recommend` | Advisor list  | linux, windows | x86_64, arm64 | interruption buckets | cost, web, ci, batch |
 | `gcp`   | `recommend` only   | `us-central1` | linux          | x86_64, arm64 | unavailable          | cost                 |
-| `azure` | `recommend` only   | see clouds.md | linux          | x86_64, arm64 | unavailable          | cost                 |
+| `azure` | `recommend` only   | see clouds.md | linux, windows | x86_64, arm64 | unavailable          | cost                 |
 
-On GCP and Azure the root query command returns `UNSUPPORTED_CAPABILITY`, `--os windows`
-returns `UNSUPPORTED_CAPABILITY`, an unserved `--region` returns `NO_CANDIDATES`, and
-`--workload web|ci|batch` returns `UNSUPPORTED_CAPABILITY`.
+On GCP and Azure the root query command returns `UNSUPPORTED_CAPABILITY`, an unserved
+`--region` returns `NO_CANDIDATES`, and `--workload web|ci|batch` returns
+`UNSUPPORTED_CAPABILITY`. `--os windows` is answered on Azure, which prices the
+licence-bundled meters, and returns `UNSUPPORTED_CAPABILITY` on GCP, which publishes none.
 
 ## Output Formats
 

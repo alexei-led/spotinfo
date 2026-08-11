@@ -3,7 +3,7 @@
   "CustomerEntityId": "Default",
   "CustomerEntityType": "Retail",
   "NextPageLink": "https://prices.azure.com/api/retail/prices?$skip=100",
-  "Count": 7,
+  "Count": 8,
   "Items": [
     {
       "currencyCode": "USD",
@@ -82,6 +82,19 @@
       "unitOfMeasure": "1 Hour",
       "type": "Consumption",
       "armSkuName": "Standard_B1ls_v2"
+    },
+    {
+      "currencyCode": "USD",
+      "retailPrice": 1.9584,
+      "armRegionName": "eastus",
+      "effectiveStartDate": "2026-01-01T00:00:00Z",
+      "meterName": "FXmds Type1 Spot",
+      "productName": "FX Series Dedicated Host",
+      "skuName": "FXmds Type1 Spot",
+      "serviceName": "Virtual Machines",
+      "unitOfMeasure": "1 Hour",
+      "type": "Consumption",
+      "armSkuName": "FXmds Type1"
     },
     {
       "currencyCode": "USD",

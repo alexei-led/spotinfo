@@ -18,7 +18,7 @@ move without a code change.
 | Machine types            | 1,192                     | 333                              | 224                      |
 | Machine series           | not enumerated            | 18                               | 26                       |
 | Architectures            | x86_64, arm64             | x86_64 (275), arm64 (58)         | x86_64 (187), arm64 (37) |
-| Operating systems        | linux, windows            | linux                            | linux                    |
+| Operating systems        | linux, windows            | linux                            | linux, windows           |
 | Interruption risk        | published buckets         | `unavailable`, or opt-in live    | `unavailable`            |
 | Workloads accepted       | cost, web, ci, batch      | cost                             | cost                     |
 | On-Demand price in v2    | no                        | yes                              | yes                      |
@@ -138,7 +138,10 @@ region returns `NO_CANDIDATES`. An unset `--region` searches all 55.
 `dpsv6` and `epsv5`. `--instance` accepts the full Azure size name, for example
 `Standard_D2s_v5`.
 
-**Operating systems.** Linux only. `--os windows` returns `UNSUPPORTED_CAPABILITY`.
+**Operating systems.** Linux and Windows. Azure prices most sizes twice — once bare and once
+with a Windows licence — and each is a separate row keyed by machine, region and OS, so a
+Windows Spot price is only ever compared against the Windows list price. 196 of the 224 sizes
+carry a Windows meter; the Arm ones do not.
 
 **Prices.** The anonymous Azure Retail Prices API supplies the amounts. Microsoft Learn size
 pages supply vCPU, memory and processor architecture. Architecture is read from each page's

@@ -215,8 +215,10 @@ Classification, in order:
 | `skuName` ends ` Spot` | Spot price | The only interruptible meter |
 | `skuName` ends ` Low Priority` | **excluded** | Retired Batch product, different eviction model, priced alongside Spot |
 | otherwise | On-Demand price | List rate |
-| `productName` contains `Windows` | excluded | Bundles a licence; the catalogue is Linux-only |
+| `productName` ends ` Windows` | Windows price | Bundles a licence; its own catalogue row, never paired with a Linux one |
+| `productName` ends ` Linux`, or has no OS suffix | Linux price | The newer families spell it out; the older ones do not |
 | `productName` contains `Cloud Services`/`CloudServices` | excluded | Legacy PaaS, same `armSkuName`, different rate |
+| `productName` contains `Dedicated Host`/`DedicatedHost` | excluded | Prices a physical host under a Spot-shaped sku (`FX Series Dedicated Host` / `FXmds Type1 Spot`) |
 | `armSkuName` empty | skipped | Cannot be attributed to a machine (0 observed) |
 | `retailPrice` zero | skipped | Promotional or placeholder, not a quotable rate |
 
@@ -341,6 +343,49 @@ x86_64 machine is `centralindia` at 0.020513 USD/hour, against `uksouth` at
 
 `parser_version` is **not** bumped: no parser was widened, and no source contract
 gained a URL. Only the region list the same parser is asked for changed.
+
+#### 5b. `azure-retail-prices/2` — Windows, and the two contaminants that had to go first
+
+The productName suffix is the only thing that separates a licence-bundled meter
+from a bare one, and Microsoft documents it nowhere. It is treated as a
+high-confidence convention with three states — `" Windows"`, `" Linux"`, and no
+suffix, which is Linux — matched as a **suffix**, never as a substring. The old
+substring exclusion could not tell a Windows meter from a name that merely says
+the word.
+
+Two defences make the convention safe rather than assumed. Every price row is
+keyed by machine, region **and** OS, so a Windows meter that stopped ending in
+`" Windows"` would land on the Linux key beside a different amount and fail the
+refresh on `ErrAmbiguousPrice` instead of publishing either. And the catalogue
+must carry a row for every OS the contract approves, so a rename that silently
+emptied the Windows half fails the same run.
+
+`Dedicated Host` was excluded in the same act, before the key was widened. It
+prices a whole physical host under `serviceName = "Virtual Machines"`, and its
+sku reads like a Spot meter: `FX Series Dedicated Host` is sold as
+`FXmds Type1 Spot`. Its `armSkuName` is not a `Standard_*` size, so the
+specification join drops it today; the exclusion is what keeps that accident
+from becoming load-bearing.
+
+Measured on the rebuilt snapshot: 21,656 priced rows, 11,204 Linux and 10,452
+Windows, across the same 224 sizes and 55 regions. 196 sizes carry a Windows
+meter; the 28 that do not are Arm. No size in any region publishes two different
+prices for one (machine, region, OS) key, checked across four sampled regions
+before the change and by the refresh itself after it.
+
+| threshold | before | after | basis |
+| --- | --- | --- | --- |
+| `max_compressed_bytes` | 131072 | 262144 | 209,979 observed; the refresh refused at the old cap and named the number |
+| `min_records.prices` | 19,800 | 39,600 | `min_regions` x `min_machines` x 2 classes x 2 operating systems; 43,312 observed |
+| `min_regions`, `min_machines`, `max_fractional_digits` | — | unchanged | Windows adds rows, not regions, machines or precision |
+
+Snapshot cost: 88,272 → **209,979 compressed bytes** (+121,707, ~0.3% of the
+binary) for 1.9x the priced rows.
+
+`parser_version` **is** bumped to `azure-retail-prices/2`, and
+`data_schema_version` to `spotinfo.azure-catalog/v2`: the classification rules
+changed and every catalogue row gained an `os` field, so a v1 archive must not be
+read by this parser.
 
 #### 6. Redistribution
 

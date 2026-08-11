@@ -211,8 +211,8 @@ The committed snapshot predates both defects, carries the correct 32 GiB for
 - **Approved contract**: `internal/providers/azure/data/source-contract.json`. All 27 source
   URLs are enumerated there; no other document is read.
 - **Embedded snapshot**: `internal/providers/azure/data/catalog.json.gz` plus its sidecar
-  `manifest.json`. 224 VM sizes across 26 series in 55 regions, 11,204 prices, 88,272 compressed
-  bytes.
+  `manifest.json`. 224 VM sizes across 26 series in 55 regions, 21,656 priced rows — 11,204
+  Linux and 10,452 Windows — and 209,979 compressed bytes.
 - **Update frequency**: weekly, through the `update-azure-data` workflow.
 - **Region coverage**: 55 regions. This is the canonical list; every other document states the
   count and links here.
@@ -235,8 +235,11 @@ The committed snapshot predates both defects, carries the correct 32 GiB for
   An unset `--region`, or `--region all`, enumerates exactly this set. A request for any other
   region returns `NO_CANDIDATES`; no region is substituted.
 
-- **OS coverage**: Linux only. Meters whose `productName` contains `Windows` bundle a licence
-  and are excluded.
+- **OS coverage**: Linux and Windows. The operating system is read from the `productName`
+  suffix — `" Windows"` for a licence-bundled meter, `" Linux"` on the families that spell it
+  out, and no suffix for Linux on every older family — and each is a separate priced row, so a
+  Windows Spot price is only ever a saving against the Windows list price. 196 of the 224 sizes
+  carry a Windows meter; the rest are Arm sizes Azure does not license.
 - **Risk**: none. Azure publishes eviction rates only through Resource Graph `SpotResources` and
   Resource SKUs, both of which require a subscription, so every Azure candidate reports
   `risk.status = "unavailable"` rather than a low number. Consequently Azure serves only the
@@ -248,10 +251,12 @@ The committed snapshot predates both defects, carries the correct 32 GiB for
 1. **`Low Priority` is not Spot.** The retired Batch meter is priced like Spot and sits beside
    it under the same size. It is excluded; only a `skuName` ending in `" Spot"` — leading space
    included — is Spot.
-2. **Cloud Services meters share the VM service name.** The legacy PaaS product is published
-   under `serviceName = "Virtual Machines"` against the same `armSkuName` at a different rate,
-   which made roughly 40 sizes per region ambiguous. Rows whose `productName` contains
-   `Cloud Services` or `CloudServices` are excluded.
+2. **Cloud Services and Dedicated Host meters share the VM service name.** The legacy PaaS
+   product is published under `serviceName = "Virtual Machines"` against the same `armSkuName`
+   at a different rate, which made roughly 40 sizes per region ambiguous. Dedicated Host prices
+   a whole physical host under a sku shaped like a Spot meter — `FX Series Dedicated Host` is
+   sold as `FXmds Type1 Spot`. Rows whose `productName` contains `Cloud Services`,
+   `CloudServices`, `Dedicated Host` or `DedicatedHost` are excluded.
 3. **Memory is labelled two ways.** The 18 general-purpose and compute-optimized pages write
    `Memory (GiB)`; the 8 memory-optimized pages write `Memory (GB)` for the same gibibyte
    figure — `Standard_E2_v5` reads 16 on one and `Standard_E2s_v5` reads 16 on the other. Both

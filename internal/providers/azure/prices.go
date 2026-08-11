@@ -34,9 +34,11 @@ const (
 	// values, the Spot rule, and the effective-date rule. Bump it whenever any of
 	// those change, so a committed snapshot can never be read as the product of a
 	// different parser.
-	ParserVersion = "azure-retail-prices/1"
-	// CatalogSchemaVersion versions the committed catalogue shape.
-	CatalogSchemaVersion = "spotinfo.azure-catalog/v1"
+	ParserVersion = "azure-retail-prices/2"
+	// CatalogSchemaVersion versions the committed catalogue shape. v2 keys every
+	// price row by operating system; a v1 archive has one OS for the whole
+	// catalogue and must not be read as a v2 one.
+	CatalogSchemaVersion = "spotinfo.azure-catalog/v2"
 )
 
 // The exact field values the approved API contract publishes. A row that
@@ -58,19 +60,35 @@ const (
 	suffixLowPriority = " Low Priority"
 )
 
-// windowsMarker appears in productName for meters that bundle a Windows licence.
-// The committed catalogue is Linux-only, so those rows are left out; the
-// remaining meters price compute alone.
-const windowsMarker = "Windows"
+// The productName suffixes that carry the operating system. Microsoft does not
+// document the convention, so it is read as a suffix and never as a substring:
+// " Windows" ends a licence-bundled meter, " Linux" ends the newer families that
+// spell it out, and no suffix at all is Linux on every older family.
+//
+// The leading space is load-bearing. Matching "Windows" anywhere in the name
+// would classify by coincidence, and the rule has to hold for the 4,449 Windows
+// rows and the 1,012 " Linux" rows one region publishes.
+const (
+	windowsMarker = " Windows"
+	linuxMarker   = " Linux"
+)
 
-// cloudServicesMarker identifies the legacy Azure Cloud Services meters. The API
-// publishes them under serviceName "Virtual Machines" against the same
-// armSkuName as the real VM meter but at a different rate, so leaving them in
-// makes 40-odd sizes per region ambiguous — the machine is not sold that way
-// through Virtual Machines at all. The marker is matched with spaces removed
-// because both "Basv2 Series Cloud Services" and "Eadsv5 Series CloudServices"
-// are in use.
-const cloudServicesMarker = "cloudservices"
+// The products the Retail API publishes under serviceName "Virtual Machines"
+// that are not a virtual-machine rate. Each is priced against a machine name a
+// user recognises, at a rate they cannot buy that way.
+//
+// Cloud Services is the legacy PaaS product, published against the same
+// armSkuName as the real VM meter at a different rate. Dedicated Host prices a
+// whole physical host — "FX Series Dedicated Host" is sold as "FXmds Type1
+// Spot", which reads as a Spot meter for a machine called FXmds Type1.
+//
+// Both markers are matched with spaces removed because both spellings are in
+// use: "Basv2 Series Cloud Services" beside "Eadsv5 Series CloudServices", and
+// "DCadsv6 Series Dedicated Host" beside "DCadsv5 series DedicatedHost".
+const (
+	cloudServicesMarker = "cloudservices"
+	dedicatedHostMarker = "dedicatedhost"
+)
 
 // Errors a caller distinguishes. Everything else is an invalid catalogue.
 var (
@@ -123,23 +141,29 @@ type Observation struct {
 	Start   time.Time
 	Machine cloud.MachineID
 	Region  cloud.Region
+	OS      cloud.OperatingSystem
 	Class   cloud.PriceClass
 	Amount  cloud.Money
 }
 
-// PriceRow is one resolved price: a machine, in a region, for one purchase
-// class, at the moment the snapshot was taken.
+// PriceRow is one resolved price: a machine, in a region, for one operating
+// system and purchase class, at the moment the snapshot was taken.
 type PriceRow struct {
 	Machine cloud.MachineID
 	Region  cloud.Region
+	OS      cloud.OperatingSystem
 	Class   cloud.PriceClass
 	Amount  cloud.Money
 }
 
 // priceKey identifies a price. The catalogue may publish each of these once.
+// The operating system is part of the identity: Azure prices the same size
+// twice, once bare and once with a Windows licence, and without it the two
+// meters collide and the cheaper one wins by arrival order.
 type priceKey struct {
 	machine cloud.MachineID
 	region  cloud.Region
+	os      cloud.OperatingSystem
 	class   cloud.PriceClass
 }
 
@@ -191,9 +215,11 @@ func DecodeRetailPage(document io.Reader) (*RetailPage, error) {
 //
 // A row that contradicts the contracted request — another service, price type,
 // unit, or currency — is an error, because it means the filter stopped selecting
-// what it was reviewed to select. A row that is simply not part of a Linux Spot
-// catalogue is skipped: Windows meters, the legacy Low Priority meters, rows with
-// no machine identifier, and rows priced at zero.
+// what it was reviewed to select. A row that is simply not a virtual-machine
+// rate is skipped: the Cloud Services and Dedicated Host products, the legacy
+// Low Priority meters, rows with no machine identifier, and rows priced at zero.
+// Linux and Windows meters are both accepted, and each carries the operating
+// system its product name declares.
 func AcceptRows(items []RetailItem) ([]Observation, error) {
 	accepted := make([]Observation, 0, len(items))
 
@@ -245,7 +271,7 @@ func (i *RetailItem) checkContract() error {
 // observe classifies one contract-conforming row. The second result is false for
 // a row that is out of scope rather than malformed.
 func (i *RetailItem) observe() (Observation, bool, error) {
-	if i.ArmSkuName == "" || strings.Contains(i.ProductName, windowsMarker) || i.isCloudServices() {
+	if i.ArmSkuName == "" || i.isExcludedProduct() {
 		return Observation{}, false, nil
 	}
 
@@ -268,6 +294,7 @@ func (i *RetailItem) observe() (Observation, bool, error) {
 	return Observation{
 		Machine: cloud.MachineID(i.ArmSkuName),
 		Region:  cloud.Region(i.ArmRegionName),
+		OS:      osOf(i.ProductName),
 		Class:   class,
 		Amount:  amount,
 		Start:   i.EffectiveStartDate,
@@ -275,12 +302,31 @@ func (i *RetailItem) observe() (Observation, bool, error) {
 	}, true, nil
 }
 
-// isCloudServices reports whether a row prices the legacy Cloud Services
-// product rather than a virtual machine.
-func (i *RetailItem) isCloudServices() bool {
+// isExcludedProduct reports whether a row prices something other than a virtual
+// machine: the legacy Cloud Services product, or a dedicated host.
+func (i *RetailItem) isExcludedProduct() bool {
 	folded := strings.ToLower(strings.ReplaceAll(i.ProductName, " ", ""))
 
-	return strings.Contains(folded, cloudServicesMarker)
+	return strings.Contains(folded, cloudServicesMarker) || strings.Contains(folded, dedicatedHostMarker)
+}
+
+// osOf reads the operating system a meter prices from its product name.
+//
+// The three states are a " Windows" suffix, a " Linux" suffix on the families
+// that spell it out, and no suffix, which is Linux on every older family. The
+// convention is undocumented, so the defence against it changing is elsewhere:
+// a Windows meter that stopped ending in " Windows" would land on the Linux key
+// beside the real Linux price, and SelectCurrent fails the refresh on two
+// different amounts for one key rather than publishing either.
+func osOf(productName string) cloud.OperatingSystem {
+	switch {
+	case strings.HasSuffix(productName, windowsMarker):
+		return cloud.OSWindows
+	case strings.HasSuffix(productName, linuxMarker):
+		return cloud.OSLinux
+	default:
+		return cloud.OSLinux
+	}
 }
 
 // classOf reads the purchase class from a sku name. The legacy Low Priority
@@ -312,7 +358,12 @@ func SelectCurrent(observations []Observation, at time.Time) ([]PriceRow, []stri
 
 	for i := range observations {
 		observation := &observations[i]
-		key := priceKey{machine: observation.Machine, region: observation.Region, class: observation.Class}
+		key := priceKey{
+			machine: observation.Machine,
+			region:  observation.Region,
+			os:      observation.OS,
+			class:   observation.Class,
+		}
 		covered[key] = struct{}{}
 
 		if !observation.inEffect(at) {
@@ -320,8 +371,8 @@ func SelectCurrent(observations []Observation, at time.Time) ([]PriceRow, []stri
 		}
 
 		if previous, repeated := current[key]; repeated && previous != observation.Amount {
-			return nil, nil, fmt.Errorf("%w: %s/%s/%s is priced %s and %s at %s",
-				ErrAmbiguousPrice, observation.Region, observation.Machine, observation.Class,
+			return nil, nil, fmt.Errorf("%w: %s/%s/%s/%s is priced %s and %s at %s",
+				ErrAmbiguousPrice, observation.Region, observation.Machine, observation.OS, observation.Class,
 				previous, observation.Amount, at.Format(time.RFC3339))
 		}
 
@@ -333,6 +384,7 @@ func SelectCurrent(observations []Observation, at time.Time) ([]PriceRow, []stri
 		rows = append(rows, PriceRow{
 			Machine: key.machine,
 			Region:  key.region,
+			OS:      key.os,
 			Class:   key.class,
 			Amount:  current[key],
 		})
@@ -360,7 +412,7 @@ func expiredKeys(covered map[priceKey]struct{}, current map[priceKey]cloud.Money
 		if _, live := current[key]; live {
 			continue
 		}
-		expired = append(expired, fmt.Sprintf("%s/%s/%s", key.region, key.machine, key.class))
+		expired = append(expired, fmt.Sprintf("%s/%s/%s/%s", key.region, key.machine, key.os, key.class))
 	}
 	slices.Sort(expired)
 
@@ -376,6 +428,9 @@ func sortedKeys[V any](indexed map[priceKey]V) []priceKey {
 			return order
 		}
 		if order := strings.Compare(string(left.machine), string(right.machine)); order != 0 {
+			return order
+		}
+		if order := strings.Compare(string(left.os), string(right.os)); order != 0 {
 			return order
 		}
 

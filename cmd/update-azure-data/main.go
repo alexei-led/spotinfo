@@ -418,12 +418,15 @@ func buildCatalog(contract *snapshot.SourceContract, series []azure.SeriesSpec,
 		fmt.Fprintf(os.Stderr, "skipped %s: no price interval in effect at %s\n", key, at.Format(time.RFC3339))
 	}
 
-	catalog, unpaired, err := azure.BuildCatalog(series, rows)
+	catalog, report, err := azure.BuildCatalog(series, rows)
 	if err != nil {
 		return nil, err
 	}
-	for _, key := range unpaired {
+	for _, key := range report.Unpaired {
 		fmt.Fprintf(os.Stderr, "skipped %s: priced in only one class\n", key)
+	}
+	for _, machine := range report.Unspecified {
+		fmt.Fprintf(os.Stderr, "skipped %s: priced with no reviewed specification\n", machine)
 	}
 
 	if err := catalog.Verify(contract); err != nil {

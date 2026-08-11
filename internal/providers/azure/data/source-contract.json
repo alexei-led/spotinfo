@@ -4,7 +4,7 @@
   "review_status": "approved",
   "reviewer": "alexei-led",
   "reviewed_at": "2026-08-10",
-  "parser_version": "azure-retail-prices/1",
+  "parser_version": "azure-retail-prices/2",
   "update_cadence": "weekly",
   "terms": {
     "redistribution_decision": "approved",
@@ -244,8 +244,9 @@
     "response row: effectiveEndDate = RFC 3339 timestamp, absent while the interval is in force",
     "spot classification: skuName ends with ' Spot'",
     "excluded classification: skuName ends with ' Low Priority', the legacy Batch meter",
-    "windows exclusion: productName contains 'Windows'",
+    "os classification: productName ends with ' Windows' for a licence-bundled meter, ' Linux' on the families that spell it out, and no suffix for Linux on every older family",
     "cloud services exclusion: productName contains 'Cloud Services' or 'CloudServices', the legacy PaaS product published under the same armSkuName at a different rate",
+    "dedicated host exclusion: productName contains 'Dedicated Host' or 'DedicatedHost', which prices a whole physical host under a sku shaped like a Spot meter, for example 'FX Series Dedicated Host' sold as 'FXmds Type1 Spot'",
     "size page table header: Size Name | vCPUs (Qty.) | Memory (GiB) or Memory (GB); both label gibibytes and carry identical figures for equivalent sizes",
     "size page size cell: ^Standard_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*$",
     "size page parts table row: Processor | <range> vCPUs | <model> [x86-64] or [Arm64] or [ARM-64]"
@@ -253,7 +254,8 @@
   "support": {
     "risk_status": "unavailable",
     "operating_systems": [
-      "linux"
+      "linux",
+      "windows"
     ],
     "architectures": [
       "x86_64",
@@ -352,7 +354,7 @@
   "thresholds": {
     "min_regions": 55,
     "min_machines": 180,
-    "max_compressed_bytes": 131072,
+    "max_compressed_bytes": 262144,
     "max_fractional_digits": 6
   },
   "no_go_conditions": [
@@ -361,6 +363,7 @@
     "A size page renames a contracted header cell, or labels its memory column with a third unit, which empties the parse and trips the coverage floor.",
     "The 'Cloud Services' product stops being distinguishable by productName, leaving its rate ambiguous with the virtual-machine rate for the same size.",
     "A machine has two different prices in effect at the same instant, with no rule that chooses between them.",
+    "The ' Windows' productName suffix stops distinguishing licence-bundled meters, leaving no defensible operating system for a price. The convention is undocumented, so this is a review trigger rather than a parser change.",
     "A published price needs more fractional digits than the contracted maximum.",
     "A Spot meter has no paired On-Demand meter in the same region, leaving a savings figure with no denominator.",
     "The ' Spot' sku-name suffix stops distinguishing interruptible meters from the legacy ' Low Priority' meters.",

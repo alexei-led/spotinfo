@@ -47,6 +47,11 @@ func (p *Provider) ID() cloud.ProviderID { return cloud.ProviderAzure }
 
 // Capabilities reports what the committed snapshot can answer.
 //
+// The operating systems are read from the catalogue rather than declared here,
+// so the provider offers exactly what it prices: Azure sells Linux and Windows
+// meters for the same size, and a catalogue built from a source that stopped
+// publishing one of them must stop offering it in the same run.
+//
 // Risk is false and stays false: Azure publishes eviction rates through Resource
 // Graph and Resource SKUs, both of which require a subscription, so this
 // provider has nothing to report and must not let silence be ranked as low
@@ -54,7 +59,7 @@ func (p *Provider) ID() cloud.ProviderID { return cloud.ProviderAzure }
 // require an authenticated API, which the offline contract rules out.
 func (p *Provider) Capabilities() cloud.Capabilities {
 	return cloud.Capabilities{
-		OperatingSystems: []cloud.OperatingSystem{p.catalog.OS},
+		OperatingSystems: slices.Clone(p.catalog.OperatingSystems),
 		Architectures:    []cloud.Architecture{cloud.ArchitectureX8664, cloud.ArchitectureARM64},
 		SpotPrice:        true,
 		OnDemandPrice:    true,
@@ -111,7 +116,7 @@ func (p *Provider) Query(_ context.Context, query *cloud.Query) (cloud.Result, e
 			if machine == nil || !accepts(machine, price, query, pattern) {
 				continue
 			}
-			candidates = append(candidates, p.toCandidate(region.ID, machine, price, query.OS))
+			candidates = append(candidates, p.toCandidate(region.ID, machine, price))
 		}
 	}
 
@@ -136,6 +141,12 @@ func covers(requested []cloud.Region, region cloud.Region) bool {
 }
 
 func accepts(machine *CatalogMachine, price *CatalogPrice, query *cloud.Query, pattern *regexp.Regexp) bool {
+	// The catalogue prices the same size for Linux and for Windows, so the OS is
+	// a row filter, not only a capability check. An unset OS is "any", the same
+	// as every other zero-valued filter on cloud.Query.
+	if query.OS != "" && price.OS != query.OS {
+		return false
+	}
 	if query.Architecture != "" && machine.Architecture != query.Architecture {
 		return false
 	}
@@ -152,9 +163,7 @@ func accepts(machine *CatalogMachine, price *CatalogPrice, query *cloud.Query, p
 	return true
 }
 
-func (p *Provider) toCandidate(region cloud.Region, machine *CatalogMachine, price *CatalogPrice,
-	machineOS cloud.OperatingSystem,
-) cloud.Candidate {
+func (p *Provider) toCandidate(region cloud.Region, machine *CatalogMachine, price *CatalogPrice) cloud.Candidate {
 	location := cloud.Location{Region: region}
 	observation := func(class cloud.PriceClass, amount cloud.Money) *cloud.PriceObservation {
 		return &cloud.PriceObservation{
@@ -169,7 +178,7 @@ func (p *Provider) toCandidate(region cloud.Region, machine *CatalogMachine, pri
 	return cloud.Candidate{
 		Provider: cloud.ProviderAzure,
 		Location: location,
-		OS:       machineOS,
+		OS:       price.OS,
 		Machine: cloud.MachineSpec{
 			ID:           machine.ID,
 			Architecture: machine.Architecture,

@@ -55,26 +55,118 @@ func TestPageDecodingFollowsPagination(t *testing.T) {
 	assert.Len(t, last.Items, last.Count)
 }
 
-// TestOnlyLinuxSpotAndListMetersAreAccepted pins the classification rules. Each
-// excluded row is a real shape the API returns, and each would be wrong in a
-// different way if it were published.
-func TestOnlyLinuxSpotAndListMetersAreAccepted(t *testing.T) {
+// meterKey identifies an accepted row the way the catalogue does.
+type meterKey struct {
+	os    cloud.OperatingSystem
+	class cloud.PriceClass
+}
+
+// TestOnlyVirtualMachineSpotAndListMetersAreAccepted pins the classification
+// rules. Each excluded row is a real shape the API returns, and each would be
+// wrong in a different way if it were published.
+func TestOnlyVirtualMachineSpotAndListMetersAreAccepted(t *testing.T) {
 	t.Parallel()
 
 	observations, err := AcceptRows(fixtureItems(t, "retail-page-1.json"))
 	require.NoError(t, err)
 
-	got := make(map[cloud.PriceClass]cloud.Money, len(observations))
+	got := make(map[meterKey]cloud.Money, len(observations))
 	for _, observation := range observations {
 		assert.Equal(t, cloud.MachineID("Standard_D2s_v5"), observation.Machine,
 			"every other row on the page is out of scope")
-		got[observation.Class] = observation.Amount
+		got[meterKey{os: observation.OS, class: observation.Class}] = observation.Amount
 	}
 
-	require.Len(t, got, 2, "one spot and one on-demand row survive")
-	assert.Equal(t, "0.041200000", got[cloud.PriceClassSpot].String())
-	assert.Equal(t, "0.096000000", got[cloud.PriceClassOnDemand].String(),
+	require.Len(t, got, 3, "a linux pair and the windows spot meter survive")
+	assert.Equal(t, "0.041200000", got[meterKey{os: cloud.OSLinux, class: cloud.PriceClassSpot}].String())
+	assert.Equal(t, "0.096000000", got[meterKey{os: cloud.OSLinux, class: cloud.PriceClassOnDemand}].String(),
 		"the Cloud Services rate for the same size must not win")
+	assert.Equal(t, "0.178300000", got[meterKey{os: cloud.OSWindows, class: cloud.PriceClassSpot}].String(),
+		"the licence-bundled meter is its own row, not a replacement for the linux one")
+}
+
+// TestADedicatedHostMeterIsNeverPublished covers the contaminant a
+// productName-suffix rule has to keep out: "FX Series Dedicated Host" is sold
+// as "FXmds Type1 Spot", which classifies as a Spot meter for a machine named
+// FXmds Type1. It prices a whole physical host.
+func TestADedicatedHostMeterIsNeverPublished(t *testing.T) {
+	t.Parallel()
+
+	observations, err := AcceptRows(fixtureItems(t, "retail-page-1.json"))
+	require.NoError(t, err)
+
+	for _, observation := range observations {
+		assert.NotEqual(t, cloud.MachineID("FXmds Type1"), observation.Machine)
+	}
+
+	// The list-price row of the same product, which carries no " Spot" suffix
+	// and would otherwise be read as an On-Demand VM rate.
+	plain := RetailItem{
+		ServiceName:        serviceVirtualMachines,
+		Type:               priceTypeConsumption,
+		UnitOfMeasure:      unitOfMeasureHour,
+		CurrencyCode:       string(cloud.CurrencyUSD),
+		ProductName:        "FX Series Dedicated Host",
+		SkuName:            "FXmds Type1",
+		ArmSkuName:         "FXmds Type1",
+		ArmRegionName:      "eastus",
+		RetailPrice:        "3.9168",
+		EffectiveStartDate: snapshotTime,
+	}
+	require.NoError(t, plain.checkContract())
+
+	_, usable, err := plain.observe()
+	require.NoError(t, err)
+	assert.False(t, usable, "a dedicated host is not an on-demand virtual machine rate")
+}
+
+// TestTheOperatingSystemIsReadFromTheProductNameSuffix pins the three states of
+// the undocumented convention, and the reason the marker carries a leading
+// space: matching "Windows" anywhere in the name classified by coincidence.
+func TestTheOperatingSystemIsReadFromTheProductNameSuffix(t *testing.T) {
+	t.Parallel()
+
+	for name, expectation := range map[string]struct {
+		productName string
+		want        cloud.OperatingSystem
+	}{
+		"windows suffix":     {productName: "Virtual Machines Dsv5 Series" + windowsMarker, want: cloud.OSWindows},
+		"linux suffix":       {productName: "Virtual Machines Dsv7-series" + linuxMarker, want: cloud.OSLinux},
+		"no suffix":          {productName: "Virtual Machines Dsv5 Series", want: cloud.OSLinux},
+		"windows mid-string": {productName: "Virtual Machines Windows Migration Dsv5 Series", want: cloud.OSLinux},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, expectation.want, osOf(expectation.productName))
+		})
+	}
+}
+
+// TestALinuxRowNamingWindowsMidStringIsKept is the same rule checked through
+// the accept path, because the substring match dropped the row entirely rather
+// than mislabelling it.
+func TestALinuxRowNamingWindowsMidStringIsKept(t *testing.T) {
+	t.Parallel()
+
+	item := RetailItem{
+		ServiceName:        serviceVirtualMachines,
+		Type:               priceTypeConsumption,
+		UnitOfMeasure:      unitOfMeasureHour,
+		CurrencyCode:       string(cloud.CurrencyUSD),
+		ProductName:        "Virtual Machines Windows Migration Dsv5 Series",
+		SkuName:            "D2s v5 Spot",
+		ArmSkuName:         "Standard_D2s_v5",
+		ArmRegionName:      "eastus",
+		RetailPrice:        "0.0412",
+		EffectiveStartDate: snapshotTime,
+	}
+
+	observation, usable, err := item.observe()
+
+	require.NoError(t, err)
+	require.True(t, usable)
+	assert.Equal(t, cloud.OSLinux, observation.OS)
 }
 
 // TestLowPriorityIsNotSpot is called out on its own because it is the mistake a
@@ -163,7 +255,7 @@ func TestCurrentIntervalWins(t *testing.T) {
 	assert.Equal(t, "0.192000000", prices["Standard_D4s_v5/on-demand"])
 	assert.NotContains(t, prices, "Standard_D8s_v5/spot",
 		"an expired price with no replacement is dropped, not carried forward")
-	assert.Equal(t, []string{"eastus/Standard_D8s_v5/spot"}, expired,
+	assert.Equal(t, []string{"eastus/Standard_D8s_v5/linux/spot"}, expired,
 		"what was dropped is reported so a shrinking snapshot is visible")
 }
 

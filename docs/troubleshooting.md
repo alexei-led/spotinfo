@@ -489,13 +489,6 @@ root query command is AWS-only.
 spotinfo recommend --cloud azure --architecture x86_64 --cpu 2 --memory 4
 ```
 
-### "azure: unsupported capability: os windows" (`UNSUPPORTED_CAPABILITY`)
-
-**Cause:** `--os windows` on `--cloud azure`. The embedded Azure catalogue is Linux-only; Windows meters
-bundle a licence and are excluded from it.
-
-**Solution:** Drop `--os windows`, or use `--cloud aws` for Windows pricing.
-
 ### "no candidates for architecture ... and workload cost" (`NO_CANDIDATES`) on Azure
 
 **Cause:** An explicit `--region` was given that the embedded Azure catalogue does not cover. It covers
