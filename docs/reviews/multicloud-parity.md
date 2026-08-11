@@ -53,7 +53,7 @@ has no code to write at all.
 | Browse command (`spotinfo list`)       | **Shipped**                        | **Shipped**                  |
 | `--offline` / `--refresh`              | **Shipped**                        | **Shipped**                  |
 | `--sort` / `--order` on `recommend`    | **Shipped**                        | **Shipped**                  |
-| `text`, `csv`, `number` on `recommend` | Open — `json` and `table` only     | Open — `json` and `table` only |
+| `text`, `csv` on `recommend`           | **Shipped**                        | **Shipped**                  |
 
 The three blocked rows are the ones this page exists to close. They are recorded as answered
 in [../clouds.md](../clouds.md#what-stays-refused-and-why), and every refusal message names
@@ -367,8 +367,10 @@ spotinfo: gcp: unsupported capability: zone_detail: this cloud publishes prices 
 
 ## 9. Consistency work — no data needed
 
-**Status: every row below shipped except the last.** `text` and `csv` are still refused on
-`recommend`, which answers in `json` and `table` only.
+**Status: every row below shipped.** `text` and `csv` landed on `recommend` in Task 17, which
+is where the surface matrix first swept the command against all five formats. `number` stays
+`list`-only by decision, and the refusal names where it lives:
+`--output number belongs to `spotinfo list`: one savings percent cannot describe a ranked page`.
 
 None of these needs a vendor API. Each is a case where the same flag means different things,
 or silently means nothing.

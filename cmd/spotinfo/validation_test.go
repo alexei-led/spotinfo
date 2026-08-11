@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"strings"
 	"testing"
 
@@ -358,4 +359,130 @@ func TestLiveRiskRefusesABadProjectFromTheEnvironment(t *testing.T) {
 		"--"+flagLiveRisk)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, gcpprovider.ErrBadProject)
+}
+
+// recommendationFixture is the two-row ranked page the text and csv tests
+// render: one fully measured row and one with neither a price nor a discount,
+// which is what makes the absent-value rule observable.
+func recommendationFixture() []cloud.RecommendationDTO {
+	savings := 76.0
+	label := "<5%"
+
+	return []cloud.RecommendationDTO{
+		{
+			Rank: 1,
+			CandidateDTO: cloud.CandidateDTO{
+				Cloud: cloud.ProviderAWS, Region: "us-east-1", Machine: "m5.large",
+				Architecture: cloud.ArchitectureX8664, OS: cloud.OSLinux, VCPU: 2, MemoryGiB: 8,
+				SpotUSDPerHour: usdPerHour("0.039900000"), SavingsPercent: &savings,
+				Risk: cloud.RiskDTO{Status: cloud.RiskStatusAvailable, Label: &label},
+			},
+			RationaleCodes: []string{"ARCHITECTURE_MATCH", "COST_POLICY"},
+		},
+		{
+			Rank: 2,
+			CandidateDTO: cloud.CandidateDTO{
+				Cloud: cloud.ProviderAWS, Region: "us-east-1", Machine: "m6i.large",
+				Architecture: cloud.ArchitectureX8664, OS: cloud.OSLinux, VCPU: 2, MemoryGiB: 8,
+				Risk: cloud.RiskDTO{Status: cloud.RiskStatusUnavailable},
+			},
+			RationaleCodes: []string{"ARCHITECTURE_MATCH"},
+		},
+	}
+}
+
+// text and csv render a ranked page too. --output used to be the one flag whose
+// accepted values depended on which command it was given on: `list --output csv`
+// rendered a page and `recommend --output csv` was refused with "output must be
+// table or json".
+//
+// The two formats publish the amount and the discount as the JSON report does —
+// the full fixed-point string and a bare percent — because a program reads them.
+func TestRecommendationCSVCarriesEveryColumnAndTheRawFigures(t *testing.T) {
+	t.Parallel()
+
+	var rendered strings.Builder
+	require.NoError(t, writeRecommendationCSV(recommendationFixture(), &rendered))
+
+	rows, err := csv.NewReader(strings.NewReader(rendered.String())).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, rows, 3)
+
+	assert.Equal(t, []string{
+		"Rank", "Cloud", "Region", "Machine", "Architecture",
+		"vCPU", "Memory GiB", "USD/Hour", "Savings over On-Demand", "Risk", "Why",
+	}, rows[0])
+	assert.Equal(t, []string{
+		"1", "aws", "us-east-1", "m5.large", "x86_64", "2", "8",
+		"0.039900000", "76", "<5%", "ARCHITECTURE_MATCH COST_POLICY",
+	}, rows[1])
+
+	// An unpriced, unmeasured row prints the dash every other format prints,
+	// never a zero: a price nobody published is not a price of zero, and a
+	// cloud with no risk figure states its absence.
+	assert.Equal(t, []string{
+		"2", "aws", "us-east-1", "m6i.large", "x86_64", "2", "8",
+		"-", "-", "unavailable", "ARCHITECTURE_MATCH",
+	}, rows[2])
+}
+
+func TestRecommendationTextPrintsTheWireFieldNamesAsKeys(t *testing.T) {
+	t.Parallel()
+
+	var rendered strings.Builder
+	require.NoError(t, writeRecommendationText(recommendationFixture(), &rendered))
+
+	lines := strings.Split(strings.TrimRight(rendered.String(), "\n"), "\n")
+	require.Len(t, lines, 2)
+
+	// The keys are the spotinfo.recommend/v3 field names, not the column
+	// headings lower-cased: a caller who reads the JSON document should not have
+	// to learn a second spelling for the same value.
+	assert.Equal(t,
+		"rank=1, cloud=aws, region=us-east-1, machine=m5.large, architecture=x86_64, "+
+			"vcpu=2, memory_gib=8, spot_usd_per_hour=0.039900000, savings_percent=76, "+
+			"risk=<5%, rationale_codes=ARCHITECTURE_MATCH COST_POLICY",
+		lines[0])
+	assert.Contains(t, lines[1], "spot_usd_per_hour=-")
+	assert.Contains(t, lines[1], "risk=unavailable")
+}
+
+// A page carrying placement figures gains one column in both formats, titled
+// after the measurement it holds — and no column at all when none was asked
+// for, which the two tests above pin.
+func TestRecommendationRowsAppendThePlacementColumnOnlyWhenPresent(t *testing.T) {
+	t.Parallel()
+
+	score := 7
+	page := recommendationFixture()
+	page[0].RegionScore = &score
+
+	columns, rows := recommendationRows(page)
+
+	require.Len(t, columns, len(recommendationColumns)+1)
+	assert.Equal(t, "PLACEMENT SCORE", columns[len(columns)-1].heading)
+	assert.Equal(t, "placement_score", columns[len(columns)-1].key)
+	require.Len(t, rows, 2)
+	assert.Equal(t, "7", rows[0][len(columns)-1])
+	// The row the lookup returned nothing for prints the same dash the JSON
+	// document publishes as a null, never a zero score.
+	assert.Equal(t, absentValue, rows[1][len(columns)-1])
+}
+
+// Only number is refused, and the message says where it lives rather than only
+// that it is wrong.
+func TestRecommendOutputVocabularyRefusesOnlyNumberByName(t *testing.T) {
+	t.Parallel()
+
+	for _, format := range recommendOutputFormats {
+		require.NoError(t, validateRecommendOutput(format), format)
+	}
+
+	err := validateRecommendOutput(outputNumber)
+	require.ErrorIs(t, err, cloud.ErrInvalidArgument)
+	assert.Contains(t, err.Error(), "spotinfo list")
+
+	err = validateRecommendOutput("jsonn")
+	require.ErrorIs(t, err, cloud.ErrInvalidArgument)
+	assert.Contains(t, err.Error(), "text|json|table|csv")
 }

@@ -48,6 +48,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1370,4 +1371,646 @@ func TestE2EBareInvocationPrintsHelpWhileTheModeFlagsStillWork(t *testing.T) {
 			t.Fatalf("--mcp did not start a server that answers")
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// The command x cloud x format matrix.
+//
+// Everything above proves one behaviour at a time. This half sweeps the whole
+// published surface — two commands, three clouds, five formats — against the
+// binary as shipped, which is the only place a renderer that drops a column on
+// one cloud, or a document that stops matching its own contract, is visible.
+//
+// Every cell runs --offline. All three clouds accept it now, it is what keeps
+// stderr empty and the answer reproducible, and the dead proxy in e2eEnv is
+// still there to catch a request the flag failed to prevent.
+// ---------------------------------------------------------------------------
+
+// e2eScope is the filter one cloud's matrix cells are asked with. Sweeping the
+// whole catalogue would be 8 MB and four seconds per AWS cell; one region and
+// one machine is the same code path in a tenth of a second.
+//
+// The machine must exist in that cloud's committed snapshot. A weekly refresh
+// that drops one fails the cell loudly — the binary logs "no machines matched
+// the query" to stderr, which the empty-stderr assertion catches — rather than
+// passing over an empty page, and this table is the one place to fix it.
+type e2eScope struct {
+	cloud   string
+	region  string
+	machine string
+}
+
+var e2eScopes = []e2eScope{
+	{cloud: "aws", region: "us-east-1", machine: `^m5\.large$`},
+	{cloud: "gcp", region: "us-central1", machine: `^n2-standard-4$`},
+	{cloud: "azure", region: "eastus", machine: `^Standard_B16as_v2$`},
+}
+
+// e2eFormats is the published --output vocabulary. number is list-only; the
+// matrix asserts recommend refuses it rather than skipping the cell.
+var e2eFormats = []string{"number", "text", "json", "table", "csv"}
+
+func (s e2eScope) list(format string) []string {
+	return []string{
+		"list", "--cloud", s.cloud, "--offline",
+		"--region", s.region, "--machine", s.machine, "--output", format,
+	}
+}
+
+func (s e2eScope) recommend(format string) []string {
+	return []string{
+		"recommend", "--cloud", s.cloud, "--offline", "--region", s.region,
+		"--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
+		"--top", "3", "--output", format,
+	}
+}
+
+func TestE2ETheListCommandAnswersEveryCloudInEveryFormat(t *testing.T) {
+	t.Parallel()
+
+	for _, scope := range e2eScopes {
+		for _, format := range e2eFormats {
+			t.Run(scope.cloud+"/"+format, func(t *testing.T) {
+				t.Parallel()
+
+				got := runSpotinfo(t, nil, scope.list(format)...)
+
+				e2eAssertAnsweredCleanly(t, got)
+
+				if format == "json" {
+					e2eAssertValidAgainstContract(t, e2eListContract, got.stdout)
+
+					var report listReport
+
+					requireJSON(t, got.stdout, &report)
+					assertEqual(t, report.SchemaVersion, schemaListV1, "schema_version")
+					requireNotEmpty(t, report.Candidates, "candidates")
+
+					return
+				}
+
+				if rows := e2eRowCount(t, format, got.stdout); rows < 1 {
+					t.Fatalf("%s printed no row:\n%s", format, got.stdout)
+				}
+
+				// Every rendered format but number names what it priced. number
+				// prints a bare percent by design, which the format's own test
+				// pins.
+				if format != "number" {
+					assertContains(t, got.stdout, e2eMachineOf(scope),
+						format+" must name the machine it priced")
+				}
+			})
+		}
+	}
+}
+
+func TestE2ETheRecommendCommandAnswersEveryCloudInEveryFormat(t *testing.T) {
+	t.Parallel()
+
+	for _, scope := range e2eScopes {
+		for _, format := range e2eFormats {
+			t.Run(scope.cloud+"/"+format, func(t *testing.T) {
+				t.Parallel()
+
+				got := runSpotinfo(t, nil, scope.recommend(format)...)
+
+				// One savings percent cannot describe a ranked page, so number
+				// is refused here rather than rendered — and the refusal says
+				// where the format lives.
+				if format == "number" {
+					assertNonZeroExit(t, got)
+					assertEmptyStdout(t, got)
+					assertContains(t, got.stderr, "number", "the refusal must name the format")
+					assertContains(t, got.stderr, "spotinfo list", "the refusal must name where it lives")
+
+					return
+				}
+
+				e2eAssertAnsweredCleanly(t, got)
+
+				if format == "json" {
+					e2eAssertValidAgainstContract(t, e2eRecommendContract, got.stdout)
+
+					var report recommendReport
+
+					requireJSON(t, got.stdout, &report)
+					assertEqual(t, report.SchemaVersion, schemaRecommendV3, "schema_version")
+					requireNotEmpty(t, report.Recommendations, "recommendations")
+
+					return
+				}
+
+				if rows := e2eRowCount(t, format, got.stdout); rows < 1 {
+					t.Fatalf("%s printed no row:\n%s", format, got.stdout)
+				}
+			})
+		}
+	}
+}
+
+// e2eMachineOf returns the machine name the scope filters on, without the
+// anchors of its regular expression.
+func e2eMachineOf(scope e2eScope) string {
+	return strings.NewReplacer("^", "", "$", "", `\`, "").Replace(scope.machine)
+}
+
+// e2eAssertAnsweredCleanly is the contract every matrix cell shares: the process
+// succeeded, it printed an answer, and it printed nothing to stderr.
+//
+// The empty stderr is the load-bearing half. An empty match, a feed that could
+// not be reached, a beta warning — each of them still exits 0 and still prints
+// something to stdout, and each is a cell that answered less than it claims.
+func e2eAssertAnsweredCleanly(t *testing.T, got e2eResult) {
+	t.Helper()
+
+	requireZeroExit(t, got)
+
+	if strings.TrimSpace(got.stdout) == "" {
+		t.Fatalf("the command printed no answer; stderr: %s", got.stderr)
+	}
+
+	if strings.TrimSpace(got.stderr) != "" {
+		t.Errorf("an answered request must print nothing to stderr; stderr: %s", got.stderr)
+	}
+}
+
+// e2eRowCount counts the data rows of a rendered page, one rule per format.
+//
+// json is not handled here: its callers decode the document and count the array
+// the schema names, which is a stronger check than a line count.
+func e2eRowCount(t *testing.T, format, payload string) int {
+	t.Helper()
+
+	switch format {
+	case "csv":
+		return len(e2eCSVRecords(t, payload)) - 1 // minus the header
+	case "table":
+		return len(e2eTableDataRows(payload))
+	default: // number and text both print one line per row
+		return len(e2eNonEmptyLines(payload))
+	}
+}
+
+func e2eCSVRecords(t *testing.T, payload string) [][]string {
+	t.Helper()
+
+	records, err := csv.NewReader(strings.NewReader(payload)).ReadAll()
+	if err != nil {
+		t.Fatalf("output is not csv: %v\npayload: %s", err, payload)
+	}
+
+	if len(records) == 0 {
+		t.Fatalf("csv output carries not even a header")
+	}
+
+	return records
+}
+
+// e2eTableDataRows returns a rendered table's data rows.
+//
+// A data row is told from the two other kinds of line by carrying a digit: every
+// row prints a vCPU count and a price, no column heading contains one, and a
+// drawn border contains no alphanumeric at all. That rule holds for both
+// renderers in this repository — the bordered browse table and the hand-padded
+// ranked one — which is why the count is asserted and the style is not.
+func e2eTableDataRows(payload string) []string {
+	var rows []string
+
+	for _, line := range e2eNonEmptyLines(payload) {
+		if strings.ContainsFunc(line, unicode.IsDigit) {
+			rows = append(rows, line)
+		}
+	}
+
+	return rows
+}
+
+func e2eNonEmptyLines(payload string) []string {
+	var lines []string
+
+	for _, line := range strings.Split(payload, "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, strings.TrimSpace(line))
+		}
+	}
+
+	return lines
+}
+
+// e2eAWSRiskLabels are the AWS Spot Advisor's interruption buckets. No other
+// cloud publishes a figure measured that way, so seeing one of these on a GCP
+// or Azure page would mean a bucket had been substituted for a measurement
+// nobody made.
+var e2eAWSRiskLabels = []string{"<5%", "5-10%", "10-15%", "15-20%", ">20%"}
+
+// Invariant 2, read off the rendered page rather than off a struct: a cloud that
+// publishes no interruption figure prints its status. Never a blank cell, which
+// reads as "no interruptions", never a zero, which reads as a measurement of
+// none, and never an AWS bucket.
+func TestE2ETheRiskColumnPrintsAStatusOnCloudsWithoutRiskData(t *testing.T) {
+	t.Parallel()
+
+	for _, scope := range e2eScopes {
+		if scope.cloud == "aws" {
+			continue // AWS is the one cloud that publishes a bucket
+		}
+
+		t.Run(scope.cloud, func(t *testing.T) {
+			t.Parallel()
+
+			// csv first, because it is the one format whose risk cell can be
+			// read exactly rather than searched for.
+			asCSV := runSpotinfo(t, nil, scope.list("csv")...)
+			e2eAssertAnsweredCleanly(t, asCSV)
+
+			records := e2eCSVRecords(t, asCSV.stdout)
+			column := slices.Index(records[0], "Risk")
+
+			if column < 0 {
+				t.Fatalf("the csv page has no Risk column: %v", records[0])
+			}
+
+			assertLen(t, records[1:], 1, "one machine, one row")
+
+			for _, row := range records[1:] {
+				assertEqual(t, row[column], "unavailable",
+					scope.cloud+" publishes no redistributable interruption figure")
+			}
+
+			// And the two formats a person reads, where the same cell is a
+			// substring rather than a field.
+			for _, format := range []string{"table", "text"} {
+				got := runSpotinfo(t, nil, scope.list(format)...)
+				e2eAssertAnsweredCleanly(t, got)
+				assertContains(t, got.stdout, "unavailable", format+" must print the risk status")
+
+				for _, bucket := range e2eAWSRiskLabels {
+					if strings.Contains(got.stdout, bucket) {
+						t.Errorf("%s printed the AWS interruption bucket %q on %s:\n%s",
+							format, bucket, scope.cloud, got.stdout)
+					}
+				}
+			}
+		})
+	}
+}
+
+// Two identical --offline invocations must produce identical bytes.
+//
+// This is the only check in the suite that sees an unstable ordering. It did
+// find one: `spotinfo list --cloud aws --offline` ranged over a map of regions
+// and a map of instances, and sorted the result with sort.Sort, so two runs
+// seconds apart printed different pages. The renderers were never the cause —
+// internal/spot now sorts both maps' keys and sorts stably — which is why the
+// unfiltered AWS row below is here rather than a scoped one: the whole-catalogue
+// sweep is where the ties are.
+func TestE2ETheSameOfflineInvocationIsByteIdentical(t *testing.T) {
+	t.Parallel()
+
+	type invocation struct {
+		name string
+		args []string
+	}
+
+	cases := make([]invocation, 0, 2+2*len(e2eScopes))
+	cases = append(cases, invocation{
+		// Every region, every machine, no sort key: the widest answer the
+		// binary gives, and the one the ordering defect was found in. csv
+		// rather than json only to keep a megabyte out of the comparison.
+		name: "aws browses every region",
+		args: []string{"list", "--cloud", "aws", "--offline", "--output", "csv"},
+	}, invocation{
+		name: "aws browses every region, sorted by price",
+		args: []string{"list", "--cloud", "aws", "--offline", "--sort", "price", "--output", "csv"},
+	})
+
+	for _, scope := range e2eScopes {
+		cases = append(cases,
+			invocation{name: scope.cloud + " lists", args: scope.list("json")},
+			invocation{name: scope.cloud + " recommends", args: scope.recommend("json")},
+		)
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			first := runSpotinfo(t, nil, tc.args...)
+			second := runSpotinfo(t, nil, tc.args...)
+
+			requireZeroExit(t, first)
+			requireZeroExit(t, second)
+
+			if first.stdout != second.stdout {
+				t.Errorf("two identical invocations produced different pages: %v", tc.args)
+			}
+		})
+	}
+}
+
+// The refusal matrix: every flag this build refuses, on every cloud that refuses
+// it, observed as a process rather than as a returned error.
+//
+// The wants column is per cell rather than one rule for all of them, because the
+// two refusal classes say different things on purpose. A capability refusal is
+// about one cloud and names it. A companion refusal — a flag that needs another
+// flag — is refused identically everywhere, and naming a cloud there would imply
+// that some other cloud accepts the combination.
+//
+// Three cells name the neutral capability (`zone_detail`, `placement_score`,
+// `risk`) rather than the flag the caller typed. That message is built in
+// internal/cloud and is shared with the MCP surface, whose argument names differ
+// from the flag names, so the flag cannot be named there without leaking CLI
+// vocabulary into the neutral domain. It is recorded in
+// docs/reviews/surface-validation.md as wording for the manual review, not
+// asserted away here.
+func TestE2ETheRefusalMatrixExitsNonZeroWithAnEmptyStdout(t *testing.T) {
+	t.Parallel()
+
+	recommendArgs := func(cloud string, extra ...string) []string {
+		return append([]string{
+			"recommend", "--cloud", cloud, "--offline",
+			"--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
+		}, extra...)
+	}
+	listArgs := func(cloud string, extra ...string) []string {
+		return append([]string{"list", "--cloud", cloud, "--offline"}, extra...)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		args  []string
+		wants []string
+	}{
+		// Companion refusals: a flag that cannot act without the flag that
+		// fetches what it acts on. Refused on both commands and every cloud.
+		{"list aws az", listArgs("aws", "--az"), []string{"--az", "--with-score"}},
+		{"list aws min-score", listArgs("aws", "--min-score", "5"), []string{"--min-score", "--with-score"}},
+		{"list aws score-timeout", listArgs("aws", "--score-timeout", "5"), []string{"--score-timeout", "--with-score"}},
+		{"list gcp score-timeout", listArgs("gcp", "--score-timeout", "5"), []string{"--score-timeout", "--with-score"}},
+		{"list azure score-timeout", listArgs("azure", "--score-timeout", "5"), []string{"--score-timeout", "--with-score"}},
+		{"recommend aws az", recommendArgs("aws", "--az"), []string{"--az", "--with-score"}},
+		{"recommend gcp az", recommendArgs("gcp", "--az"), []string{"--az", "--with-score"}},
+		{"recommend azure az", recommendArgs("azure", "--az"), []string{"--az", "--with-score"}},
+		{"recommend aws min-score", recommendArgs("aws", "--min-score", "5"), []string{"--min-score", "--with-score"}},
+		{"recommend azure min-score", recommendArgs("azure", "--min-score", "5"), []string{"--min-score", "--with-score"}},
+		{"recommend aws score-timeout", recommendArgs("aws", "--score-timeout", "5"), []string{"--score-timeout", "--with-score"}},
+
+		// Capability refusals: the cloud cannot answer, and the message names it.
+		{"list gcp az", listArgs("gcp", "--az"), []string{"gcp", "zone_detail"}},
+		{"list azure az", listArgs("azure", "--az"), []string{"azure", "zone_detail"}},
+		{"list gcp min-score", listArgs("gcp", "--min-score", "5"), []string{"gcp", "--min-score"}},
+		{"list azure min-score", listArgs("azure", "--min-score", "5"), []string{"azure", "placement_score"}},
+		{"recommend gcp min-score", recommendArgs("gcp", "--min-score", "5"), []string{"gcp", "--min-score"}},
+		{"list azure with-score", listArgs("azure", "--with-score"), []string{"azure", "--with-score", "subscription"}},
+		{"recommend azure with-score", recommendArgs("azure", "--with-score"), []string{"azure", "--with-score", "subscription"}},
+		{"list gcp with-score", listArgs("gcp", "--with-score"), []string{"gcp", "ranked recommendation"}},
+		{"list aws gcp-project", listArgs("aws", "--gcp-project", "p"), []string{"aws", "--gcp-project"}},
+		{"list azure gcp-project", listArgs("azure", "--gcp-project", "p"), []string{"azure", "--gcp-project"}},
+		{"recommend aws gcp-project", recommendArgs("aws", "--gcp-project", "p"), []string{"aws", "--gcp-project"}},
+		{"recommend azure gcp-project", recommendArgs("azure", "--gcp-project", "p"), []string{"azure", "--gcp-project"}},
+		{"recommend aws live-risk", recommendArgs("aws", "--live-risk"), []string{"aws", "--live-risk"}},
+		{"recommend azure live-risk", recommendArgs("azure", "--live-risk"), []string{"azure", "--live-risk", "subscription"}},
+
+		// A risk-capped workload on a cloud that publishes no interruption
+		// figure. Invariant 1 from the outside: the ceiling is an AWS bucket
+		// boundary and transfers to no other measurement.
+		{"recommend gcp workload web", recommendArgs("gcp", "--workload", "web"), []string{"gcp", "risk"}},
+		{"recommend azure workload ci", recommendArgs("azure", "--workload", "ci"), []string{"azure", "risk"}},
+		{"recommend gcp windows", recommendArgs("gcp", "--os", "windows"), []string{"gcp", "windows"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := runSpotinfo(t, nil, tc.args...)
+
+			assertNonZeroExit(t, got)
+			assertEmptyStdout(t, got)
+
+			for _, want := range tc.wants {
+				assertContains(t, got.stderr, want, "the refusal must say what and where")
+			}
+		})
+	}
+}
+
+// e2eToolCall builds one JSON-RPC tools/call request.
+func e2eToolCall(id int, tool, arguments string) string {
+	return fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":%d,"method":"tools/call","params":{"name":%q,"arguments":%s}}`,
+		id, tool, arguments)
+}
+
+// e2eToolPayload returns the document one tool call answered with.
+func e2eToolPayload(t *testing.T, responses map[int]mcpResponse, id int) string {
+	t.Helper()
+
+	call, answered := responses[id]
+	if !answered {
+		t.Fatalf("the server returned no response for request %d", id)
+	}
+
+	if len(call.Result.Content) == 0 {
+		t.Fatalf("request %d returned no content", id)
+	}
+
+	return call.Result.Content[0].Text
+}
+
+// The MCP surface, driven end to end in one stdio session: the handshake, the
+// published tool list, then all three tools against all three clouds.
+//
+// One session rather than nine: the server is the same process for every call,
+// which is how a client uses it, and starting it nine times would mostly measure
+// process start-up. HTTP_PROXY and HTTPS_PROXY are pinned at a closed port by
+// e2eEnv and every tool is told to answer offline, so nothing here can reach a
+// vendor.
+func TestE2EEveryMCPToolAnswersForEveryCloud(t *testing.T) {
+	t.Parallel()
+
+	type call struct {
+		id    int
+		tool  string
+		cloud string
+	}
+
+	requests := make([]string, 0, 1+3*len(e2eScopes))
+	requests = append(requests, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+
+	calls := make([]call, 0, 3*len(e2eScopes))
+	id := 3
+
+	for _, scope := range e2eScopes {
+		for _, tool := range []string{"list_spot_machines", "recommend_spot_machines", "list_cloud_regions"} {
+			var arguments string
+
+			switch tool {
+			case "list_spot_machines":
+				arguments = fmt.Sprintf(`{"cloud":%q,"offline":true,"regions":[%q],"machine":%q}`,
+					scope.cloud, scope.region, scope.machine)
+			case "recommend_spot_machines":
+				arguments = fmt.Sprintf(
+					`{"cloud":%q,"offline":true,"regions":[%q],"architecture":"x86_64","min_vcpu":2,"min_memory_gib":8,"top":3}`,
+					scope.cloud, scope.region)
+			default:
+				arguments = fmt.Sprintf(`{"cloud":%q}`, scope.cloud)
+			}
+
+			requests = append(requests, e2eToolCall(id, tool, arguments))
+			calls = append(calls, call{id: id, tool: tool, cloud: scope.cloud})
+			id++
+		}
+	}
+
+	responses := mcpSession(t, requests...)
+
+	listing, answered := responses[2]
+	if !answered {
+		t.Fatalf("the server returned no tool listing")
+	}
+
+	names := make([]string, 0, len(listing.Result.Tools))
+	for _, tool := range listing.Result.Tools {
+		names = append(names, tool.Name)
+	}
+
+	slices.Sort(names)
+	assertSliceEqual(t, names,
+		[]string{"list_cloud_regions", "list_spot_machines", "recommend_spot_machines"},
+		"the published tool names")
+
+	for _, made := range calls {
+		t.Run(made.tool+"/"+made.cloud, func(t *testing.T) {
+			payload := e2eToolPayload(t, responses, made.id)
+
+			switch made.tool {
+			case "list_spot_machines":
+				e2eAssertValidAgainstContract(t, e2eListContract, payload)
+
+				var report listReport
+
+				requireJSON(t, payload, &report)
+				assertEqual(t, report.SchemaVersion, schemaListV1, "schema_version")
+				assertEqual(t, report.Status, "ok", "status")
+				assertEqual(t, report.Request.Cloud, made.cloud, "request.cloud")
+				requireNotEmpty(t, report.Candidates, "candidates")
+			case "recommend_spot_machines":
+				e2eAssertValidAgainstContract(t, e2eRecommendContract, payload)
+
+				var report recommendReport
+
+				requireJSON(t, payload, &report)
+				assertEqual(t, report.SchemaVersion, schemaRecommendV3, "schema_version")
+				assertEqual(t, report.Status, "ok", "status")
+				assertEqual(t, report.Request.Cloud, made.cloud, "request.cloud")
+				requireNotEmpty(t, report.Recommendations, "recommendations")
+			default:
+				var report struct {
+					SchemaVersion string     `json:"schema_version"`
+					Status        string     `json:"status"`
+					Cloud         string     `json:"cloud"`
+					Regions       []string   `json:"regions"`
+					DataSource    dataSource `json:"data_source"`
+				}
+
+				requireJSON(t, payload, &report)
+				assertEqual(t, report.SchemaVersion, "spotinfo.regions/v1", "schema_version")
+				assertEqual(t, report.Status, "ok", "status")
+				assertEqual(t, report.Cloud, made.cloud, "cloud")
+				requireNotEmpty(t, report.Regions, "regions")
+				// This tool is where a trimmed answer's sources_omitted count is
+				// resolved, so its own source list may never be trimmed.
+				requireNotEmpty(t, report.DataSource.Sources, "data_source.sources")
+			}
+		})
+	}
+}
+
+// Acceptance criterion 2, checked against the binary on every cloud: the same
+// question asked over the CLI and over MCP returns the same request echo, the
+// same ranking policy and the same first result.
+//
+// TestE2ETheCLIAndMCPAnswerTheSameQuestionIdentically above pins the resolved
+// defaults on AWS. This one asks the question explicitly and sweeps the three
+// clouds, which is where a per-provider divergence would show.
+func TestE2ETheCLIAndMCPRankEveryCloudIdentically(t *testing.T) {
+	t.Parallel()
+
+	for _, scope := range e2eScopes {
+		t.Run(scope.cloud, func(t *testing.T) {
+			t.Parallel()
+
+			cli := runSpotinfo(t, nil, scope.recommend("json")...)
+			e2eAssertAnsweredCleanly(t, cli)
+
+			var fromCLI recommendReport
+
+			requireJSON(t, cli.stdout, &fromCLI)
+
+			fromMCP := callRecommendOverMCP(t, fmt.Sprintf(
+				`{"cloud":%q,"offline":true,"regions":[%q],"architecture":"x86_64","min_vcpu":2,"min_memory_gib":8,"top":3}`,
+				scope.cloud, scope.region))
+
+			assertEqual(t, fromCLI.SchemaVersion, fromMCP.SchemaVersion, "schema_version")
+			assertEqual(t, fromCLI.Request.Cloud, fromMCP.Request.Cloud, "request.cloud")
+			assertSliceEqual(t, fromCLI.Request.Regions, fromMCP.Request.Regions, "request.regions")
+			assertEqual(t, fromCLI.Request.Workload, fromMCP.Request.Workload, "request.workload")
+			assertEqual(t, fromCLI.Request.OS, fromMCP.Request.OS, "request.os")
+			assertEqual(t, fromCLI.Request.Top, fromMCP.Request.Top, "request.top")
+			assertEqual(t, fromCLI.Request.MinVCPU, fromMCP.Request.MinVCPU, "request.min_vcpu")
+			assertEqual(t, fromCLI.Request.MinMemoryGiB, fromMCP.Request.MinMemoryGiB, "request.min_memory_gib")
+			assertSliceEqual(t, fromCLI.RankingPolicy, fromMCP.RankingPolicy, "ranking_policy")
+			assertEqual(t, fromCLI.DataSource.Mode, fromMCP.DataSource.Mode, "data_source.mode")
+
+			requireNotEmpty(t, fromCLI.Recommendations, "the CLI returned no recommendation")
+			requireNotEmpty(t, fromMCP.Recommendations, "MCP returned no recommendation")
+
+			first, second := fromCLI.Recommendations[0], fromMCP.Recommendations[0]
+
+			assertEqual(t, first.Machine, second.Machine, "the first result must be the same machine")
+			assertEqual(t, first.Region, second.Region, "the first result must be the same region")
+			assertEqual(t, first.SpotUSDPerHour, second.SpotUSDPerHour, "the first result must carry the same price")
+			assertEqual(t, first.Risk.Status, second.Risk.Status, "the first result must carry the same risk status")
+		})
+	}
+}
+
+// Invariant 8 and acceptance criterion 8, read off the built binary. Nothing
+// else catches a transitive pull: a dependency added three levels down links
+// azidentity without appearing in any import statement in this repository, and
+// it costs +4.83 MB for two features this build cannot exercise.
+func TestE2ETheShippedBinaryLinksNoAzureCredentialLibrary(t *testing.T) {
+	t.Parallel()
+
+	if testing.Short() {
+		t.Skip("end-to-end test compiles the binary")
+	}
+
+	binary, err := buildSpotinfo()
+	if err != nil {
+		t.Fatalf("building the binary under test: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), e2eTimeout)
+	defer cancel()
+
+	listed, err := exec.CommandContext(ctx, "go", "version", "-m", binary).Output()
+	if err != nil {
+		t.Fatalf("reading the binary's module list: %v", err)
+	}
+
+	modules := string(listed)
+
+	// The positive control, and it is not decoration: a `go version -m` that
+	// failed quietly, or a binary stripped of its module list, would make every
+	// absence below true of an empty string.
+	assertContains(t, modules, "github.com/urfave/cli/v2",
+		"the module list must name a library the binary certainly links")
+
+	for _, forbidden := range []string{"azidentity", "armresourcegraph", "armrecommender"} {
+		if strings.Contains(modules, forbidden) {
+			t.Errorf("the shipped binary links %s, which this build must not authenticate with", forbidden)
+		}
+	}
 }

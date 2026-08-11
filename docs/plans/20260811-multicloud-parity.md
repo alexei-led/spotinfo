@@ -2297,64 +2297,137 @@ not.
 
 **Offline matrix, in `e2e_test.go`, network-free and credential-free:**
 
-- [ ] build once via `make build` and drive the **real binary** as a subprocess, as the file
+- [x] build once via `make build` and drive the **real binary** as a subprocess, as the file
       already does — never an in-process `cli.App`
-- [ ] sweep `{list, recommend}` x `{aws, gcp, azure}` x `{number, text, json, table, csv}` and
+- [x] sweep `{list, recommend}` x `{aws, gcp, azure}` x `{number, text, json, table, csv}` and
       assert for each cell: exit code 0, non-empty stdout, empty stderr, at least one candidate
       row. `number` is `list`-only, so assert `recommend --output number` is **refused**, not
       that it is skipped
-- [ ] assert every `json` cell validates against its contract schema file — `spotinfo.list/v1`
+- [x] assert every `json` cell validates against its contract schema file — `spotinfo.list/v1`
       or `spotinfo.recommend/v3` — by reading the schema from `docs/plans/contracts/`, so a
       schema edit that outruns the code fails here
-- [ ] assert the risk column on GCP and Azure prints a **status**, never a blank, a zero or an
+- [x] assert the risk column on GCP and Azure prints a **status**, never a blank, a zero or an
       AWS-shaped bucket. This is Invariant 2 checked on rendered output rather than on a struct
-- [ ] assert determinism: the same `--offline` invocation run twice produces byte-identical
+- [x] assert determinism: the same `--offline` invocation run twice produces byte-identical
       stdout. A non-deterministic map iteration in a renderer surfaces here and nowhere else
-- [ ] assert the refusal matrix: every flag Task 8 refuses, on every cloud that refuses it,
+- [x] assert the refusal matrix: every flag Task 8 refuses, on every cloud that refuses it,
       exits non-zero with **empty stdout** and a message naming both the flag and the cloud
-- [ ] assert every removed flag name (`--type`, `--instance`, `--vcpu`, `--memory`,
+- [x] assert every removed flag name (`--type`, `--instance`, `--vcpu`, `--memory`,
       `--memory-gib`, `--cpu`, `--price`, `--budget`) prints a rename hint naming its
       replacement, exits non-zero, and prints nothing to stdout
-- [ ] drive the MCP stdio surface end to end: handshake, `tools/list` returns exactly the three
+- [x] drive the MCP stdio surface end to end: handshake, `tools/list` returns exactly the three
       tool names, then call each of the three tools for each of the three clouds and assert a
       structured result. Pin `HTTP_PROXY`/`HTTPS_PROXY` at a closed port and pass `--offline`,
       as `CLAUDE.md` requires, so the fallback path is what is exercised
-- [ ] assert CLI/MCP parity on rendered output, not just in-process: the same question through
+- [x] assert CLI/MCP parity on rendered output, not just in-process: the same question through
       `spotinfo recommend --output json` and through `recommend_spot_machines` yields the same
       `request` echo, the same ranking policy and the same first candidate. This is acceptance
       criterion 2, checked against the binary
 
 **Binary-level assertions, same task:**
 
-- [ ] assert the shipped binary links **no Azure credential library**: `go version -m` on the
+- [x] assert the shipped binary links **no Azure credential library**: `go version -m` on the
       built binary must show no `azidentity`, `armresourcegraph` or `armrecommender`. This is
       Invariant 8 and acceptance criterion 8, and it is the only check that catches a
       transitive pull
-- [ ] record the binary size and compare it against the pre-plan baseline; flag a growth over
+- [x] record the binary size and compare it against the pre-plan baseline; flag a growth over
       15% for review rather than failing on it
 
 **Live checks, in `validate_clouds_test.go`, behind `make validate-clouds`:**
 
-- [ ] AWS with live feeds (anonymous): assert `list` and `recommend` answer, and that
+- [x] AWS with live feeds (anonymous): assert `list` and `recommend` answer, and that
       `data_source.mode` reports `live` or `cached`, never `embedded-snapshot`
-- [ ] Azure with the anonymous Retail Prices API (Task 10): same assertions
-- [ ] GCP from the snapshot, and — only if a key is present in the environment — the
+- [x] Azure with the anonymous Retail Prices API (Task 10): same assertions
+- [x] GCP from the snapshot, and — only if a key is present in the environment — the
       `--gcp-billing-key` path; **skip with a stated reason when the key is absent**, never fail
-- [ ] assert every live path **degrades to the snapshot** rather than failing the run: point
+- [x] assert every live path **degrades to the snapshot** rather than failing the run: point
       each at a closed port and assert exit 0 with an answer and a `data_source.mode` of
       `embedded-snapshot`. This is the Safety note "never let a live path fail a run", checked
       rather than assumed
-- [ ] `make validate-clouds` must be absent from `make test` and from every CI workflow that
+- [x] `make validate-clouds` must be absent from `make test` and from every CI workflow that
       gates a merge — assert that by grepping the Makefile and `.github/workflows/`
 
 **Close out:**
 
-- [ ] run `make build && make test && make validate-clouds`
-- [ ] run the e2e suite explicitly with no skip: `go test ./cmd/spotinfo/ -run E2E -v`, and
+- [x] run `make build && make test && make validate-clouds`
+- [x] run the e2e suite explicitly with no skip: `go test ./cmd/spotinfo/ -run E2E -v`, and
       confirm the test count is **non-zero** — a vacuous pass against zero collected tests is
       the exact failure the `TestE2E` infix rule exists to prevent
-- [ ] write `docs/reviews/surface-validation.md` recording the matrix, what passed, and every
+- [x] write `docs/reviews/surface-validation.md` recording the matrix, what passed, and every
       cell that was skipped and why
+
+
+➕ **`text` and `csv` landed on `recommend` here, and that is the ⚠️ Task 14 handed forward.**
+The matrix cannot assert what this task's own checkbox says — only `number` refused — while
+`recommend --output csv` prints `output must be table or json`. It was built rather than
+recorded because the refusal had no principle behind it: `number` is `list`-only because one
+savings percent cannot describe a ranked page, and `text` and `csv` describe three ranked rows
+perfectly well. `recommendOutputFormats` in `cmd/spotinfo/recommend.go` is now the vocabulary,
+`writeRecommendationText` and `writeRecommendationCSV` render the table's columns, and the
+`number` refusal names where the format lives. The `text` keys are the
+`spotinfo.recommend/v3` field names, not the headings lower-cased —
+`spot_usd_per_hour`, not `usd/hour`. `docs/reviews/multicloud-parity.md` row flipped to
+**Shipped**.
+
+➕ **The determinism checkbox found a real defect, and Task 3's ➕ named its cause exactly.**
+Two `spotinfo list --cloud aws --offline` runs printed different pages. The fix is in
+`internal/spot`, not in a renderer: `getRegions` and the per-region advice loop both ranged
+over maps, and `sortAdvices` used `sort.Sort` over comparators that are not total orders. All
+three are fixed — sorted region keys, sorted machine keys, `sort.Stable` — and each half was
+checked by reverting it alone. `TestGetSpotSavingsReturnsTheSameOrderEveryRun` fails on the
+row order under `sort.Sort` and on "run 21 returned a different page" under the map iteration.
+This was the one check the plan says surfaces nowhere else, and it earned its place.
+
+➕ **The contract check uses `github.com/santhosh-tekuri/jsonschema/v6`, promoted from
+indirect to direct, and lives in `cmd/spotinfo/e2e_contracts_test.go` rather than in
+`e2e_test.go`.** That file's header rule — the standard library and nothing else — is what
+keeps it compiling against a half-migrated package, so the validator import lives in a
+same-package sibling and `e2e_test.go` calls a helper. `encoding/json` was not an option: it
+ignores `required`, `enum`, `pattern`, `additionalProperties` and `minItems`, so a document
+missing half its fields decodes cleanly. No non-test file imports the validator, so the shipped
+binary is unchanged; `.golangci.yaml` gained the depguard allow entry with that reason.
+`internal/mcp` keeps its own small checker — its documented upgrade trigger has not fired.
+`go mod tidy` also demoted `github.com/spf13/cast`, which no Go file imports any more; that is
+pre-existing staleness in `go.mod`, and `CLAUDE.md` still listing it is Task 16 debt.
+
+➕ **Three capability refusals name the neutral capability rather than the flag.** `--az` on
+GCP says `zone_detail`, `--min-score` on Azure says `placement_score`, `--workload web` says
+`risk`. The message is built in `internal/cloud` and shared with MCP, whose argument names
+differ, and mapping a capability back to a flag is ambiguous — `CapabilityPlacementScore` is
+requested by three different flags. The refusal matrix asserts what each cell actually prints
+and `docs/reviews/surface-validation.md` records the wording for Task 18, rather than the
+assertion being weakened to hide it.
+
+➕ **The binary under test is built by the e2e harness, not by `make build`.** The harness
+already compiles `go build -tags release`, which is `make build` minus the version-stamping
+`-X` flags — measured at **0 bytes** of difference. Routing the suite through `make` would put
+the build system inside a test. `make build` is what the size measurement uses.
+
+➕ **`make validate-clouds` runs `-run 'TestValidate' -count=1 -v`.** `-count=1` because a
+cached pass would report a live check nobody made. One unit test had to be renamed out of that
+namespace: `TestValidateRecommendOutput` became
+`TestRecommendOutputVocabularyRefusesOnlyNumberByName`.
+
+➕ **Files this task's list omits.** `cmd/spotinfo/e2e_contracts_test.go` (the contract
+validator, kept out of the stdlib-only e2e file), `cmd/spotinfo/recommend.go` and
+`cmd/spotinfo/main.go` (the two new renderers, the `--output` vocabulary and the four ranked
+column headings), `cmd/spotinfo/validation_test.go` and `cmd/spotinfo/recommend_test.go` (their
+tests), `internal/spot/client.go`, `internal/spot/types.go` and `internal/spot/client_test.go`
+(the ordering fix the determinism checkbox found), `.golangci.yaml` and `go.mod`/`go.sum` (the
+validator's depguard entry and its promotion to a direct test dependency), and
+`docs/reviews/multicloud-parity.md` (the `text`/`csv` row, now Shipped).
+
+**Measured on this tree.** All 30 matrix cells: exit 0, empty stderr, one row for every `list`
+cell and three for every `recommend` cell, with `recommend --output number` refused on all
+three clouds. `go test ./cmd/spotinfo/ -run E2E -v` collects **27 top-level tests, 165
+assertions, 0 failures**. `go version -m` names no `azidentity`, `armresourcegraph` or
+`armrecommender`, with `github.com/urfave/cli/v2` as the positive control. Binary
+**41,551,154 bytes against the 43,961,634 of `afe3db6`: −5.48%**, no growth to flag.
+`make validate-clouds`: AWS and Azure both report `data_source.mode: live` with no credential
+in the environment, GCP reports `embedded-snapshot`, every live path degrades to the snapshot
+at exit 0 with a blocked origin, and the `--gcp-billing-key` cell **skips with its reason** —
+no key in the environment. All six gates green:
+`make build && make test && make lint && make verify-data && make verify-architecture && make validate-clouds`.
 
 ### Task 18: Manual correctness and usability review
 

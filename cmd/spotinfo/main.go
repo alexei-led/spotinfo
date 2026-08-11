@@ -57,8 +57,15 @@ const (
 	// observation rather than the AWS Spot Advisor's "frequency of interruption",
 	// and the machine-type column is named after the --machine filter that
 	// selects it.
-	regionColumn        = "Region"
-	machineColumn       = "Machine"
+	regionColumn  = "Region"
+	machineColumn = "Machine"
+	// The four headings only a ranked page prints. `recommend` renders the same
+	// columns in table, text and csv, so they are named here beside the browse
+	// ones rather than spelled out in each renderer.
+	rankColumn          = "Rank"
+	cloudColumn         = "Cloud"
+	architectureColumn  = "Architecture"
+	whyColumn           = "Why"
 	vCPUColumn          = "vCPU"
 	memoryColumn        = "Memory GiB"
 	savingsColumn       = "Savings over On-Demand"
@@ -1214,7 +1221,11 @@ func recommendCommand(action cli.ActionFunc) *cli.Command {
 				Name:  flagRefresh,
 				Usage: refreshFlagUsage,
 			},
-			&cli.StringFlag{Name: flagOutput, Usage: "format output: table|json", Value: defaultOutput},
+			&cli.StringFlag{
+				Name:  flagOutput,
+				Usage: "format output: " + strings.Join(recommendOutputFormats, "|"),
+				Value: defaultOutput,
+			},
 			gcpBillingKeyFlag(),
 		}, append(liveRiskFlags(), scoreFlags()...)...),
 	}

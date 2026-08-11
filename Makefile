@@ -59,7 +59,7 @@ export CGO_ENABLED=0
 
 .PHONY: all build test test-verbose test-race test-coverage lint fmt clean help version
 .PHONY: update-data update-price update-gcp-data update-azure-data refresh-manifests verify-data check-deps setup-tools release mocks hooks
-.PHONY: verify-architecture-rules verify-architecture
+.PHONY: verify-architecture-rules verify-architecture validate-clouds
 
 # Default target
 all: build
@@ -89,6 +89,22 @@ test-verbose:
 test-race:
 	@echo "Running tests with race detector..."
 	@CGO_ENABLED=1 go test -race ./...
+
+# The live cloud checks. Deliberately separate from `test`, and deliberately
+# absent from every workflow that gates a merge: these reach real vendor
+# endpoints — the AWS Spot feeds, the anonymous Azure Retail Prices API, and the
+# GCP Cloud Billing Catalog API when a key is present — and a merge gate that
+# depends on a third party fails for reasons the change did not cause.
+#
+# Everything in cmd/spotinfo/validate_clouds_test.go skips without
+# SPOTINFO_VALIDATE_CLOUDS, so `make test` compiles the file and runs none of
+# it. TestValidateCloudsIsNotAMergeGate asserts that separation from inside the
+# ordinary suite.
+#
+# -count=1 because a cached pass would report a live check nobody made.
+validate-clouds:
+	@echo "Validating against live cloud endpoints (this reaches the network)..."
+	@SPOTINFO_VALIDATE_CLOUDS=1 go test ./cmd/spotinfo/ -run 'TestValidate' -count=1 -v
 
 test-coverage:
 	@echo "Running tests with coverage..."

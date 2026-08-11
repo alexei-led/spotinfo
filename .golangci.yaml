@@ -90,6 +90,13 @@ linters:
             - golang.org/x/oauth2
             - github.com/aws/aws-sdk-go-v2
             - github.com/aws/smithy-go
+            # JSON Schema validator, tests only. It validates the documents the
+            # built binary prints against the contract files in
+            # docs/plans/contracts/, which is what makes a schema edit that
+            # outruns the code fail in cmd/spotinfo rather than in a consumer.
+            # Already in the module graph through mcp-go, so it costs the
+            # shipped binary nothing — no non-test file imports it.
+            - github.com/santhosh-tekuri/jsonschema/v6
             - github.com/jedib0t/go-pretty/v6/table
             - github.com/jedib0t/go-pretty/v6/text
     testifylint:

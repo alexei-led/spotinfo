@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -657,4 +658,91 @@ func TestDedupePreservesOrderAndDropsRepeats(t *testing.T) {
 			assert.Equal(t, tc.want, dedupe(tc.in))
 		})
 	}
+}
+
+// Two identical acquisitions must return identical rows in identical order.
+//
+// They did not. None of the comparators in sortAdvices is a total order — every
+// row in the same interruption bucket ties — and both the region list and the
+// per-region advice arrived from a Go map, so `sort.Sort` reordered the ties on
+// every run and `spotinfo list --offline` printed a different page each time.
+// The renderers were never the cause, which is why this test lives here.
+//
+// Repeated because Go randomises map iteration per range statement: one pair of
+// runs can agree by chance, twenty cannot.
+func TestGetSpotSavingsReturnsTheSameOrderEveryRun(t *testing.T) {
+	t.Parallel()
+
+	// Two interruption buckets across three regions: eighteen rows, twelve of
+	// them tied with something else. A page of nothing but ties would not
+	// discriminate — Go's unstable sort leaves an already-sorted run alone —
+	// and a page of nothing but distinct keys would not either.
+	advice := map[string]spotAdvice{
+		"c5.large": {Range: 0, Savings: 60}, "c6i.large": {Range: 1, Savings: 45},
+		"m5.large": {Range: 0, Savings: 50}, "m6i.large": {Range: 1, Savings: 70},
+		"r5.large": {Range: 0, Savings: 55}, "t3.large": {Range: 1, Savings: 65},
+	}
+
+	regions := []string{"us-east-1", "eu-west-1", "ap-south-1"}
+
+	answer := func() []Advice {
+		advisor := newMockadvisorProvider(t)
+		pricing := newMockpricingProvider(t)
+
+		advisor.EXPECT().getRegions().Return(regions).Once()
+		advisor.EXPECT().getRegionAdvice(mock.Anything, osLinux).Return(advice, nil).Times(len(regions))
+		advisor.EXPECT().getInstanceType(mock.Anything).Return(TypeInfo{Cores: 2, RAM: 8.0}, nil).Maybe()
+		advisor.EXPECT().getRange(0).Return(Range{Label: "<5%", Min: 0, Max: 5}, nil).Maybe()
+		advisor.EXPECT().getRange(1).Return(Range{Label: "5-10%", Min: 5, Max: 10}, nil).Maybe()
+		pricing.EXPECT().getSpotPrice(mock.Anything, mock.Anything, osLinux).Return(0.05, nil).Maybe()
+
+		client := NewWithProviders(advisor, pricing)
+		client.SetLivePriceProvider(nil)
+
+		got, err := client.GetSpotSavings(t.Context(), WithRegions([]string{allRegionsKeyword}))
+		require.NoError(t, err)
+		require.Len(t, got, len(regions)*len(advice))
+
+		return got
+	}
+
+	first := answer()
+
+	// The full page, written out. Regions are visited in the order the advisor
+	// lists them, each region's rows come out in machine-name order, and the
+	// stable sort by interruption range keeps both among the rows it ties — so
+	// the page is decided by its inputs rather than by map iteration or by
+	// whichever permutation pdqsort happens to leave.
+	where := make([]string, 0, len(first))
+	for _, row := range first {
+		where = append(where, row.Region+"/"+row.Instance)
+	}
+
+	assert.Equal(t, []string{
+		"us-east-1/c5.large", "us-east-1/m5.large", "us-east-1/r5.large",
+		"eu-west-1/c5.large", "eu-west-1/m5.large", "eu-west-1/r5.large",
+		"ap-south-1/c5.large", "ap-south-1/m5.large", "ap-south-1/r5.large",
+		"us-east-1/c6i.large", "us-east-1/m6i.large", "us-east-1/t3.large",
+		"eu-west-1/c6i.large", "eu-west-1/m6i.large", "eu-west-1/t3.large",
+		"ap-south-1/c6i.large", "ap-south-1/m6i.large", "ap-south-1/t3.large",
+	}, where)
+
+	for run := range 20 {
+		assert.Equal(t, first, answer(), "run %d returned a different page", run+2)
+	}
+}
+
+// The region list is part of the answer's order: `--region all` walks it and
+// appends each region's rows in turn.
+func TestGetRegionsIsSorted(t *testing.T) {
+	t.Parallel()
+
+	provider := &defaultAdvisorProvider{data: &advisorData{Regions: map[string]osTypes{
+		"us-east-1": {}, "ap-south-1": {}, "eu-west-1": {}, "ca-central-1": {},
+	}}}
+	// Consume the once so loadData answers from the fixture above instead of
+	// fetching. Without it this test reaches AWS.
+	provider.once.Do(func() {})
+
+	assert.Equal(t, []string{"ap-south-1", "ca-central-1", "eu-west-1", "us-east-1"}, provider.getRegions())
 }

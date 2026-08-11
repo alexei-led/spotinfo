@@ -3,7 +3,9 @@ package spot
 import (
 	"context"
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -273,8 +275,16 @@ func (c *Client) GetSpotSavings(ctx context.Context, opts ...GetSpotSavingsOptio
 			return nil, err
 		}
 
-		// Process each instance type
-		for instance, adv := range advices {
+		// Process each instance type, in name order.
+		//
+		// Ranging over the map directly made the whole answer irreproducible:
+		// the sort in sortAdvices is not a total order — every AWS row in the
+		// same interruption bucket ties — so ties kept whatever order the map
+		// enumerated, and two identical `--offline` invocations printed
+		// different pages. Sorting the keys costs one allocation per region and
+		// fixes the input order, which the stable sort then preserves.
+		for _, instance := range slices.Sorted(maps.Keys(advices)) {
+			adv := advices[instance]
 			// Match instance type pattern
 			if cfg.pattern != "" {
 				matched, err := regexp.MatchString(cfg.pattern, instance)
@@ -409,15 +419,17 @@ func (p *defaultAdvisorProvider) dataOrigin() feedOrigin {
 	return p.origin
 }
 
+// getRegions lists every region the advisor document describes, in name order.
+//
+// The order is part of the answer: `--region all` walks this slice and appends
+// each region's rows in turn, so an unsorted list made the page a caller sees
+// depend on Go's map iteration.
 func (p *defaultAdvisorProvider) getRegions() []string {
 	if err := p.loadData(); err != nil {
 		return nil
 	}
-	regions := make([]string, 0, len(p.data.Regions))
-	for k := range p.data.Regions {
-		regions = append(regions, k)
-	}
-	return regions
+
+	return slices.Sorted(maps.Keys(p.data.Regions))
 }
 
 func (p *defaultAdvisorProvider) getRegionAdvice(region, os string) (map[string]spotAdvice, error) {

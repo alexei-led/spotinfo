@@ -139,7 +139,13 @@ func sortAdvices(advices []Advice, sortBy SortBy, sortDesc bool) {
 		data = sort.Reverse(data)
 	}
 
-	sort.Sort(data)
+	// Stable, not sort.Sort: none of the comparators above is a total order —
+	// every row in the same interruption bucket, at the same price or in the
+	// same region ties. Byte-identical runs come from the acquisition loop
+	// feeding rows in region and machine-name order; stability is what makes
+	// that order survive the sort, so ties read as "by region, then by name"
+	// instead of as whichever permutation pdqsort left them in.
+	sort.Stable(data)
 }
 
 // filterByMinScore filters advices to only include those with a minimum region score.

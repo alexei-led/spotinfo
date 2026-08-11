@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,8 +31,8 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, registry provid
 	}
 
 	outputFormat := lineageString(ctx, flagOutput)
-	if outputFormat != outputTable && outputFormat != outputJSON {
-		return fmt.Errorf("%w: output must be table or json", cloud.ErrInvalidArgument)
+	if err := validateRecommendOutput(outputFormat); err != nil {
+		return err
 	}
 
 	// MaxTop is enforced here rather than in the neutral validator, which bounds
@@ -82,6 +83,34 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, registry provid
 	return execRecommend(ctx, execCtx, provider, workload,
 		cloud.SortOrder{Key: sortKey, Descending: strings.EqualFold(ctx.String(flagOrder), orderDesc)},
 		outputFormat, output)
+}
+
+// recommendOutputFormats is the --output vocabulary a ranked page can render:
+// every format `list` offers except number.
+//
+// number is the one that cannot describe a recommendation — it prints a single
+// savings percent, and a ranked page is several rows with several discounts.
+// The other four each render the same columns, so a caller can pipe a
+// recommendation into the same tools they pipe a listing into. Until this
+// landed, `recommend --output csv` was refused with "output must be table or
+// json" while the identical flag on `list` rendered a page, which made --output
+// the one flag whose accepted values depended on which command it was given on.
+var recommendOutputFormats = []string{outputText, outputJSON, outputTable, outputCSV}
+
+// validateRecommendOutput rejects a format this command cannot render, and says
+// where number lives rather than only that it is wrong.
+func validateRecommendOutput(format string) error {
+	if slices.Contains(recommendOutputFormats, format) {
+		return nil
+	}
+
+	if format == outputNumber {
+		return fmt.Errorf("%w: --%s %s belongs to `spotinfo %s`: one savings percent cannot describe a ranked page",
+			cloud.ErrInvalidArgument, flagOutput, outputNumber, listCommandName)
+	}
+
+	return fmt.Errorf("%w: unknown output format %q, want one of %s",
+		cloud.ErrInvalidArgument, format, strings.Join(recommendOutputFormats, "|"))
 }
 
 // requireRecommendFlags rejects a request that omits one of the three
@@ -381,11 +410,175 @@ func execRecommend(ctx *cli.Context, execCtx context.Context, provider cloud.Pro
 		return err
 	}
 
-	if outputFormat == outputTable {
+	return renderRecommendation(outputFormat, report, output)
+}
+
+// renderRecommendation writes the ranked page in the requested format.
+//
+// Only the JSON form carries the request echo, the ranking policy and the
+// provenance: it is the document a program reads, which is why it takes the
+// whole report where the three rendered formats take the rows.
+func renderRecommendation(format string, report *cloud.RecommendReport, output io.Writer) error {
+	switch format {
+	case outputTable:
 		return writeNeutralRecommendationTable(report.Recommendations, output)
+	case outputText:
+		return writeRecommendationText(report.Recommendations, output)
+	case outputCSV:
+		return writeRecommendationCSV(report.Recommendations, output)
+	case outputJSON:
+		return writeJSONReport(report, output)
+	default:
+		// Unreachable: validateRecommendOutput rejects an unknown format before
+		// any acquisition. Kept so a format added to the vocabulary and not here
+		// fails loudly instead of silently printing nothing.
+		return fmt.Errorf("%w: unsupported output format %q", cloud.ErrInvalidArgument, format)
+	}
+}
+
+// recommendationColumn pairs the heading the csv form prints with the key the
+// text form prints.
+//
+// The keys are the wire field names of spotinfo.recommend/v3 rather than the
+// headings lower-cased: "USD/Hour" is a good column title and a poor shell
+// variable, and a caller who already reads the JSON document should not have to
+// learn a second spelling for the same value.
+type recommendationColumn struct{ heading, key string }
+
+// The ranked page's wire field names, from spotinfo.recommend/v3. They are
+// constants because they are a published vocabulary: the text form prints them
+// as keys and the JSON document as field names, and the two must not drift.
+const (
+	keyRank           = "rank"
+	keyArchitecture   = "architecture"
+	keyVCPU           = "vcpu"
+	keyMemoryGiB      = "memory_gib"
+	keySpotUSDPerHour = "spot_usd_per_hour"
+	keySavingsPercent = "savings_percent"
+	keyRisk           = "risk"
+	keyRationaleCodes = "rationale_codes"
+)
+
+// recommendationColumns is the ranked page's column set for the two formats that
+// label their values. The placement column is appended when the page carries
+// one, so a recommendation that asked for no placement figure has no empty
+// column in either format — the same rule the table follows.
+var recommendationColumns = []recommendationColumn{
+	{heading: rankColumn, key: keyRank},
+	{heading: cloudColumn, key: flagCloud},
+	{heading: regionColumn, key: flagRegion},
+	{heading: machineColumn, key: flagMachine},
+	{heading: architectureColumn, key: keyArchitecture},
+	{heading: vCPUColumn, key: keyVCPU},
+	{heading: memoryColumn, key: keyMemoryGiB},
+	{heading: priceColumn, key: keySpotUSDPerHour},
+	{heading: savingsColumn, key: keySavingsPercent},
+	{heading: riskColumn, key: keyRisk},
+	{heading: whyColumn, key: keyRationaleCodes},
+}
+
+// recommendationCells renders one row's values, in recommendationColumns order.
+//
+// The two machine-readable formats publish the amount and the discount as the
+// report does — the full fixed-point price string and a bare percent — rather
+// than the table's truncated and suffixed cells. A person reads a column width;
+// a program reads the number. An absent figure prints absentValue, never a
+// zero: a price nobody published is not a price of zero.
+func recommendationCells(recommendation *cloud.RecommendationDTO) []string {
+	price := absentValue
+	if recommendation.SpotUSDPerHour != nil {
+		price = *recommendation.SpotUSDPerHour
 	}
 
-	return writeJSONReport(report, output)
+	savings := absentValue
+	if recommendation.SavingsPercent != nil {
+		savings = strconv.FormatFloat(*recommendation.SavingsPercent, 'f', -1, 64)
+	}
+
+	return []string{
+		strconv.Itoa(recommendation.Rank), string(recommendation.Cloud),
+		string(recommendation.Region), string(recommendation.Machine), string(recommendation.Architecture),
+		strconv.Itoa(recommendation.VCPU),
+		strconv.FormatFloat(recommendation.MemoryGiB, 'f', -1, 64),
+		price, savings, riskDisplay(&recommendation.Risk),
+		// Space-separated, not comma-separated: the csv form would otherwise
+		// quote every row's last field for a list that is one value to a reader.
+		strings.Join(recommendation.RationaleCodes, " "),
+	}
+}
+
+// writeRecommendationText prints one key=value line per ranked row, the shape
+// `list` already prints: a page a shell filters with grep and cut.
+func writeRecommendationText(recommendations []cloud.RecommendationDTO, output io.Writer) error {
+	columns, rows := recommendationRows(recommendations)
+
+	for _, row := range rows {
+		pairs := make([]string, len(row))
+		for i, value := range row {
+			pairs[i] = columns[i].key + "=" + value
+		}
+
+		if _, err := fmt.Fprintln(output, strings.Join(pairs, ", ")); err != nil {
+			return fmt.Errorf("write recommendation output: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// writeRecommendationCSV prints the ranked page as comma-separated rows with a
+// header, for a spreadsheet or a script.
+func writeRecommendationCSV(recommendations []cloud.RecommendationDTO, output io.Writer) error {
+	columns, rows := recommendationRows(recommendations)
+
+	headings := make([]string, len(columns))
+	for i, column := range columns {
+		headings[i] = column.heading
+	}
+
+	writer := csv.NewWriter(output)
+	if err := writer.Write(headings); err != nil {
+		return fmt.Errorf("write recommendation output: %w", err)
+	}
+
+	if err := writer.WriteAll(rows); err != nil {
+		return fmt.Errorf("write recommendation output: %w", err)
+	}
+
+	return nil
+}
+
+// recommendationRows builds the columns and the cells both label-bearing formats
+// share, so text and csv cannot drift apart.
+func recommendationRows(recommendations []cloud.RecommendationDTO) (columns []recommendationColumn, rows [][]string) {
+	placement := placementColumn(recommendations)
+
+	columns = slices.Clone(recommendationColumns)
+	if placement.width > 0 {
+		columns = append(columns, recommendationColumn{heading: placement.title, key: placementKey(placement.title)})
+	}
+
+	rows = make([][]string, 0, len(recommendations))
+
+	for i := range recommendations {
+		cells := recommendationCells(&recommendations[i])
+		if placement.width > 0 {
+			cells = append(cells, placement.cells[i])
+		}
+
+		rows = append(rows, cells)
+	}
+
+	return columns, rows
+}
+
+// placementKey turns a placement column heading into a text-form key:
+// "Placement Score" becomes placement_score, "Obtainability" obtainability. The
+// measurement stays in the name on purpose — an AWS score is an integer 1-10
+// and a GCP obtainability a probability, and one key for both would tell a
+// reader they are the same number.
+func placementKey(title string) string {
+	return strings.ReplaceAll(strings.ToLower(title), " ", "_")
 }
 
 // neutralRecommendRequest maps CLI flags onto the neutral request. Values
