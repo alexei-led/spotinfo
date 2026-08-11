@@ -604,7 +604,7 @@ Required: none. Returns `spotinfo.list/v1`.
 | `max_price`      | number          | —         | `exclusiveMinimum: 0`                                    |
 | `sort`           | string          | —         | `machine`, `price`, `region`, `risk`, `savings`, `score` |
 | `order`          | string          | `asc`     | `asc`, `desc`                                            |
-| `offline`        | boolean         | `false`   | Answer from the committed snapshots, no request          |
+| `offline`        | boolean         | `false`   | Answer from the committed snapshots, not the feeds       |
 | `refresh`        | boolean         | `false`   | Ignore any locally cached document for this call         |
 | `with_score`     | boolean         | `false`   | Include placement figures (experimental)                 |
 | `min_score`      | integer         | —         | `0`-`10`; needs `with_score`                             |
@@ -775,8 +775,20 @@ machine=n2-standard-2, vCPU=2, memory=8GiB, saving=47%, risk='unavailable', pric
 size pages for vCPU, memory and architecture; refreshed weekly by `update-azure-data`. The
 Retail Prices API needs no credential, so an explicit region can be priced live at runtime.
 
-`offline: true` answers from the embedded snapshots and makes no request at all.
+`offline: true` answers from the embedded snapshots instead of the price feeds.
 `refresh: true` ignores any cached document for that call.
+
+**`offline` does not suppress placement enrichment.** It governs price and risk acquisition;
+a request that also asks for a placement figure still calls the provider's placement API,
+because there is no snapshot to answer that from. Measured:
+
+```console
+$ spotinfo list --offline --region us-east-1 --machine '^m5\.large$' --with-score --score-timeout 3
+spotinfo: failed to get spot savings: aws candidate acquisition: score enrichment failed: region us-east-1: spot placement scores unavailable: requires AWS credentials and the ec2:GetSpotPlacementScores permission: …
+```
+
+Combine `offline: true` with `with_score: false` — the default — for a call that reaches no
+network at all.
 
 ---
 

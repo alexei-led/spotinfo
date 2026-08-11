@@ -55,7 +55,8 @@ follow it.
   normalised onto a shared scale
 - **Live price fallback**: EC2 DescribeSpotPriceHistory for machines the static feed prices at
   zero
-- **Embedded data**: every cloud answers offline; `--offline` makes no request at all
+- **Embedded data**: every cloud answers offline. `--offline` skips the price feeds; it does
+  not suppress `--with-score`, which has no snapshot to answer from
 - **Live GCP preemption risk**: opt-in with `--live-risk`, visible but never filterable
 - **Provenance**: every answer carries source URLs, content hashes and a `live`,
   `cached` or `embedded-snapshot` mode
