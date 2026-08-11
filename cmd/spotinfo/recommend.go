@@ -211,8 +211,11 @@ func sortRecommendations(recommendations []cloud.RecommendationDTO, order cloud.
 //   - with --az, every row carries zone figures and no regional one, which is
 //     the only figure comparePlacements orders by
 //
-// It is a recommend-only rule: `list` reaches its placement capability through
-// listCapabilityRequest, which already treats a score sort as a score request.
+// Both commands apply it. `list` reaches its placement capability through
+// listCapabilityRequest, which treats a score sort as a score request — but
+// that is a capability check, not an acquisition, so it refuses only a cloud
+// that publishes no score at all. On AWS it passed and the sort then ordered by
+// a figure nothing had fetched.
 func requireScoresToSortByThem(ctx *cli.Context, key cloud.SortKey) error {
 	if key != cloud.SortByPlacementScore {
 		return nil

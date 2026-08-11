@@ -97,10 +97,21 @@ func TestListAcceptsEveryDocumentedSortAndFormat(t *testing.T) {
 
 	// Every key in both orders: the order is what decides which end of the
 	// column a caller reads first, and it was never covered.
+	//
+	// `score` carries --with-score because that is what makes the key usable at
+	// all: the sort orders placement figures, and only --with-score fetches
+	// them. Sorting by it without the fetch is refused, and
+	// TestAScoreSortWithoutTheFetchThatFillsItIsRefusedOnList owns that half —
+	// so this sweep still proves the whole vocabulary is accepted when asked
+	// for properly, rather than quietly dropping the one key with a companion.
 	for _, sortBy := range sortKeyNames() {
 		for _, order := range []string{orderAsc, orderDesc} {
 			t.Run("sort/"+sortBy+"/"+order, func(t *testing.T) {
-				run(t, "--sort", sortBy, "--order", order, "--machine", "m5.large")
+				args := []string{"--sort", sortBy, "--order", order, "--machine", "m5.large"}
+				if sortBy == sortScore {
+					args = append(args, "--"+flagWithScore)
+				}
+				run(t, args...)
 			})
 		}
 	}

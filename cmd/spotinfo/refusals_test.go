@@ -196,6 +196,22 @@ func TestACloudThatPublishesNoPlacementScoreSaysSo(t *testing.T) {
 	assert.NotContains(t, err.Error(), "subscription")
 }
 
+// `list --sort score` without --with-score ordered nothing and exited 0 on AWS,
+// the one cloud the capability check waves through: listCapabilityRequest asks
+// for CapabilityPlacementScore, which AWS has, and having it is not the same as
+// having fetched it. Measured before the fix at exit 0 over 31,009 rows in
+// default order, with no placement column rendered.
+//
+// The clouds that publish no regional score are covered by the test above and
+// refuse earlier, on the capability. This is the gap between the two.
+func TestAScoreSortWithoutTheFetchThatFillsItIsRefusedOnList(t *testing.T) {
+	_, err := runListWith(t, refusalRegistry(cloud.ProviderAWS), stubSavingsClient{},
+		"--cloud", string(cloud.ProviderAWS), "--"+flagSort, sortScore)
+
+	require.ErrorIs(t, err, cloud.ErrInvalidArgument)
+	assert.Contains(t, err.Error(), "--"+flagWithScore)
+}
+
 // An exported GOOGLE_CLOUD_PROJECT is ambient: it is set on most machines that
 // touch GCP at all, and it is not a request. Refusing --gcp-project off GCP must
 // therefore refuse what the caller named, not what the shell happened to carry —

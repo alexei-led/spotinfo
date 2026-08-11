@@ -160,6 +160,21 @@ func execListCmd(ctx *cli.Context, execCtx context.Context,
 		return err
 	}
 
+	// The same companion rule `recommend` applies, and for the same reason:
+	// listCapabilityRequest turns a score sort into a placement *capability*
+	// request, and having the capability is not the same as having fetched it.
+	// AWS has it, so the check passed and the sort then ordered by a figure
+	// nothing acquired — measured at exit 0 over 31,009 rows in default order.
+	//
+	// Only the kind that orders a browse page gets this message. A cloud whose
+	// kind cannot order one refuses in its own Query with the reason, and
+	// "needs --with-score" would name a flag that does not help there.
+	if provider.Capabilities().PlacementKind == cloud.PlacementKindPlacementScore {
+		if invalid := requireScoresToSortByThem(ctx, sortKey); invalid != nil {
+			return invalid
+		}
+	}
+
 	return answerList(ctx, execCtx, provider, sortKey, output)
 }
 
