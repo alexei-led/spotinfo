@@ -1,545 +1,231 @@
 # API Reference
 
-This document provides complete technical specifications for the `spotinfo` MCP server tools.
+This document specifies the JSON documents `spotinfo` publishes, and the MCP tools that
+serve them.
 
-## Overview
+It covers both surfaces at once, because both emit the same documents.
+`spotinfo list --output json` and the MCP tool `list_spot_machines` return the same
+`spotinfo.list/v1` payload for the same question — the same keys and the same values, not
+merely a similar shape. Only the framing differs: the CLI pretty-prints to stdout, the tool
+returns a compact document in one text content item.
+`spotinfo recommend --output json` and `recommend_spot_machines` return the same
+`spotinfo.recommend/v3`.
 
-The spotinfo MCP server exposes three tools:
+Two things are reachable from the CLI only: a ranked page's placement figures
+(`--with-score`) and live GCP preemption risk (`--live-risk`). No MCP tool declares an
+argument for either. There is no `gcp_project` or `gcp_billing_key` argument on any tool;
+on that surface both are read from the environment.
 
-- **`find_spot_instances`**: Search and filter AWS EC2 Spot Instances (v1 compatibility contract)
-- **`list_spot_regions`**: List available AWS regions for spot instances
-- **`recommend_spot_instances`**: Rank machines across clouds and return a `spotinfo.recommend/v3` payload
+## Published documents
 
-`find_spot_instances` and `list_spot_regions` are the AWS v1 contract. Their names,
-input schemas, defaults, error behaviour and response JSON are frozen; the AWS data
-they serve now reaches them through the provider-neutral seam, which does not change
-what a client sees.
+| Schema                  | Emitted by                                                        | Normative contract                                                               |
+| ----------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `spotinfo.list/v1`      | `spotinfo list --output json`, MCP `list_spot_machines`           | `docs/plans/contracts/list-v1.schema.json`                                       |
+| `spotinfo.recommend/v3` | `spotinfo recommend --output json`, MCP `recommend_spot_machines` | `docs/plans/contracts/recommend-v3-input.schema.json` and `-success.schema.json` |
+| `spotinfo.regions/v1`   | MCP `list_cloud_regions` only — no CLI command emits it           | none                                                                             |
+| `spotinfo.error/v1`     | every failing MCP tool call                                       | `docs/plans/contracts/recommend-v3-error.schema.json`                            |
 
-All tools follow the [Model Context Protocol (MCP) specification](https://modelcontextprotocol.io/) and communicate via JSON-RPC 2.0 over stdio transport.
-
-## Server Information
-
-- **Protocol Version**: `2024-11-05`
-- **Server Name**: `spotinfo`
-- **Transport**: `stdio` (Claude Desktop compatible)
-- **Capabilities**: `tools`
-
-## Tools
-
-### `find_spot_instances`
-
-Search for AWS EC2 Spot Instance options based on specified requirements.
-
-#### Description
-
-This tool searches the embedded AWS Spot Instance data and returns matching instances with pricing, savings, and interruption frequency information. It supports filtering by instance specifications, price constraints, and reliability requirements.
-
-#### Input Schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "regions": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "description": "AWS regions to search (e.g., [\"us-east-1\", \"eu-west-1\"]). Use [\"all\"] or omit to search all regions",
-      "default": ["all"],
-      "examples": [
-        ["us-east-1"],
-        ["us-east-1", "us-west-2"],
-        ["eu-west-1", "eu-central-1"],
-        ["all"]
-      ]
-    },
-    "instance_types": {
-      "type": "string",
-      "description": "Instance type pattern - exact type (e.g., 'm5.large') or pattern (e.g., 't3.*', 'm5.*')",
-      "examples": ["t3.micro", "m5.large", "t3.*", "m5.*", "r5.xlarge"]
-    },
-    "min_vcpu": {
-      "type": "number",
-      "minimum": 0,
-      "description": "Minimum number of vCPUs required",
-      "default": 0,
-      "examples": [2, 4, 8, 16]
-    },
-    "min_memory_gb": {
-      "type": "number",
-      "minimum": 0,
-      "description": "Minimum memory in gigabytes",
-      "default": 0,
-      "examples": [4, 8, 16, 32, 64]
-    },
-    "max_price_per_hour": {
-      "type": "number",
-      "minimum": 0,
-      "description": "Maximum spot price per hour in USD",
-      "default": 0,
-      "examples": [0.1, 0.5, 1.0, 2.0]
-    },
-    "max_interruption_rate": {
-      "type": "number",
-      "minimum": 0,
-      "maximum": 100,
-      "description": "Maximum acceptable interruption rate percentage (0-100)",
-      "default": 100,
-      "examples": [5, 10, 15, 20]
-    },
-    "sort_by": {
-      "type": "string",
-      "enum": ["price", "reliability", "savings", "score"],
-      "description": "Sort results by: 'price' (cheapest first), 'reliability' (lowest interruption first), 'savings' (highest savings first), 'score' (highest score first)",
-      "default": "reliability"
-    },
-    "limit": {
-      "type": "number",
-      "minimum": 1,
-      "maximum": 50,
-      "description": "Maximum number of results to return",
-      "default": 10
-    },
-    "with_score": {
-      "type": "boolean",
-      "description": "Include AWS spot placement scores (experimental)",
-      "default": false
-    },
-    "min_score": {
-      "type": "number",
-      "minimum": 0,
-      "maximum": 10,
-      "description": "Filter: minimum spot placement score (1-10)",
-      "default": 0
-    },
-    "az": {
-      "type": "boolean",
-      "description": "Request AZ-level scores instead of region-level (use with with_score)",
-      "default": false
-    },
-    "score_timeout": {
-      "type": "number",
-      "minimum": 1,
-      "maximum": 300,
-      "description": "Timeout for score enrichment in seconds",
-      "default": 30
-    }
-  },
-  "additionalProperties": false
-}
-```
-
-#### Output Schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "results": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "instance_type": {
-            "type": "string",
-            "description": "EC2 instance type",
-            "example": "t3.micro"
-          },
-          "region": {
-            "type": "string",
-            "description": "AWS region code",
-            "example": "us-east-1"
-          },
-          "spot_price_per_hour": {
-            "type": "number",
-            "description": "Current spot price per hour in USD",
-            "example": 0.0104
-          },
-          "spot_price": {
-            "type": "string",
-            "description": "Formatted spot price with currency",
-            "example": "$0.0104/hour"
-          },
-          "savings_percentage": {
-            "type": "number",
-            "description": "Savings compared to on-demand pricing as percentage",
-            "example": 68
-          },
-          "savings": {
-            "type": "string",
-            "description": "Formatted savings description",
-            "example": "68% cheaper than on-demand"
-          },
-          "interruption_rate": {
-            "type": "number",
-            "description": "Average interruption rate as percentage",
-            "example": 7.5
-          },
-          "interruption_frequency": {
-            "type": "string",
-            "description": "Interruption frequency range label",
-            "examples": ["<5%", "5-10%", "10-15%", "15-20%", ">20%"]
-          },
-          "interruption_range": {
-            "type": "string",
-            "description": "Formatted interruption range",
-            "example": "5-10%"
-          },
-          "vcpu": {
-            "type": "number",
-            "description": "Number of virtual CPUs",
-            "example": 1
-          },
-          "memory_gb": {
-            "type": "number",
-            "description": "Memory in gigabytes",
-            "example": 1.0
-          },
-          "specs": {
-            "type": "string",
-            "description": "Formatted instance specifications",
-            "example": "1 vCPU, 1 GB RAM"
-          },
-          "reliability_score": {
-            "type": "number",
-            "description": "Calculated reliability score (100 - interruption_rate)",
-            "example": 92
-          },
-          "region_score": {
-            "type": "number",
-            "description": "AWS spot placement score for the region (1-10, higher is better)",
-            "example": 8
-          },
-          "zone_scores": {
-            "type": "object",
-            "description": "AWS spot placement scores by availability zone (1-10, higher is better)",
-            "example": {
-              "us-east-1a": 9,
-              "us-east-1b": 7,
-              "us-east-1c": 8
-            }
-          },
-          "score_fetched_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "Timestamp when scores were fetched from AWS API",
-            "example": "2024-01-15T10:30:00Z"
-          }
-        },
-        "required": [
-          "instance_type",
-          "region",
-          "spot_price_per_hour",
-          "spot_price",
-          "savings_percentage",
-          "savings",
-          "interruption_rate",
-          "interruption_frequency",
-          "interruption_range",
-          "vcpu",
-          "memory_gb",
-          "specs",
-          "reliability_score"
-        ]
-      }
-    },
-    "metadata": {
-      "type": "object",
-      "properties": {
-        "total_results": {
-          "type": "number",
-          "description": "Number of results returned"
-        },
-        "regions_searched": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "List of regions that were searched"
-        },
-        "query_time_ms": {
-          "type": "number",
-          "description": "Query execution time in milliseconds"
-        },
-        "data_source": {
-          "type": "string",
-          "description": "Where the answer came from: the embedded snapshot, or a live AWS API call",
-          "enum": ["embedded", "aws"]
-        },
-        "data_freshness": {
-          "type": "string",
-          "description": "Freshness the source can honestly claim, derived from it rather than asserted",
-          "enum": ["embedded-snapshot", "live", "cached"]
-        }
-      },
-      "required": [
-        "total_results",
-        "regions_searched",
-        "query_time_ms",
-        "data_source",
-        "data_freshness"
-      ]
-    }
-  },
-  "required": ["results", "metadata"]
-}
-```
-
-#### Example Requests
-
-##### Basic Search
-
-```json
-{
-  "name": "find_spot_instances",
-  "arguments": {
-    "instance_types": "t3.micro",
-    "regions": ["us-east-1"]
-  }
-}
-```
-
-##### Advanced Filtering
-
-```json
-{
-  "name": "find_spot_instances",
-  "arguments": {
-    "instance_types": "m5.*",
-    "min_vcpu": 4,
-    "min_memory_gb": 16,
-    "max_price_per_hour": 0.5,
-    "max_interruption_rate": 10,
-    "sort_by": "price",
-    "limit": 5
-  }
-}
-```
-
-##### Global Search
-
-```json
-{
-  "name": "find_spot_instances",
-  "arguments": {
-    "instance_types": "r5.xlarge",
-    "regions": ["all"],
-    "sort_by": "reliability",
-    "limit": 10
-  }
-}
-```
-
-#### Example Response
-
-```json
-{
-  "results": [
-    {
-      "instance_type": "t3.micro",
-      "region": "us-east-1",
-      "spot_price_per_hour": 0.0104,
-      "spot_price": "$0.0104/hour",
-      "savings_percentage": 68,
-      "savings": "68% cheaper than on-demand",
-      "interruption_rate": 7.5,
-      "interruption_frequency": "5-10%",
-      "interruption_range": "5-10%",
-      "vcpu": 1,
-      "memory_gb": 1.0,
-      "specs": "1 vCPU, 1 GB RAM",
-      "reliability_score": 92
-    }
-  ],
-  "metadata": {
-    "total_results": 1,
-    "regions_searched": ["us-east-1"],
-    "query_time_ms": 45,
-    "data_source": "embedded",
-    "data_freshness": "embedded-snapshot"
-  }
-}
-```
-
----
-
-### `list_spot_regions`
-
-List all AWS regions where EC2 Spot Instances are available.
-
-#### Description
-
-This tool returns a list of all AWS regions that have spot instance data available. The list is dynamically generated from the embedded spot instance data.
-
-#### Input Schema
-
-```json
-{
-  "type": "object",
-  "properties": {},
-  "additionalProperties": false
-}
-```
-
-#### Output Schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "regions": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "description": "Array of AWS region codes"
-    },
-    "total": {
-      "type": "number",
-      "description": "Total number of available regions"
-    }
-  },
-  "required": ["regions", "total"]
-}
-```
-
-#### Example Request
-
-```json
-{
-  "name": "list_spot_regions",
-  "arguments": {}
-}
-```
-
-#### Example Response
-
-```json
-{
-  "regions": [
-    "ap-northeast-1",
-    "ap-northeast-2",
-    "ap-south-1",
-    "ap-southeast-1",
-    "ap-southeast-2",
-    "ca-central-1",
-    "eu-central-1",
-    "eu-north-1",
-    "eu-west-1",
-    "eu-west-2",
-    "eu-west-3",
-    "sa-east-1",
-    "us-east-1",
-    "us-east-2",
-    "us-west-1",
-    "us-west-2"
-  ],
-  "total": 16
-}
-```
-
----
-
-### `recommend_spot_instances`
-
-Rank Spot machines from committed multi-cloud data and return the provider-neutral
-`spotinfo.recommend/v3` payload. It is the only recommendation document: the AWS-only
-`spotinfo.recommend/v1` shape, and the workload that used to select between the two, are
-retired.
-
-#### Description
-
-The tool validates the request, checks that the selected cloud can answer it, acquires
-candidates, and ranks the survivors. Every failure happens before acquisition except an
-acquisition error and an empty candidate set. No error result carries partial
-recommendations.
-
-A source's `content_sha256` is null when the reviewed document was not fetched as
-stable bytes. The field is never filled with the derived snapshot hash.
-
-Normative machine-readable contracts:
-
-- `docs/plans/contracts/recommend-v3-input.schema.json`
-- `docs/plans/contracts/recommend-v3-success.schema.json`
-- `docs/plans/contracts/recommend-v3-error.schema.json`
+`spotinfo.recommend/v1` and `spotinfo.recommend/v2` are retired. Nothing in this binary
+emits either.
 
 The schema files control types, required fields, defaults, nullability, formats and
-`additionalProperties`. `internal/mcp/recommend_test.go` validates real payloads against
-them.
+`additionalProperties`; this page is prose around them. `internal/mcp/jsonschema_test.go`
+validates real payloads against the contract directory, and `internal/cloud/schema_test.go`
+reads `recommend-v3-success.schema.json` directly, so a document that drifts from its schema
+fails a test rather than a consumer.
 
-#### Input Schema
+`spotinfo.regions/v1` has no contract file. It is validated by its Go tests only.
 
-```json
+### A note on `<` and `>` in JSON
+
+Go's `encoding/json` escapes both characters into their six-character Unicode escape form,
+so an AWS risk label leaves the binary escaped and decodes to `<5%` or `>20%`. Every JSON
+parser handles it. The examples below show the decoded form, which is what a client sees;
+a raw byte-for-byte capture of stdout shows the escapes.
+
+---
+
+## `spotinfo.list/v1`
+
+A browse answer. It states what is there; it does not rank.
+
+An empty match is **not** an error: `status` stays `"ok"`, `candidates` is `[]`, and the CLI
+exits 0.
+
+```console
+$ spotinfo list --offline --region us-east-1 --machine '^m5\.large$' --output json
 {
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["architecture", "min_vcpu", "min_memory_gib"],
-  "properties": {
-    "cloud": {
-      "type": "string",
-      "enum": ["aws", "gcp", "azure"],
-      "default": "aws"
-    },
-    "regions": {
-      "type": "array",
-      "items": { "type": "string" },
-      "default": ["all"]
-    },
-    "machine": { "type": "string", "default": "" },
-    "architecture": { "type": "string", "enum": ["x86_64", "arm64"] },
-    "os": {
-      "type": "string",
-      "enum": ["linux", "windows"],
-      "default": "linux"
-    },
-    "min_vcpu": { "type": "integer", "minimum": 1 },
-    "min_memory_gib": { "type": "number", "exclusiveMinimum": 0 },
-    "max_price": { "type": "number", "exclusiveMinimum": 0 },
-    "workload": {
-      "type": "string",
-      "enum": ["cost", "web", "ci", "batch"],
-      "default": "cost"
-    },
-    "top": { "type": "integer", "minimum": 1, "maximum": 50, "default": 3 }
-  }
+  "schema_version": "spotinfo.list/v1",
+  "status": "ok",
+  "request": {
+    "cloud": "aws",
+    "regions": [
+      "us-east-1"
+    ],
+    "machine": "^m5\\.large$",
+    "architecture": "",
+    "os": "linux",
+    "min_vcpu": 0,
+    "min_memory_gib": 0,
+    "max_price": null,
+    "sort": "",
+    "order": "asc"
+  },
+  "data_source": {
+    "provider": "aws",
+    "mode": "embedded-snapshot",
+    "sources": [
+      {
+        "url": "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json",
+        "fetched_at": "2026-08-10T06:54:02Z",
+        "observed_at": null,
+        "content_sha256": "158f404cca4a5167a2a035cbd952de8f1886bb14c8cdbc2a55f4871c33735f1a",
+        "parser_version": "aws-spot-advisor-json/1",
+        "schema_version": "aws.spot-advisor-feed/v1"
+      },
+      {
+        "url": "https://website.spot.ec2.aws.a2z.com/spot.json",
+        "fetched_at": "2026-08-10T06:54:02Z",
+        "observed_at": null,
+        "content_sha256": "cafdfff877df03265127b0b7615b92de79bc4e53b20eef3f2bb37181160fdbee",
+        "parser_version": "aws-spot-price-json/1",
+        "schema_version": "aws.spot-price-feed/v1"
+      },
+      {
+        "url": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-types.html",
+        "fetched_at": "2026-08-06T00:00:00Z",
+        "observed_at": null,
+        "content_sha256": null,
+        "parser_version": "aws-architecture-snapshot/1",
+        "schema_version": "aws.architecture-snapshot/v1"
+      }
+    ],
+    "sources_omitted": 0
+  },
+  "candidates": [
+    {
+      "cloud": "aws",
+      "region": "us-east-1",
+      "machine": "m5.large",
+      "architecture": "x86_64",
+      "os": "linux",
+      "vcpu": 2,
+      "memory_gib": 8,
+      "spot_usd_per_hour": "0.039900000",
+      "on_demand_usd_per_hour": null,
+      "savings_percent": 59,
+      "risk": {
+        "status": "available",
+        "kind": "interruption_bucket",
+        "label": ">20%",
+        "min_percent": 23,
+        "max_percent": 100,
+        "window_days": 30,
+        "source_url": "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json",
+        "observed_at": null
+      },
+      "live_price": false
+    }
+  ],
+  "warnings": []
 }
 ```
 
-- Omitted `machine` means no machine-name filter; omitted `max_price` means no
-  price ceiling.
-- `regions: ["all"]` selects every region the provider publishes and cannot be combined
-  with explicit regions. It is also the default, so an omitted `regions` searches every
-  region of the selected cloud. (The CLI differs: its `--region` default is the AWS region
-  name `us-east-1`, which on a non-AWS cloud is treated as unset and expands to `all`.)
-- `cost` makes **no** interruption claim. Ranking is by price, excess vCPU, excess memory, region, and machine, for every cloud and every workload. `web`, `ci` and `batch`
-  admit only a risk bucket whose **maximum** is at most 5%, 16% and 22% respectively. On
-  AWS the reachable Advisor buckets make those effective ceilings 5%, 15% and 20%. All
-  three require a cloud that publishes risk; asking for one on a cloud that does not
-  returns `UNSUPPORTED_CAPABILITY` before acquisition.
+### `request`
 
-**GCP capability constraints:**
+The echo of what was asked, after defaults. Always these ten keys.
 
-- Region: `us-central1` only. Any other explicit region returns `NO_CANDIDATES`.
-- OS: `linux` only. `os: "windows"` returns `UNSUPPORTED_CAPABILITY`.
-- Workload: `cost` only. `web`, `ci`, `batch` return `UNSUPPORTED_CAPABILITY`.
-- Risk: always `status: "unavailable"`. GCP preemption history is not in the public pricing feed.
-- Architectures: `x86_64` and `arm64` (arm series: `c4a`, `n4a`, `t2a`).
-- The root query command (`find_spot_instances`, `list_spot_regions`) is AWS-only.
+| Key              | Type                | Notes                                          |
+| ---------------- | ------------------- | ---------------------------------------------- |
+| `cloud`          | `aws\|gcp\|azure`   | Defaults to `aws`                              |
+| `regions`        | array of string     | Defaults to `["all"]` on both surfaces         |
+| `machine`        | string              | RE2 pattern; `""` means no machine-name filter |
+| `architecture`   | `""\|x86_64\|arm64` | `""` means no architecture filter              |
+| `os`             | `linux\|windows`    | Defaults to `linux`                            |
+| `min_vcpu`       | integer ≥ 0         | `0` means no floor                             |
+| `min_memory_gib` | number ≥ 0          | `0` means no floor                             |
+| `max_price`      | number or `null`    | `null` means no ceiling                        |
+| `sort`           | enum                | `""` keeps the order the cloud publishes       |
+| `order`          | `asc\|desc`         | Defaults to `asc`                              |
 
-**Azure capability constraints:**
+`sort` echoes the **neutral field name**, not the word a caller wrote. The vocabulary is
+`price`, `savings`, `risk`, `machine`, `region` and `score`; the first five echo unchanged,
+and `score` echoes as `placement_score` — the field's own name. The enum in
+`list-v1.schema.json` is the normative list.
 
-- Regions: 55, enumerated in [data-sources.md](data-sources.md#7-azure-retail-prices-api-and-microsoft-learn-vm-size-pages). Any other explicit region
-  returns `NO_CANDIDATES`.
-- OS: `linux` only. `os: "windows"` returns `UNSUPPORTED_CAPABILITY`.
-- Workload: `cost` only. `web`, `ci`, `batch` return `UNSUPPORTED_CAPABILITY`.
-- Risk: always `status: "unavailable"`. Azure eviction rates need a subscription.
-- Architectures: `x86_64` and `arm64` (arm series: `bpsv2`, `dpsv5`, `dpdsv5`, `dpsv6`, `epsv5`).
-- `machine` is the full Azure size name, for example `Standard_D2s_v5`.
+### `candidates[]`
 
-#### Success Schema
+Twelve keys are always present.
 
-A successful result has `isError=false` and a single text content item containing JSON:
+| Key                      | Type                     | Notes                                                                            |
+| ------------------------ | ------------------------ | -------------------------------------------------------------------------------- |
+| `cloud`                  | `aws\|gcp\|azure`        |                                                                                  |
+| `region`                 | string                   | The provider's own region identifier                                             |
+| `machine`                | string                   | The provider's own machine name — `m5.large`, `n2-standard-2`, `Standard_D2s_v5` |
+| `architecture`           | `""\|x86_64\|arm64`      |                                                                                  |
+| `os`                     | `linux\|windows`         |                                                                                  |
+| `vcpu`                   | integer                  |                                                                                  |
+| `memory_gib`             | number                   | GiB, not GB                                                                      |
+| `spot_usd_per_hour`      | decimal string or `null` | Exactly nine fractional digits, e.g. `"0.039900000"`                             |
+| `on_demand_usd_per_hour` | decimal string or `null` | `null` on AWS, which publishes no on-demand price in this feed                   |
+| `savings_percent`        | number or `null`         | 0-100                                                                            |
+| `risk`                   | object                   | See below; all eight keys always present                                         |
+| `live_price`             | boolean                  | `true` when the price came from a live provider API rather than a feed           |
+
+Prices are decimal **strings** so no consumer has to reconstruct an amount from a float.
+
+Optional keys appear only when the matching flag or argument asked for them:
+`zone_prices`, `region_score`, `zone_scores`, `score_fetched_at`, `region_obtainability`,
+`zone_obtainability`, `region_estimated_uptime_seconds` and `placement_status`. See
+[Placement observations](#placement-observations).
+
+### `risk`
+
+```json
+"risk": {
+  "status": "unavailable",
+  "kind": null,
+  "label": null,
+  "min_percent": null,
+  "max_percent": null,
+  "window_days": null,
+  "source_url": null,
+  "observed_at": null
+}
+```
+
+That block is exactly what every GCP and Azure candidate carries. An absent measurement is
+`null`, never `0` and never a low bucket. `status` is one of `available`, `unavailable`,
+`unsupported` or `unknown`.
+
+`kind` is `interruption_bucket` (AWS Spot Advisor), `preemption_rate` (GCP, `--live-risk`
+only) or `null`. `eviction_rate` is in the frozen enum and has no producer in this build.
+
+**Kinds from different clouds measure different things and must not be compared.** AWS
+publishes the fraction of _running_ instances interrupted over a 30-day window. Google's
+preemption rate is (preempted Spot VMs) / (Spot VMs that stopped running). That is why
+`--workload web|ci|batch`, whose ceilings are AWS Advisor bucket boundaries, is refused on
+a cloud that publishes anything else — even when the figure is present.
+
+### `warnings`
+
+Array of strings, never `null`. A degraded live path adds a warning here and still answers;
+it does not fail the call.
+
+---
+
+## `spotinfo.recommend/v3`
+
+A ranked page. Unlike `list`, an empty result is an **error** (`NO_CANDIDATES`), because a
+recommendation with nothing in it is not an answer.
+
+```console
+$ spotinfo recommend --offline --region us-east-1 --architecture x86_64 \
+    --min-vcpu 2 --min-memory-gib 4 --top 2 --output json
+```
+
+The `schema_version`, `data_source` and `warnings` blocks are identical in shape to
+`spotinfo.list/v1`. What differs:
 
 ```json
 {
@@ -552,10 +238,10 @@ A successful result has `isError=false` and a single text content item containin
     "architecture": "x86_64",
     "os": "linux",
     "min_vcpu": 2,
-    "min_memory_gib": 8,
+    "min_memory_gib": 4,
     "max_price": null,
-    "workload": "web",
-    "top": 3
+    "workload": "cost",
+    "top": 2
   },
   "ranking_policy": [
     "spot_price_ascending",
@@ -564,34 +250,19 @@ A successful result has `isError=false` and a single text content item containin
     "region_ascending",
     "machine_ascending"
   ],
-  "data_source": {
-    "provider": "aws",
-    "mode": "embedded-snapshot",
-    "sources": [
-      {
-        "url": "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json",
-        "fetched_at": "2026-08-06T08:58:27Z",
-        "observed_at": null,
-        "content_sha256": "f42df66cd52c9dc3ac28b6bb7e525627696eec60692d5cf56658c679f0012393",
-        "parser_version": "aws-spot-advisor-json/1",
-        "schema_version": "aws.spot-advisor-feed/v1"
-      }
-    ],
-    "sources_omitted": 0
-  },
   "recommendations": [
     {
       "rank": 1,
       "cloud": "aws",
       "region": "us-east-1",
-      "machine": "m6i.large",
+      "machine": "t2.medium",
       "architecture": "x86_64",
       "os": "linux",
       "vcpu": 2,
-      "memory_gib": 8,
-      "spot_usd_per_hour": "0.041600000",
+      "memory_gib": 4,
+      "spot_usd_per_hour": "0.016100000",
       "on_demand_usd_per_hour": null,
-      "savings_percent": 72,
+      "savings_percent": 62,
       "risk": {
         "status": "available",
         "kind": "interruption_bucket",
@@ -604,43 +275,101 @@ A successful result has `isError=false` and a single text content item containin
       },
       "rationale_codes": [
         "ARCHITECTURE_MATCH",
+        "COST_POLICY",
         "KNOWN_POSITIVE_PRICE",
-        "RESOURCE_MINIMUMS_MET",
-        "WORKLOAD_WEB_CAP_MET"
+        "RESOURCE_MINIMUMS_MET"
       ]
     }
-  ],
-  "warnings": []
+  ]
 }
 ```
 
-Contract notes:
+Differences from a `list` candidate:
 
-- Prices are decimal strings with exactly nine fractional digits, so no consumer has to
-  reconstruct an amount from a float.
-- An absent measurement is `null`, never `0`. A cloud that publishes no interruption data
-  reports `risk.status = "unavailable"` with every risk field null.
-- `risk.kind` is one of `interruption_bucket`, `preemption_rate` or `eviction_rate`. Kinds
-  from different clouds measure different things and must not be compared.
-- Arrays are never null. `data_source.sources` always has at least one complete entry; a
-  provider that cannot describe its provenance returns `DATA_UNAVAILABLE` instead.
-- `data_source.sources` lists the documents the published rows draw their values from,
-  not every document the snapshot was built from. Azure reads 81 — one Retail Prices
-  query per region and one Microsoft Learn page per machine series — so a three-row
-  answer would otherwise be mostly provenance for rows it does not contain.
-  `data_source.sources_omitted` counts what was read and not listed. A source whose scope
-  a provider cannot derive from its URL is always listed, so trimming can never drop the
-  provenance of a value a published row carries.
+- `request` carries `workload` and `top` instead of `sort` and `order`.
+- Each recommendation carries `rank` (1-based) and `rationale_codes`, and no `live_price`.
+- `spot_usd_per_hour` is **never** `null` here. A machine with no known positive price is
+  not rankable and does not reach the page.
+- `architecture` is never `""`, and `min_vcpu`/`min_memory_gib` are never zero: the three
+  are required.
 
-#### Error Schema
+### Input
 
-An error result has `isError=true` and a single text content item containing:
+`architecture`, `min_vcpu` and `min_memory_gib` are required on both surfaces. Omitting one
+on the CLI is refused before anything is read:
+
+```console
+$ spotinfo recommend --offline
+spotinfo: invalid argument: --architecture, --min-vcpu, --min-memory-gib are required; every recommendation needs an architecture and a size floor
+```
+
+`top` is bounded at 1..50 on **both** surfaces — the CLI applies the same bound the schema
+declares, so a payload can never contradict its own contract.
+
+### `ranking_policy`
+
+The ordering actually applied, most significant first. It is published so a consumer never
+has to infer why one row outranks another. The `cost` workload's policy is the one shown
+above; `web`, `ci` and `batch` apply the same ordering after an interruption ceiling.
+
+### `workload`
+
+`cost` makes **no** interruption claim. `web`, `ci` and `batch` admit only a risk bucket
+whose **maximum** is at most 5%, 16% and 22% respectively; on AWS the reachable Advisor
+buckets make those effective ceilings 5%, 15% and 20%.
+
+All three require a cloud that publishes an interruption frequency. Asking on one that does
+not is refused before acquisition, and the message says why:
+
+```console
+$ spotinfo recommend --cloud gcp --architecture x86_64 --min-vcpu 2 --min-memory-gib 4 --workload web
+spotinfo: gcp: unsupported capability: risk: the web workload caps interruption frequency at 5%, an AWS Spot Advisor bucket boundary, and gcp publishes no figure measured that way; workload cost applies no ceiling and answers on every cloud
+```
+
+### `rationale_codes`
+
+Non-empty and unique. The codes this build emits:
+
+| Code                     | Meaning                                                  |
+| ------------------------ | -------------------------------------------------------- |
+| `ARCHITECTURE_MATCH`     | The machine's architecture is the one that was required  |
+| `RESOURCE_MINIMUMS_MET`  | vCPU and memory floors are satisfied                     |
+| `KNOWN_POSITIVE_PRICE`   | A real Spot price was read, not a zero or an absence     |
+| `COST_POLICY`            | Ranked under `--workload cost`, which applies no ceiling |
+| `WORKLOAD_WEB_CAP_MET`   | Risk is within the `web` ceiling                         |
+| `WORKLOAD_CI_CAP_MET`    | Risk is within the `ci` ceiling                          |
+| `WORKLOAD_BATCH_CAP_MET` | Risk is within the `batch` ceiling                       |
+
+`COST_POLICY` appears only under `--workload cost`; the three `WORKLOAD_*_CAP_MET` codes
+replace it under the other three.
+
+---
+
+## `spotinfo.regions/v1`
+
+Emitted by `list_cloud_regions` and by nothing else — there is no `spotinfo regions`
+subcommand.
+
+Five top-level keys: `schema_version`, `status`, `cloud`, `regions` and `data_source`.
+`tools/call list_cloud_regions {"cloud": "gcp"}` answers with `"regions": ["us-central1"]`
+and the `data_source` block described below.
+
+Its `data_source` carries the **complete** source list of that cloud, which is what makes
+the `sources_omitted` count of a trimmed `list` or `recommend` answer resolvable. Measured
+on this build: AWS 34 regions and 3 sources, GCP 1 region and 5 sources, Azure 55 regions
+and 81 sources — all three with `sources_omitted: 0`.
+
+---
+
+## `spotinfo.error/v1`
+
+An MCP error result has `isError: true` and one text content item:
 
 ```json
 {
   "schema_version": "spotinfo.error/v1",
-  "code": "DATA_UNAVAILABLE",
-  "message": "human-readable stable summary",
+  "code": "NO_CANDIDATES",
+  "message": "no candidates: gcp publishes no machines in atlantis",
   "cloud": "gcp"
 }
 ```
@@ -656,215 +385,409 @@ An error result has `isError=true` and a single text content item containing:
 `cloud` echoes the value the caller supplied, or `null` when it could not be read. The MCP
 host rejects a `cloud` outside the input enum before the handler runs.
 
+**The CLI does not emit this document.** A CLI failure prints a plain-text line to stderr,
+prefixed with `spotinfo:`, and exits 1 — in every `--output` format, including `json`. The
+wording is the same as the `message` field:
+
+```console
+$ spotinfo recommend --offline --region us-east-1 --architecture x86_64 \
+    --min-vcpu 2 --min-memory-gib 4 --machine '^zzzz$' --output json
+spotinfo: no candidates: no machine name matches "^zzzz$"; aws publishes c3.2xlarge, c3.xlarge, c5.9xlarge, c5.metal, c5a.2xlarge, c5a.xlarge, c5n.metal, c6a.metal, and more
+```
+
+A JSON-RPC `-32602` with `tool 'X' not found` means the tool name is one of the three
+retired ones. See [Migration](#migration-from-the-retired-v1-surface).
+
 ---
 
-## Error Handling
+## Placement observations
 
-The v1 tools return standard MCP error responses when issues occur.
-`recommend_spot_instances` returns the `spotinfo.error/v1` payload documented above.
+A placement figure answers "can I actually get this machine right now", which is a different
+question from interruption risk. Two clouds publish one, and they publish two different
+measurements:
 
-### Error Response Format
+| Kind              | Cloud | Scale         | Fields                                                                          | Notes                                                                             |
+| ----------------- | ----- | ------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `placement_score` | AWS   | integer 1-10  | `region_score`, `zone_scores`, `score_fetched_at`                               | EC2 `GetSpotPlacementScores`; needs credentials and `ec2:GetSpotPlacementScores`  |
+| `obtainability`   | GCP   | float 0.0-1.0 | `region_obtainability`, `zone_obtainability`, `region_estimated_uptime_seconds` | Beta `compute advice.capacity`; needs a project and ADC; recommendation-side only |
+
+This build declares no placement kind for Azure, and `--with-score` on GCP is
+recommendation-side only. Both refusals say so:
+
+```console
+$ spotinfo list --cloud azure --with-score
+spotinfo: unsupported capability: --with-score is refused on azure: azure publishes a Spot Placement Score, but reading it needs an Azure subscription this build does not authenticate to
+
+$ spotinfo list --cloud gcp --with-score
+spotinfo: failed to get spot savings: unsupported capability: gcp obtainability is fetched for a ranked recommendation only, and needs a Google Cloud project
+```
+
+**The two kinds are deliberately not normalised onto a shared scale.** A common 1-10 would
+invent precision no vendor published: an AWS score is a decile bucket whose boundaries AWS
+does not document, and reading `--min-score 8` as "obtainability ≥ 0.8" would be this tool
+inventing a correspondence between two vendors' measurements. So the integer filter is
+refused rather than mapped, naming the cloud and the kind:
+
+```console
+$ spotinfo list --cloud gcp --with-score --min-score 5
+spotinfo: unsupported capability: --min-score is refused on gcp: gcp publishes obtainability, and an integer 1-10 floor states no reviewed mapping onto it
+```
+
+`--with-score` still answers on such a cloud. Only the filter is refused. The same rule
+governs `sort`: `--sort score` orders each kind on its own scale, and leaves a pair of
+different kinds unordered rather than ranking one measurement against another.
+
+Only the _regional_ figure orders a page. `--sort score` combined with `--az` is refused,
+because asking for one figure per zone leaves no regional figure to order by, and inventing
+a maximum or a mean across zones would publish a regional figure the provider declined to
+give.
+
+### `placement_status`
+
+Three domain states, one published value.
+
+- A figure present means the lookup ran and produced one.
+- `"placement_status": "unavailable"` means the lookup ran and produced nothing. On AWS a
+  per-region score failure is non-fatal, so one failed region among many really does yield
+  rows in this state.
+- Neither key present means nobody asked.
+
+Emitting `"available"` beside a score would say the same thing twice, so the schema declares
+the field as a single-valued enum. That is honest about what can appear there today.
+
+---
+
+## `data_source` and provenance
+
+Every answer names where its values came from. The block has exactly four keys —
+`provider`, `mode`, `sources` and `sources_omitted` — and a filled-in example is in the
+`spotinfo.list/v1` payload above.
+
+`mode` is one of:
+
+| Mode                | Meaning                                                                            |
+| ------------------- | ---------------------------------------------------------------------------------- |
+| `embedded-snapshot` | Answered from the snapshot compiled into the binary. No request was made.          |
+| `cached`            | Answered from a locally cached copy of a fetched document, not revalidated.        |
+| `live`              | Answered from the origin this run, or from a copy the origin confirmed with a 304. |
+
+`cached` exists because reporting a cached answer as `live` would be a claim about recency
+that nothing verified.
+
+Each `sources[]` entry has six keys, all required, two of them nullable:
+
+| Key              | Notes                                                                                        |
+| ---------------- | -------------------------------------------------------------------------------------------- |
+| `url`            | The exact document read                                                                      |
+| `fetched_at`     | RFC 3339                                                                                     |
+| `observed_at`    | Nullable                                                                                     |
+| `content_sha256` | 64 lowercase hex, or `null`                                                                  |
+| `parser_version` | e.g. `aws-spot-price-json/1`, `gcp-pricing-html/1`, `azure-retail-prices/2`                  |
+| `schema_version` | The **source** document's schema, e.g. `aws.spot-price-feed/v1`, `spotinfo.azure-catalog/v2` |
+
+`content_sha256` is `null` when the reviewed document was not fetched as stable bytes — the
+AWS architecture snapshot is one, its source being a documentation page rather than a
+fetched payload. The field is never filled with the derived snapshot hash, because the
+published hash has to stay verifiable by re-fetching the source. A consumer that verifies
+provenance must test the value, not the key.
+
+**Trimming.** `sources` lists the documents the published rows draw their values from, not
+every document the snapshot was built from. Azure reads 81 — one Retail Prices query per
+region and one Microsoft Learn page per machine series — so a three-row answer would
+otherwise be mostly provenance for rows it does not contain. `sources_omitted` counts what
+was read and not listed; a two-source Azure recommendation reports `79`. A source whose
+scope a provider cannot derive from its URL is always listed, so trimming can never drop the
+provenance of a value a published row carries. `list_cloud_regions` returns the untrimmed
+list.
+
+---
+
+## Per-cloud constraints
+
+[clouds.md](clouds.md) is the single source for coverage counts. What matters to an
+integrator is which requests are refused.
+
+**AWS** — the full surface. Linux and Windows, x86_64 and arm64, 34 regions, all four
+workloads, `interruption_bucket` risk on every candidate, `placement_score` behind
+credentials. `--live-risk`, `--gcp-project` and `--gcp-billing-key` are refused.
+
+**GCP** — Linux only, one snapshot region, opt-in live risk.
+
+- OS: `linux` only. `os: "windows"` returns `UNSUPPORTED_CAPABILITY`.
+- Workload: `cost` only. `web`, `ci` and `batch` return `UNSUPPORTED_CAPABILITY`.
+- Risk: `status: "unavailable"` on every candidate. `--live-risk` fetches a per-project
+  preemption rate and makes it _visible_, never filterable — see below.
+- Regions: `us-central1` in the committed snapshot. A valid `--gcp-billing-key` /
+  `SPOTINFO_GCP_BILLING_KEY` prices regions beyond it, for that invocation only; the key
+  never enters a snapshot.
+- Placement: `obtainability`, on a ranked page only, needing `--gcp-project` /
+  `GOOGLE_CLOUD_PROJECT`.
+
+**Azure** — both operating systems, no risk figure, no placement figure.
+
+- OS: `linux` **and** `windows`. Both are served, on both commands and both surfaces.
+- Workload: `cost` only.
+- Risk: `status: "unavailable"` on every candidate. Eviction rates need a subscription this
+  build does not authenticate to, and it links no Azure credential library.
+- Placement: none. `--with-score` is refused.
+- Regions: 55. `machine` is the full Azure size name, e.g. `Standard_D2s_v5`.
+
+**Unknown regions differ by command, not by cloud.** `spotinfo list` treats an unmatched
+region as an empty result — exit 0, `candidates: []`, a `WARN` on stderr — while
+`recommend` refuses:
+
+```console
+$ spotinfo recommend --cloud gcp --architecture x86_64 --min-vcpu 2 --min-memory-gib 4 --region atlantis
+spotinfo: no candidates: gcp publishes no machines in atlantis
+```
+
+On AWS the region list is validated during acquisition instead, so an unknown region is
+`region not found: atlantis` on both commands.
+
+### Live GCP preemption risk
+
+`--live-risk` calls `compute/beta advice.capacityHistory` with Application Default
+Credentials and attaches a `preemption_rate` risk to the ranked page. It is GCP-only,
+opt-in, and never enters a snapshot: the figure is per-project advisory data, so it is not
+redistributable and the GCP source contract does not name it.
+
+`preemption_rate` is deliberately **not** accepted by `--workload web|ci|batch`. Google
+measures (preempted Spots) / (Spots that stopped running); AWS measures the fraction of
+_running_ instances interrupted. Live risk makes the figure visible, not filterable, and
+that asymmetry is the point of the kind vocabulary.
+
+A failed lookup is a warning, not a refusal: the run exits 0, warns on stderr, and the page
+reports the snapshot's `risk.status` unchanged.
+
+---
+
+## MCP server
+
+- **Protocol version**: `2024-11-05`
+- **Server name**: `spotinfo`
+- **Transport**: stdio by default. `MCP_TRANSPORT=sse` with `MCP_PORT` (default `8080`)
+  selects SSE.
+- **Start**: `spotinfo --mcp`, or set `SPOTINFO_MODE=mcp` and run `spotinfo` with no
+  arguments. Both serve the same three tools.
+- **Capabilities**: `tools` (with `listChanged`) and `logging`.
+
+All three tools declare `readOnlyHint: true`, `destructiveHint: false`,
+`idempotentHint: true`, `openWorldHint: true`, and `additionalProperties: false` on their
+input schema.
+
+`--offline` is **not** a global flag and does not compose with `--mcp`. Pass the per-call
+`offline: true` argument instead.
+
+### `list_cloud_regions`
+
+Required: none.
+
+| Argument | Type   | Default | Notes                   |
+| -------- | ------ | ------- | ----------------------- |
+| `cloud`  | string | `aws`   | `aws`, `azure` or `gcp` |
+
+Returns `spotinfo.regions/v1`.
+
+### `list_spot_machines`
+
+Required: none. Returns `spotinfo.list/v1`.
+
+| Argument         | Type            | Default   | Bounds / enum                                            |
+| ---------------- | --------------- | --------- | -------------------------------------------------------- |
+| `cloud`          | string          | `aws`     | `aws`, `azure`, `gcp`                                    |
+| `regions`        | array of string | `["all"]` | `minItems: 1`, unique, each non-empty                    |
+| `machine`        | string          | `""`      | RE2 pattern                                              |
+| `architecture`   | string          | —         | `x86_64`, `arm64`; omit for no filter                    |
+| `os`             | string          | `linux`   | `linux`, `windows`                                       |
+| `min_vcpu`       | integer         | —         | `minimum: 0`                                             |
+| `min_memory_gib` | number          | —         | `minimum: 0`                                             |
+| `max_price`      | number          | —         | `exclusiveMinimum: 0`                                    |
+| `sort`           | string          | —         | `machine`, `price`, `region`, `risk`, `savings`, `score` |
+| `order`          | string          | `asc`     | `asc`, `desc`                                            |
+| `offline`        | boolean         | `false`   | Answer from the committed snapshots, no request          |
+| `refresh`        | boolean         | `false`   | Ignore any locally cached document for this call         |
+| `with_score`     | boolean         | `false`   | Include placement figures (experimental)                 |
+| `min_score`      | integer         | —         | `0`-`10`; needs `with_score`                             |
+| `az`             | boolean         | `false`   | Zone-level instead of region-level; needs `with_score`   |
+| `score_timeout`  | integer         | `30`      | `1`-`300` seconds; needs `with_score`                    |
+
+`min_score`, `az` and `score_timeout` are refused on **presence**, not on value — passing
+`min_score: 0` without `with_score` is refused too. The wording matches the CLI's, without
+the `--` prefix:
 
 ```json
 {
-  "error": {
-    "code": -32603,
-    "message": "Internal error",
-    "data": {
-      "details": "Specific error description"
-    }
-  }
+  "schema_version": "spotinfo.error/v1",
+  "code": "INVALID_ARGUMENT",
+  "message": "invalid argument: az needs with_score, which is what fetches the placement scores it splits by zone",
+  "cloud": "aws"
 }
 ```
 
-### Common Error Scenarios
+### `recommend_spot_machines`
 
-#### Invalid Parameters
+Required: `architecture`, `min_vcpu`, `min_memory_gib`. Returns `spotinfo.recommend/v3`.
 
-```json
-{
-  "error": {
-    "code": -32602,
-    "message": "Invalid params",
-    "data": {
-      "details": "max_interruption_rate must be between 0 and 100"
-    }
-  }
-}
-```
+| Argument         | Type            | Default   | Bounds / enum                |
+| ---------------- | --------------- | --------- | ---------------------------- |
+| `cloud`          | string          | `aws`     | `aws`, `azure`, `gcp`        |
+| `regions`        | array of string | `["all"]` | `minItems: 1`, unique        |
+| `machine`        | string          | `""`      | RE2 pattern                  |
+| `architecture`   | string          | required  | `x86_64`, `arm64`            |
+| `os`             | string          | `linux`   | `linux`, `windows`           |
+| `min_vcpu`       | integer         | required  | `minimum: 1`                 |
+| `min_memory_gib` | number          | required  | `exclusiveMinimum: 0`        |
+| `max_price`      | number          | —         | `exclusiveMinimum: 0`        |
+| `workload`       | string          | `cost`    | `cost`, `web`, `ci`, `batch` |
+| `top`            | integer         | `3`       | `1`-`50`                     |
+| `offline`        | boolean         | `false`   |                              |
+| `refresh`        | boolean         | `false`   |                              |
 
-#### No Results Found
+It declares **no** `sort`, `order`, `with_score`, `min_score`, `az`, `score_timeout` or
+`live_risk` argument. A ranked page's placement figures and live risk are CLI-only.
 
-When no instances match the search criteria, the tool returns a successful response with empty results:
+### CLI flag to MCP argument
 
-```json
-{
-  "results": [],
-  "metadata": {
-    "total_results": 0,
-    "regions_searched": ["us-east-1"],
-    "query_time_ms": 12,
-    "data_source": "embedded",
-    "data_freshness": "embedded-snapshot"
-  }
-}
-```
+Strip the leading `--` and replace `-` with `_`. The one exception is the repeatable
+`--region`, which becomes the array `regions`. `--output` has no argument (MCP is always
+JSON), and `--gcp-project` and `--gcp-billing-key` have none by design — on that surface
+both come from the environment.
 
-## Data Sources and Freshness
-
-### Embedded Data
-
-The spotinfo MCP server uses embedded data included in the binary at build time:
-
-**AWS:**
-
-- **Spot Advisor Data**: Instance interruption frequency from the AWS Spot Instance Advisor feed
-- **Spot Pricing Data**: Static spot pricing from the AWS pricing page feed
-- **Update Frequency**: Refreshed weekly by the `update-data` workflow
-
-**GCP:**
-
-- **Spot VM Catalogue**: Machine types, Spot prices, and On-Demand prices parsed from `cloud.google.com/spot-vms/pricing` and family-specific pricing pages
-- **Update Frequency**: Refreshed weekly by the `update-gcp-data` workflow (`make update-gcp-data`)
-- **Coverage**: `us-central1` only (other GCP regions require JavaScript rendering not performed by spotinfo)
-
-**Azure:**
-
-- **Spot VM Catalogue**: Spot and On-Demand prices from the anonymous Azure Retail Prices API, joined to vCPU, memory and processor architecture parsed from the Microsoft Learn VM size pages
-- **Update Frequency**: Refreshed weekly by the `update-azure-data` workflow (`make update-azure-data`)
-- **Coverage**: 224 VM sizes across 26 series in 55 regions (Linux only)
-
-### Data Limitations
-
-1. **Offline Operation**: All data is embedded, enabling offline functionality
-2. **Update Lag**: Data freshness depends on the weekly refresh workflow
-3. **GCP Regional Coverage**: Limited to `us-central1` — the only region with static pricing pages
-4. **GCP Risk Data**: Preemption history requires an authenticated beta API; it is not embedded
-5. **Azure Coverage**: 55 reviewed regions and 26 reviewed machine series, not the whole Azure catalogue
-6. **Azure Risk Data**: Eviction rates require a subscription (Resource Graph, Resource SKUs); they are not embedded
-
-## Performance Characteristics
-
-### Response Times
-
-- **Single Region**: < 50ms typical
-- **Multiple Regions**: < 100ms typical
-- **Global Search**: < 200ms typical
-
-### Result Limits
-
-- **Default Limit**: 10 results
-- **Maximum Limit**: 50 results
-- **Recommendation**: Use filters to reduce result set for better performance
-
-### Memory Usage
-
-- **Server Memory**: ~10MB typical
-- **Per Request**: ~1MB additional during processing
-
-## Integration Patterns
-
-### Typical Usage Flows
-
-#### 1. Cost Optimization
-
-```
-1. Call list_spot_regions to see available regions
-2. Call find_spot_instances with price constraints
-3. Sort by price to find most cost-effective options
-```
-
-#### 2. Reliability-First
-
-```
-1. Call find_spot_instances with max_interruption_rate filter
-2. Sort by reliability to find most stable instances
-3. Compare across regions for best availability
-```
-
-#### 3. Requirements-Based
-
-```
-1. Call find_spot_instances with min_vcpu and min_memory_gb
-2. Apply price and interruption constraints
-3. Review specs to confirm suitability
-```
-
-### Best Practices
-
-1. **Filter Early**: Use constraints to reduce result set
-2. **Limit Results**: Use appropriate limit values for your use case
-3. **Cache Results**: Consider caching region lists as they change infrequently
-4. **Handle Empty Results**: Always check for empty result sets
-5. **Progressive Refinement**: Start broad, then apply additional filters
-
-## Testing and Validation
-
-### Testing with MCP Inspector
+### Driving it by hand
 
 ```bash
-# Install MCP Inspector
-npm install -g @modelcontextprotocol/inspector
-
-# Test the server
-npx @modelcontextprotocol/inspector spotinfo --mcp
-
-# Test specific tool calls
-# In the Inspector interface:
-find_spot_instances {"instance_types": "t3.micro", "regions": ["us-east-1"]}
-list_spot_regions {}
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  | spotinfo --mcp
 ```
 
-### Validation Examples
+---
 
-#### Valid Parameter Combinations
+## Migration from the retired v1 surface
+
+### Tools
+
+| Retired                    | Now                       | Note                         |
+| -------------------------- | ------------------------- | ---------------------------- |
+| `find_spot_instances`      | `list_spot_machines`      | Now serves three clouds      |
+| `list_spot_regions`        | `list_cloud_regions`      | Now takes a `cloud` argument |
+| `recommend_spot_instances` | `recommend_spot_machines` | `spotinfo.recommend/v3`      |
+
+Calling a retired name is a JSON-RPC error, not a payload:
 
 ```json
-// Minimal request
-{"instance_types": "t3.micro"}
-
-// With constraints
 {
-  "min_vcpu": 2,
-  "max_price_per_hour": 0.1,
-  "sort_by": "price"
-}
-
-// Regional focus
-{
-  "regions": ["us-east-1", "us-west-2"],
-  "instance_types": "m5.*",
-  "limit": 5
+  "code": -32602,
+  "message": "tool 'find_spot_instances' not found: tool not found"
 }
 ```
 
-#### Invalid Parameter Examples
+### Arguments
 
-```json
-// Invalid sort option
-{"sort_by": "invalid"}
+| Retired                                          | Now                                                                                               |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `instance_types`                                 | `machine`                                                                                         |
+| `min_memory_gb`                                  | `min_memory_gib`                                                                                  |
+| `max_price_per_hour`                             | `max_price`                                                                                       |
+| `max_interruption_rate`                          | No replacement. Use `workload` (`web`, `ci`, `batch`) on `recommend_spot_machines`                |
+| `sort_by`                                        | `sort` plus `order`. `reliability` is now `risk`; `price`, `savings` and `score` keep their words |
+| `limit`                                          | `top` on `recommend_spot_machines`. `list_spot_machines` returns every match                      |
+| `min_vcpu`, `regions`                            | Unchanged                                                                                         |
+| `with_score`, `min_score`, `az`, `score_timeout` | Unchanged on `list_spot_machines`; not declared on `recommend_spot_machines`                      |
 
-// Negative values
-{"min_vcpu": -1}
+### Response fields
 
-// Exceeding limits
-{"limit": 100}
+| Retired                                                         | Now                                                       |
+| --------------------------------------------------------------- | --------------------------------------------------------- |
+| `instance_type`, `instance`                                     | `machine`                                                 |
+| `spot_price_per_hour` (number)                                  | `spot_usd_per_hour` (decimal string, 9 fractional digits) |
+| `price` (number, root v1 JSON)                                  | `spot_usd_per_hour`                                       |
+| `savings_percentage` (tool), `savings` (root v1 JSON, integer) | `savings_percent`                                         |
+| `interruption_frequency`, `interruption_range`, `range.label`   | `risk.label`                                              |
+| `interruption_rate`, `range.min`, `range.max`                   | `risk.min_percent`, `risk.max_percent`                    |
+| `memory_gb`, `info.ram_gb`                                      | `memory_gib` (renamed; the figure is GiB)                 |
+| `vcpu`, `info.cores`                                            | `vcpu`                                                    |
+| `zone_price`                                                    | `zone_prices` (decimal strings)                           |
+| `metadata.regions_searched`                                     | `request.regions`                                         |
+| `metadata.data_source`, `metadata.data_freshness`               | `data_source.provider`, `data_source.mode`                |
+| `region_score`, `zone_scores`, `score_fetched_at`, `live_price` | Unchanged                                                 |
 
-// Invalid region format
-{"regions": "us-east-1"}  // Should be array
+Gone with no replacement:
+
+- `spot_price` (`"$0.0104/hour"`), the tool's string `savings`
+  (`"68% cheaper than on-demand"`) and `specs` (`"1 vCPU, 1 GB RAM"`) — pre-formatted display
+  strings. Format from the numbers.
+- `reliability_score` — it was `100 - interruption_rate`, a derived figure no cloud
+  publishes. Read `risk` instead, which states its own availability.
+- `metadata.total_results` — count `candidates`. `metadata.query_time_ms` — measure it.
+- **`info.emr`** — and the whole `info` block with it. EMR compatibility is an AWS Spot
+  Advisor classification with no meaning on another cloud, so the provider-neutral candidate
+  carries no equivalent and the field is retired with the schema rather than published as a
+  false `false`. `vcpu` and `memory_gib` are now top-level candidate fields.
+
+### Vocabulary
+
+The neutral vocabulary is shared by both surfaces. An old CLI flag is refused with a rename
+hint rather than "flag provided but not defined":
+
+```console
+$ spotinfo list --offline --type m5.large
+spotinfo: invalid argument: --type was renamed to --machine
 ```
 
-## Version Compatibility
+| Retired flag               | Now                |
+| -------------------------- | ------------------ |
+| `--type`, `--instance`     | `--machine`        |
+| `--vcpu`, `--cpu`          | `--min-vcpu`       |
+| `--memory`, `--memory-gib` | `--min-memory-gib` |
+| `--price`, `--budget`      | `--max-price`      |
 
-### MCP Protocol
+There is also no root query command any more. `spotinfo` with no subcommand prints help and
+exits 1; use `spotinfo list`.
 
-- **Supported Version**: `2024-11-05`
-- **Backward Compatibility**: None (first MCP implementation)
+---
 
-### API Versioning
+## Data sources and freshness
 
-- **Current Version**: 1.0
-- **Stability**: Stable (no breaking changes planned)
-- **Deprecation Policy**: 6-month notice for breaking changes
+Every snapshot is compiled into the binary, so every cloud answers offline. See
+[data-sources.md](data-sources.md) for the full treatment, including each source contract.
 
-This API reference provides complete technical specifications for integrating with the spotinfo MCP server. For setup instructions, see the [Claude Desktop integration guide](claude-desktop-setup.md).
+**AWS** — the Spot Instance Advisor feed and the Spot pricing feed, refreshed weekly by the
+`update-data` workflow. `DescribeSpotPriceHistory` is a live fallback for instance types the
+static feed prices at zero; a candidate priced that way carries `live_price: true`.
+
+**GCP** — Google's server-rendered Spot and Compute pricing pages, refreshed weekly by
+`update-gcp-data`. With a Cloud Billing Catalog API key (`--gcp-billing-key` or
+`SPOTINFO_GCP_BILLING_KEY`) a run can also price regions the snapshot does not carry; that
+answer reports `mode` `live` or `cached` and appends one more `sources[]` entry, under the
+parser version `gcp-billing-catalog/1`, so a composed price is never published under the
+scrape's provenance. A key that is rejected degrades to the snapshot and still answers:
+
+```console
+$ spotinfo --debug list --cloud gcp --region us-central1 --gcp-billing-key bogus-key-123 --machine '^n2-standard-2$' --output text
+… level=DEBUG msg="gcp billing catalogue unavailable; answering from the committed snapshot" error="billing catalogue request was refused: 400 Bad Request: …"
+machine=n2-standard-2, vCPU=2, memory=8GiB, saving=47%, risk='unavailable', price=0.0507
+```
+
+**Azure** — the anonymous Azure Retail Prices API for amounts, joined to Microsoft Learn VM
+size pages for vCPU, memory and architecture; refreshed weekly by `update-azure-data`. The
+Retail Prices API needs no credential, so an explicit region can be priced live at runtime.
+
+`offline: true` answers from the embedded snapshots and makes no request at all.
+`refresh: true` ignores any cached document for that call.
+
+---
+
+## Version compatibility
+
+- **MCP protocol**: `2024-11-05`.
+- **Payload documents**: `spotinfo.list/v1`, `spotinfo.recommend/v3`, `spotinfo.regions/v1`,
+  `spotinfo.error/v1`. Each is versioned in its own `schema_version` field; a breaking change
+  raises that number rather than mutating a published shape in place.
+- **Retired**: `spotinfo.recommend/v1` and `spotinfo.recommend/v2`, and the three v1 tool
+  names. This release breaks compatibility with all of them. See
+  [Migration](#migration-from-the-retired-v1-surface).
+
+For setup instructions, see the [Claude Desktop integration guide](claude-desktop-setup.md).

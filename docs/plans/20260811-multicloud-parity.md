@@ -2264,6 +2264,30 @@ are outside the suite.** They are shell probes over `.bin/spotinfo`, not tests; 
 - [ ] leave this plan in place — Phase 10 still has to run against the documented surface, so
       archiving it here would file it as done before anyone has run the binary
 
+➕ **`docs/api-reference.md` and `llms.txt` are done.** The second checkbox above names ten
+files and is left unticked until the other nine land; these two are complete and every command
+quoted in them was run against `.bin/spotinfo` at `2f2b80b`. `api-reference.md` was rewritten
+rather than patched: two thirds of it documented `find_spot_instances` and `list_spot_regions`,
+which return JSON-RPC `-32602`, and the candidate shape it specified was the retired v1 one.
+It now specifies `spotinfo.list/v1`, `spotinfo.recommend/v3`, `spotinfo.regions/v1` and
+`spotinfo.error/v1` against the contract files, documents both placement kinds
+(`placement_score`, integer 1-10, AWS; `obtainability`, 0.0-1.0, GCP) with the observed
+`--min-score` refusal as the evidence that they are **not** normalised onto a shared scale,
+documents `placement_status` and the three obtainability fields, and carries a four-part
+migration table — tools, arguments, response fields and flag names — in which `info.emr` is
+recorded as gone with the whole `info` block. This closes the debt recorded at :1691-1699 and
+the `api-reference.md` half of :1968-1972 (`SPOTINFO_GCP_BILLING_KEY`, the extra
+`gcp-billing-catalog/1` source entry, and GCP `mode` being `live` or `cached`).
+
+➕ **Two plan claims this task could not repeat, because the binary contradicts them.**
+:1691-1699 says the four score flags are "documented as root-command flags"; there is no root
+command, and they are documented here as declared on both `list` and `recommend`. The
+`spotinfo.recommend/v3` section of the old file also said GCP and Azure were `linux` only and
+that an unknown explicit region returns `NO_CANDIDATES` on both — measured: Azure serves
+Windows on both surfaces, and an unknown region is `NO_CANDIDATES` on `recommend`
+(`no candidates: gcp publishes no machines in atlantis`) but exit 0 with an empty result on
+`list`. Both were rewritten to what was observed.
+
 ---
 
 ## Phase 10 — Validate the shipped binary, not the packages
