@@ -627,9 +627,11 @@ parser to make a changed page fit.
 **Open as of 2026-08-12: `catalogue has no machine in approved series "n4d"`.** Every N4D
 machine is skipped with `spot price with no on-demand pair`, which trips the approved-series
 check. The rows are on the general-purpose page, but that one table's fourth header cell reads
-`Price (USD)` where `ParseOnDemandPage` requires the `Default* (USD)` prefix that every other
-table on the page still uses; the N4D table carries its own consumption-model id
-(`7754-699E-0EBF`), so it is a per-series layout rather than a page-wide rename. This is the
+`Price (USD)` where `ParseOnDemandPage` requires the `Default* (USD)` prefix. Read out of one
+download, the tables holding `n2-standard-4`, `e2-standard-4` and `c3d-standard-4` all still use
+the old spelling and only N4D's does not, which is why exactly the 27 N4D machines were skipped;
+the N4D table carries its own consumption-model id (`7754-699E-0EBF`), so it is a per-series
+layout rather than a page-wide rename. This is the
 reviewed-change path above, not a bug to patch around: confirm from the page that the column is
 the on-demand rate, accept both spellings, update `expected_fields` and bump `parser_version` in
 the parser and the contract together. Until then the GCP catalogue stays at its 2026-08-09

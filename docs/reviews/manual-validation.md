@@ -22,21 +22,21 @@ header rename that needs the contract's reviewer, not a review agent.
 
 ## Summary
 
-| #   | Finding                                                              | Severity | Verdict           |
-| --- | -------------------------------------------------------------------- | -------- | ----------------- |
-| 1   | GCP snapshot updater could never write a snapshot                     | High     | Fixed             |
-| 2   | GCP on-demand page renamed the N4D column header                      | High     | Open, needs review |
-| 3   | GCP catalogue prices are stale and measurably wrong                   | Medium   | Open, blocked by 2 |
-| 4   | Twelve identical credential warnings on a default `list`              | High     | Fixed             |
-| 5   | `unknown cloud provider` did not name the accepted set                | Medium   | Fixed             |
-| 6   | `list` prefixed provider errors with `failed to get spot savings`     | Medium   | Fixed             |
-| 7   | Empty `list` answer named no next move                                | Medium   | Fixed             |
-| 8   | MCP tool descriptions did not say which clouds each supports          | Medium   | Fixed             |
-| 9   | `list --help` did not state the half of the discriminator it owns     | Low      | Fixed             |
-| 10  | Unknown region exits 0 on GCP and Azure, 1 on AWS                     | Medium   | Not fixed         |
-| 11  | AWS savings percent and AWS spot price come from two feeds that disagree | Low   | Not fixed         |
-| 12  | Savings percent is truncated, not rounded                             | Low      | Not fixed         |
-| 13  | `warnings` is present in both schemas and never populated             | Low      | Not fixed         |
+| #   | Finding                                                                  | Severity | Verdict            |
+| --- | ------------------------------------------------------------------------ | -------- | ------------------ |
+| 1   | GCP snapshot updater could never write a snapshot                        | High     | Fixed              |
+| 2   | GCP on-demand page renamed the N4D column header                         | High     | Open, needs review |
+| 3   | GCP catalogue prices are stale and measurably wrong                      | Medium   | Open, blocked by 2 |
+| 4   | Twelve identical credential warnings on a default `list`                 | High     | Fixed              |
+| 5   | `unknown cloud provider` did not name the accepted set                   | Medium   | Fixed              |
+| 6   | `list` prefixed provider errors with `failed to get spot savings`        | Medium   | Fixed              |
+| 7   | Empty `list` answer named no next move                                   | Medium   | Fixed              |
+| 8   | MCP tool descriptions did not say which clouds each supports             | Medium   | Fixed              |
+| 9   | `list --help` did not state the half of the discriminator it owns        | Low      | Fixed              |
+| 10  | Unknown region exits 0 on GCP and Azure, 1 on AWS                        | Medium   | Not fixed          |
+| 11  | AWS savings percent and AWS spot price come from two feeds that disagree | Low      | Not fixed          |
+| 12  | Savings percent is truncated, not rounded                                | Low      | Not fixed          |
+| 13  | `warnings` is present in both schemas and never populated                | Low      | Not fixed          |
 
 ---
 
@@ -96,14 +96,14 @@ Three sizes in three regions, Linux and Windows, against the anonymous Retail Pr
 Azure pricing calculator is client-rendered and publishes no numbers in its HTML; the Retail
 Prices API is the documented source behind it and is what the source contract names.
 
-| Region         | Size            | OS      | Retail spot | Printed spot | Retail on-demand | Printed on-demand |
-| -------------- | --------------- | ------- | ----------- | ------------ | ---------------- | ----------------- |
-| eastus         | Standard_D2s_v5 | linux   | 0.020266    | 0.020266000  | 0.096            | 0.096000000       |
-| eastus         | Standard_D2s_v5 | windows | 0.039687    | 0.039687000  | 0.188            | 0.188000000       |
-| westeurope     | Standard_D4s_v5 | linux   | 0.042504    | 0.042504000  | 0.230            | 0.230000000       |
-| westeurope     | Standard_D4s_v5 | windows | 0.076507    | 0.076507000  | 0.414            | 0.414000000       |
-| southeastasia  | Standard_E4s_v5 | linux   | 0.056362    | 0.056362000  | 0.304            | 0.304000000       |
-| southeastasia  | Standard_E4s_v5 | windows | 0.090475    | 0.090475000  | 0.488            | 0.488000000       |
+| Region        | Size            | OS      | Retail spot | Printed spot | Retail on-demand | Printed on-demand |
+| ------------- | --------------- | ------- | ----------- | ------------ | ---------------- | ----------------- |
+| eastus        | Standard_D2s_v5 | linux   | 0.020266    | 0.020266000  | 0.096            | 0.096000000       |
+| eastus        | Standard_D2s_v5 | windows | 0.039687    | 0.039687000  | 0.188            | 0.188000000       |
+| westeurope    | Standard_D4s_v5 | linux   | 0.042504    | 0.042504000  | 0.230            | 0.230000000       |
+| westeurope    | Standard_D4s_v5 | windows | 0.076507    | 0.076507000  | 0.414            | 0.414000000       |
+| southeastasia | Standard_E4s_v5 | linux   | 0.056362    | 0.056362000  | 0.304            | 0.304000000       |
+| southeastasia | Standard_E4s_v5 | windows | 0.090475    | 0.090475000  | 0.488            | 0.488000000       |
 
 Twelve of twelve exact.
 
@@ -235,9 +235,19 @@ update-gcp-data: invalid gcp catalogue: catalogue has no machine in approved ser
 
 The N4D rows are on the general-purpose page — `n4d-standard-4 | 4 | 16 GiB | $0.1694 / 1 hour
 | $0.121968 / 1 hour | …` — but that table's fourth header cell reads **`Price (USD)`**, while
-`ParseOnDemandPage` requires the prefix **`Default* (USD)`** that every other table on the same
-page still uses. The N4D table carries its own consumption-model id (`7754-699E-0EBF`), so this
-is a per-series layout, not a page-wide rename.
+`ParseOnDemandPage` requires the prefix **`Default* (USD)`**. Read out of the same download,
+three other tables on that page still use the old spelling and only N4D does not:
+
+| Table containing | Header cell 3    | Table offset |
+| ---------------- | ---------------- | ------------ |
+| `n4d-standard-4` | `Price (USD)`    | 3,164,704    |
+| `c3d-standard-4` | `Default* (USD)` | 3,832,515    |
+| `e2-standard-4`  | `Default* (USD)` | 4,055,513    |
+| `n2-standard-4`  | `Default* (USD)` | 4,337,613    |
+
+which is also why only the 27 N4D machines were skipped. The N4D table carries its own
+consumption-model id (`7754-699E-0EBF`), so this is a per-series layout, not a page-wide
+rename.
 
 **Not fixed here, deliberately.** Accepting a second header spelling is exactly the move the
 plan's safety notes forbid without review: "Never widen a parser to make a changed source fit.
@@ -393,12 +403,12 @@ change; nothing else needed rewording.
 `docs/quick-start.md` repeats it with a measured table pointing at `--offline` first. Measured
 here, on a cold cache (`SPOTINFO_CACHE=off`):
 
-| Invocation                                          | Wall time |
-| --------------------------------------------------- | --------- |
-| `list --machine '^m5\.large$'` (all regions, live)   | 7.9 s     |
-| `list --machine '^m5\.large$' --region us-east-1`    | 1.4 s     |
-| `list --machine '^m5\.large$' --offline`             | 0.15 s    |
-| `list` (no filter, all regions, live)                | 5.9 s     |
+| Invocation                                         | Wall time |
+| -------------------------------------------------- | --------- |
+| `list --machine '^m5\.large$'` (all regions, live) | 7.9 s     |
+| `list --machine '^m5\.large$' --region us-east-1`  | 1.4 s     |
+| `list --machine '^m5\.large$' --offline`           | 0.15 s    |
+| `list` (no filter, all regions, live)              | 5.9 s     |
 
 Eight seconds of silence is the slowest case, and it is what the help text and the quick-start
 both warn about. Not a finding on its own; the wall of credential warnings that used to
@@ -425,20 +435,20 @@ Every one names the replacement, not just the removal.
 
 Each was triggered by hand and judged on whether it says what to do next.
 
-| Invocation                                    | Message                                                                                            | Verdict           |
-| --------------------------------------------- | -------------------------------------------------------------------------------------------------- | ----------------- |
-| `--output yaml`                               | `unknown output format "yaml", want one of number\|text\|json\|table\|csv`                          | good              |
-| `--sort bogus`                                | `unknown sort "bogus", want one of machine\|price\|region\|risk\|savings\|score`                    | good              |
-| `--order sideways`                            | `unknown order "sideways", want asc or desc`                                                        | good              |
-| `--architecture sparc`                        | `architecture must be x86_64 or arm64`                                                              | good              |
-| `--max-price -1`                              | `--max-price must be a positive USD machine-hour price`                                             | good              |
-| `--top 0`                                     | `top must be at least 1`                                                                            | good              |
-| `recommend` missing `--architecture`          | `--architecture is required; every recommendation needs an architecture and a size floor`           | good              |
-| `list --cloud gcp --os windows`               | `gcp: unsupported capability: os windows: this cloud publishes spot prices for linux only`          | good              |
-| `list --cloud gcp --az`                       | `gcp: unsupported capability: zone_detail: this cloud publishes prices per region, not per zone, …` | good              |
-| `list --cloud azure --with-score --min-score` | `--with-score is refused on azure: azure publishes a Spot Placement Score, but reading it needs an Azure subscription this build does not authenticate to` | good |
-| `--machine '['`                               | `aws candidate acquisition: failed to match instance type: error parsing regexp: missing closing ]` | acceptable — Go's own regexp error is the clearest available |
-| bare `spotinfo`                               | `no command given; run "spotinfo list" to browse or "spotinfo recommend" to rank`, exit 1           | good              |
+| Invocation                                    | Message                                                                                                                                                    | Verdict                                                      |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `--output yaml`                               | `unknown output format "yaml", want one of number\|text\|json\|table\|csv`                                                                                 | good                                                         |
+| `--sort bogus`                                | `unknown sort "bogus", want one of machine\|price\|region\|risk\|savings\|score`                                                                           | good                                                         |
+| `--order sideways`                            | `unknown order "sideways", want asc or desc`                                                                                                               | good                                                         |
+| `--architecture sparc`                        | `architecture must be x86_64 or arm64`                                                                                                                     | good                                                         |
+| `--max-price -1`                              | `--max-price must be a positive USD machine-hour price`                                                                                                    | good                                                         |
+| `--top 0`                                     | `top must be at least 1`                                                                                                                                   | good                                                         |
+| `recommend` missing `--architecture`          | `--architecture is required; every recommendation needs an architecture and a size floor`                                                                  | good                                                         |
+| `list --cloud gcp --os windows`               | `gcp: unsupported capability: os windows: this cloud publishes spot prices for linux only`                                                                 | good                                                         |
+| `list --cloud gcp --az`                       | `gcp: unsupported capability: zone_detail: this cloud publishes prices per region, not per zone, …`                                                        | good                                                         |
+| `list --cloud azure --with-score --min-score` | `--with-score is refused on azure: azure publishes a Spot Placement Score, but reading it needs an Azure subscription this build does not authenticate to` | good                                                         |
+| `--machine '['`                               | `aws candidate acquisition: failed to match instance type: error parsing regexp: missing closing ]`                                                        | acceptable — Go's own regexp error is the clearest available |
+| bare `spotinfo`                               | `no command given; run "spotinfo list" to browse or "spotinfo recommend" to rank`, exit 1                                                                  | good                                                         |
 
 `spotinfo --mcp` starts and completes a handshake, `spotinfo --version` prints
 `v2.5.0-95-gc293cc2`.
@@ -471,17 +481,17 @@ The savings percent comes from the Spot Advisor and the price comes from the pri
 are refreshed on different cadences, so the printed savings does not equal
 `1 − spot/on-demand` computed from AWS's own published on-demand index:
 
-| Region         | Machine    | Printed savings | Implied by AWS's own prices | Gap    |
-| -------------- | ---------- | --------------- | --------------------------- | ------ |
-| us-east-1      | c5.xlarge  | 58%             | 62.0%                       | 4.0 pp |
-| us-east-1      | m5.large   | 59%             | 57.3%                       | 1.7 pp |
-| us-east-1      | r5.2xlarge | 60%             | 63.2%                       | 3.2 pp |
+| Region         | Machine    | Printed savings | Implied by AWS's own prices | Gap     |
+| -------------- | ---------- | --------------- | --------------------------- | ------- |
+| us-east-1      | c5.xlarge  | 58%             | 62.0%                       | 4.0 pp  |
+| us-east-1      | m5.large   | 59%             | 57.3%                       | 1.7 pp  |
+| us-east-1      | r5.2xlarge | 60%             | 63.2%                       | 3.2 pp  |
 | eu-west-1      | c5.xlarge  | 39%             | 55.7%                       | 16.7 pp |
 | eu-west-1      | m5.large   | 40%             | 50.9%                       | 10.9 pp |
-| eu-west-1      | r5.2xlarge | 52%             | 53.0%                       | 1.0 pp |
-| ap-southeast-1 | c5.xlarge  | 52%             | 58.9%                       | 6.9 pp |
-| ap-southeast-1 | m5.large   | 63%             | 62.8%                       | 0.2 pp |
-| ap-southeast-1 | r5.2xlarge | 56%             | 61.0%                       | 5.0 pp |
+| eu-west-1      | r5.2xlarge | 52%             | 53.0%                       | 1.0 pp  |
+| ap-southeast-1 | c5.xlarge  | 52%             | 58.9%                       | 6.9 pp  |
+| ap-southeast-1 | m5.large   | 63%             | 62.8%                       | 0.2 pp  |
+| ap-southeast-1 | r5.2xlarge | 56%             | 61.0%                       | 5.0 pp  |
 
 (on-demand from `b0.p.awsstatic.com/pricing/2.0/…`, spot from the live feed, both read
 2026-08-12)

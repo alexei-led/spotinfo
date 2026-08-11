@@ -364,7 +364,7 @@ Every one of these is checked before any data is read.
 
 | Command fragment             | Message                                                                           |
 | ---------------------------- | --------------------------------------------------------------------------------- |
-| `--cloud oracle`             | `unknown cloud provider "oracle", want one of aws\|azure\|gcp`                                                 |
+| `--cloud oracle`             | `unknown cloud provider "oracle", want one of aws\|azure\|gcp`                    |
 | `--architecture s390x`       | `architecture must be x86_64 or arm64`                                            |
 | `--workload gpu`             | `workload must be cost, web, ci, or batch`                                        |
 | `--sort colour`              | `unknown sort "colour", want one of machine\|price\|region\|risk\|savings\|score` |
@@ -405,8 +405,8 @@ $ spotinfo list --offline --region us-east-1 --machine '^zzzz$'
 └─────────┴──────┴────────────┴────────────────────────┴──────┴──────────┘
 ```
 
-with `level=WARN msg="no machines matched the query; relax a filter, or check the region name is one this cloud publishes"` on stderr and exit 0 — an empty browse
-is an answer. A ranked page with nothing in it is not:
+with a `level=WARN msg="no machines matched the query; …"` line on stderr and exit 0 — an
+empty browse is an answer. A ranked page with nothing in it is not:
 
 ```console
 $ spotinfo recommend --offline --region us-east-1 --architecture x86_64 --min-vcpu 2 --min-memory-gib 4 --machine '^zzzz$'
