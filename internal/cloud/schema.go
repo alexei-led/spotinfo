@@ -115,6 +115,21 @@ type RequestDTO struct { //nolint:govet // field order follows the published sch
 // consumer never has to reconstruct them from a float. Both published schemas
 // carry this block unchanged, which is what makes an answer from `list` and an
 // answer from `recommend` comparable field for field.
+//
+// SpotUSDPerHour is nullable for the same reason OnDemandUSDPerHour is: an
+// unknown price is the absence of an observation, never a zero and never an
+// empty string. AWS's static price feed omits some families and every me-*
+// region, so a browse answer really does carry rows nobody published a spot
+// price for. `recommend` never publishes one — accepts() drops a candidate with
+// no price before ranking — which is why recommend-v3-success.schema.json keeps
+// the field non-nullable while list-v1.schema.json admits null.
+//
+// SavingsPercent is independent of both amounts on AWS, and stays published
+// when they are absent. It is the Spot Advisor's own figure, read from a feed
+// that is not the price feed; AWS publishes no on-demand price at all, so
+// *every* AWS row already carries a discount without its denominator. Azure
+// refuses a savings figure it would have to compute itself (catalog.go), which
+// is a different shape: that one would be a number no consumer could check.
 type CandidateDTO struct { //nolint:govet // field order follows the published schema
 	Cloud              ProviderID      `json:"cloud"`
 	Region             Region          `json:"region"`
@@ -123,7 +138,7 @@ type CandidateDTO struct { //nolint:govet // field order follows the published s
 	OS                 OperatingSystem `json:"os"`
 	VCPU               int             `json:"vcpu"`
 	MemoryGiB          float64         `json:"memory_gib"`
-	SpotUSDPerHour     string          `json:"spot_usd_per_hour"`
+	SpotUSDPerHour     *string         `json:"spot_usd_per_hour"`
 	OnDemandUSDPerHour *string         `json:"on_demand_usd_per_hour"`
 	SavingsPercent     *float64        `json:"savings_percent"`
 	Risk               RiskDTO         `json:"risk"`
@@ -436,7 +451,8 @@ func candidateDTO(candidate *Candidate) (CandidateDTO, error) {
 		Risk:         risk,
 	}
 	if candidate.Spot != nil {
-		published.SpotUSDPerHour = candidate.Spot.Amount.String()
+		price := candidate.Spot.Amount.String()
+		published.SpotUSDPerHour = &price
 	}
 	if onDemand := candidate.OnDemand; onDemand != nil {
 		price := onDemand.Amount.String()

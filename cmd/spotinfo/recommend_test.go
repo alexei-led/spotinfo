@@ -401,7 +401,8 @@ func TestRecommendServesTheCostPolicyOnAWS(t *testing.T) {
 	assert.Equal(t, cloud.ProviderAWS, report.Request.Cloud)
 	assert.Equal(t, cloud.WorkloadCost, report.Request.Workload)
 	require.Len(t, report.Recommendations, 1)
-	assert.Equal(t, "0.041600000", report.Recommendations[0].SpotUSDPerHour)
+	require.NotNil(t, report.Recommendations[0].SpotUSDPerHour)
+	assert.Equal(t, "0.041600000", *report.Recommendations[0].SpotUSDPerHour)
 }
 
 // The table names the risk status rather than leaving a blank column that

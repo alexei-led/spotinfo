@@ -89,7 +89,9 @@ func listedCandidates(t *testing.T, document []byte) []cloud.ListCandidateDTO {
 func listedPrice(t *testing.T, candidate *cloud.ListCandidateDTO) float64 {
 	t.Helper()
 
-	amount, err := cloud.ParseMoney(candidate.SpotUSDPerHour)
+	require.NotNil(t, candidate.SpotUSDPerHour, "%s published no spot price", candidate.Machine)
+
+	amount, err := cloud.ParseMoney(*candidate.SpotUSDPerHour)
 	require.NoError(t, err)
 
 	return amount.Float64()

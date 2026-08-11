@@ -218,9 +218,18 @@ func recommendationComparator(key cloud.SortKey) (func(left, right *cloud.Recomm
 // comparePrices orders the fixed-point wire amounts numerically. They are
 // nine-decimal strings, so a lexicographic comparison would sort 10.000000000
 // below 2.000000000.
+//
+// The shared candidate block types the amount as nullable because `list`
+// publishes rows AWS has no price for. A recommendation never carries one —
+// accepts() drops a price-less candidate before ranking — so an absent amount
+// is treated the same as an unparsable one rather than given an order.
 func comparePrices(left, right *cloud.RecommendationDTO) int {
-	leftAmount, leftErr := cloud.ParseMoney(left.SpotUSDPerHour)
-	rightAmount, rightErr := cloud.ParseMoney(right.SpotUSDPerHour)
+	if left.SpotUSDPerHour == nil || right.SpotUSDPerHour == nil {
+		return 0
+	}
+
+	leftAmount, leftErr := cloud.ParseMoney(*left.SpotUSDPerHour)
+	rightAmount, rightErr := cloud.ParseMoney(*right.SpotUSDPerHour)
 	if leftErr != nil || rightErr != nil {
 		return 0
 	}
@@ -422,7 +431,10 @@ func priceDecimals(recommendations []cloud.RecommendationDTO) int {
 
 	decimals := minDecimals
 	for i := range recommendations {
-		amount := recommendations[i].SpotUSDPerHour
+		if recommendations[i].SpotUSDPerHour == nil {
+			continue
+		}
+		amount := *recommendations[i].SpotUSDPerHour
 
 		dot := strings.IndexByte(amount, '.')
 		if dot < 0 {
@@ -435,14 +447,20 @@ func priceDecimals(recommendations []cloud.RecommendationDTO) int {
 	return decimals
 }
 
-// humanPrice renders a fixed-point amount at the column's decimal count.
-func humanPrice(amount string, decimals int) string {
-	dot := strings.IndexByte(amount, '.')
-	if dot < 0 || len(amount) < dot+1+decimals {
-		return amount
+// humanPrice renders a fixed-point amount at the column's decimal count. An
+// absent amount prints as "-", the way savingsDisplay prints an absent
+// discount: a price nobody published is not a price of zero.
+func humanPrice(amount *string, decimals int) string {
+	if amount == nil {
+		return "-"
 	}
 
-	return amount[:dot+1+decimals]
+	dot := strings.IndexByte(*amount, '.')
+	if dot < 0 || len(*amount) < dot+1+decimals {
+		return *amount
+	}
+
+	return (*amount)[:dot+1+decimals]
 }
 
 func riskDisplay(risk *cloud.RiskDTO) string {

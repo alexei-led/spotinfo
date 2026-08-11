@@ -316,7 +316,8 @@ func TestRecommendPublishesCanonicalPriceStrings(t *testing.T) {
 	require.Len(t, report.Recommendations, 1)
 
 	recommendation := report.Recommendations[0]
-	assert.Equal(t, "0.041600000", recommendation.SpotUSDPerHour)
+	require.NotNil(t, recommendation.SpotUSDPerHour)
+	assert.Equal(t, "0.041600000", *recommendation.SpotUSDPerHour)
 	assert.Nil(t, recommendation.OnDemandUSDPerHour, "the AWS feeds publish savings, not an on-demand price")
 	require.NotNil(t, recommendation.SavingsPercent)
 	assert.InDelta(t, 72.0, *recommendation.SavingsPercent, 0)

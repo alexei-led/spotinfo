@@ -829,6 +829,33 @@ on the first row a source backs, and the comment on it names the ceiling and the
 collect the published regions and machine IDs into two sets first, which makes it
 O(sources + candidates).
 
+➕ **`spot_usd_per_hour` is nullable in `spotinfo.list/v1`, and was `""` for one commit.**
+Reported by review: `candidateDTO` set the amount only when the observation existed, so a machine
+the AWS static price feed does not price published the Go zero string — which the contract this
+same task created rejects, because `""` matches neither the amount pattern nor `null`. Measured on
+the committed snapshot: 2 rows of 1,145 in `us-east-1`, **254 of 254** in `me-south-1`, and **600
+of 19,353** under the unified `--region all` default, so `spotinfo list --output json` published a
+document that failed its own schema. The fix is `*string` in the shared `CandidateDTO` and
+`["string", "null"]` in `list-v1.schema.json` — the same shape `on_demand_usd_per_hour` already
+had, and the one `internal/cloud/observations.go` states: an unknown price is the absence of an
+observation, never a zero. All three answers now validate against the contract file, as do GCP and
+Azure `list` and `recommend` on every cloud.
+
+`recommend-v3-success.schema.json` **stays non-nullable**, because `accepts` drops a candidate
+with no price before ranking. `TestRankerReappliesEveryConstraint` now asserts every published
+recommendation carries an amount, so the asymmetry between the two schemas is enforced rather
+than assumed. `savings_percent` stays published on an unpriced row: AWS publishes no on-demand
+price at all, so *every* AWS row already carries a discount without its denominator, and the
+figure is the Spot Advisor's own — read from a different feed than the price. That is not the
+shape `internal/providers/azure/catalog.go` refuses, which is a savings figure Azure would have
+had to compute itself.
+
+It shipped green because `testCandidate.build()` attaches a price only under `if c.Price > 0`
+and every fixture in `TestListPayloadValidatesAgainstTheContract` was priced, so the nil branch
+was outside the fixture space. The case is now in the table with `Price: 0, Savings: 41` — the
+`dl1.24xlarge` shape — and the test asserts the key is present **and null**, not merely present.
+Reverting `internal/cloud/schema.go` makes it fail on the real error.
+
 ⚠️ **AWS `list` candidates publish `architecture: ""`, and Task 7 is about to freeze that into a
 golden.** `awsQueryProvider` reads the architecture snapshot only when `--architecture` asks for it
 — Task 4's ➕ above records why — so the default AWS browse answer carries an empty architecture
@@ -906,6 +933,16 @@ rather than half-rewritten here, but it is wrong as of this commit.
 - [ ] confirm the Task 2 e2e suite now passes end to end
 - [ ] run `make test lint verify-data verify-architecture` — the gate is the full suite from
       here on, with no skip
+
+➕ **The fixed `cloud.Provider` stub must include a candidate with no price observation.** Every
+existing helper prices every candidate — `contractAdvices()`, `testCandidate.build()` under
+`if c.Price > 0`, the `cmd/spotinfo` stubs — which is exactly how the `""` price defect in Task 5
+reached a commit. A stub that prices every row records five goldens over a shape that omits the
+600 unpriced rows a real `--region all` answer carries, and freezes whatever the four rendered
+formats print for them without anyone reviewing it. Decide what `table`, `text`, `csv` and
+`number` show for an unpriced row **before** recording, not after: the JSON form now publishes
+`null`, and a renderer printing `0.0000` beside it would be the same silent zero in a different
+font.
 
 ---
 

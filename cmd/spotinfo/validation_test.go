@@ -173,15 +173,35 @@ func TestHumanPriceUsesOneWidthForTheWholeColumn(t *testing.T) {
 
 			recommendations := make([]cloud.RecommendationDTO, len(test.amounts))
 			for i, amount := range test.amounts {
-				recommendations[i].SpotUSDPerHour = amount
+				recommendations[i].SpotUSDPerHour = usdPerHour(amount)
 			}
 
 			decimals := priceDecimals(recommendations)
 			for i, amount := range test.amounts {
-				assert.Equal(t, test.want[i], humanPrice(amount, decimals))
+				assert.Equal(t, test.want[i], humanPrice(usdPerHour(amount), decimals))
 			}
 		})
 	}
+}
+
+// usdPerHour is the published nullable amount. `list` carries rows AWS has no
+// spot price for, so the shared candidate block types the field as a pointer.
+func usdPerHour(amount string) *string { return &amount }
+
+// A machine the price feed omits has no price, not a price of zero. The column
+// prints the same dash the savings column already prints for an unmeasured
+// discount, and priceDecimals must not let an absent amount set the width.
+func TestHumanPriceRendersAnAbsentAmountAsADash(t *testing.T) {
+	t.Parallel()
+
+	decimals := priceDecimals([]cloud.RecommendationDTO{
+		{CandidateDTO: cloud.CandidateDTO{SpotUSDPerHour: nil}},
+		{CandidateDTO: cloud.CandidateDTO{SpotUSDPerHour: usdPerHour("0.027894000")}},
+	})
+
+	assert.Equal(t, 6, decimals)
+	assert.Equal(t, "-", humanPrice(nil, decimals))
+	assert.Equal(t, "0.027894", humanPrice(usdPerHour("0.027894000"), decimals))
 }
 
 // Savings against on-demand is the number clouds are compared on, and the v2
@@ -201,7 +221,7 @@ func TestNeutralRecommendationTableShowsSavings(t *testing.T) {
 			CandidateDTO: cloud.CandidateDTO{
 				Cloud: cloud.ProviderGCP, Region: "us-central1", Machine: "c3d-standard-4",
 				Architecture: cloud.ArchitectureX8664, VCPU: 4, MemoryGiB: 16,
-				SpotUSDPerHour: "0.042496000", OnDemandUSDPerHour: &onDemand, SavingsPercent: &savings,
+				SpotUSDPerHour: usdPerHour("0.042496000"), OnDemandUSDPerHour: &onDemand, SavingsPercent: &savings,
 				Risk: cloud.RiskDTO{Status: cloud.RiskStatusUnavailable},
 			},
 		},
@@ -212,7 +232,7 @@ func TestNeutralRecommendationTableShowsSavings(t *testing.T) {
 			CandidateDTO: cloud.CandidateDTO{
 				Cloud: cloud.ProviderGCP, Region: "us-central1", Machine: "n2d-standard-4",
 				Architecture: cloud.ArchitectureX8664, VCPU: 4, MemoryGiB: 16,
-				SpotUSDPerHour: "0.053824000",
+				SpotUSDPerHour: usdPerHour("0.053824000"),
 				Risk:           cloud.RiskDTO{Status: cloud.RiskStatusUnavailable},
 			},
 		},
@@ -236,11 +256,11 @@ func TestRecommendTableAlignsRowsWiderThanTheirHeaders(t *testing.T) {
 	require.NoError(t, writeNeutralRecommendationTable([]cloud.RecommendationDTO{
 		{Rank: 1, CandidateDTO: cloud.CandidateDTO{
 			Region: "ap-southeast-3", Machine: "m7i-flex.xlarge", Architecture: "x86_64",
-			VCPU: 4, MemoryGiB: 16, SpotUSDPerHour: "0.100000000",
+			VCPU: 4, MemoryGiB: 16, SpotUSDPerHour: usdPerHour("0.100000000"),
 		}},
 		{Rank: 2, CandidateDTO: cloud.CandidateDTO{
 			Region: "ca-west-1", Machine: "t3.xlarge", Architecture: "x86_64",
-			VCPU: 4, MemoryGiB: 16, SpotUSDPerHour: "0.200000000",
+			VCPU: 4, MemoryGiB: 16, SpotUSDPerHour: usdPerHour("0.200000000"),
 		}},
 	}, &rendered))
 

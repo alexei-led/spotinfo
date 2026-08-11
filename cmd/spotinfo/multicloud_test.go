@@ -170,7 +170,9 @@ func TestRecommendationAcceptsABudgetFinerThanTheScale(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, recommendation := range report.Recommendations {
-		price, parseErr := cloud.ParseMoney(recommendation.SpotUSDPerHour)
+		require.NotNil(t, recommendation.SpotUSDPerHour)
+
+		price, parseErr := cloud.ParseMoney(*recommendation.SpotUSDPerHour)
 		require.NoError(t, parseErr)
 		assert.LessOrEqual(t, price.Nanos(), ceiling.Nanos(),
 			"every recommendation must sit under the truncated ceiling")

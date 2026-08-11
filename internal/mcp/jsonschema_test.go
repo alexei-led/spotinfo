@@ -311,6 +311,13 @@ func TestListPayloadValidatesAgainstTheContract(t *testing.T) {
 		// publish. Without them the schema check passes on a document that
 		// carries none of them, which proves nothing about the ones a flag adds.
 		wantKeys []string
+		// wantNull are the keys this case must publish as JSON null, and
+		// wantNonNull the ones it must publish with a value. Presence alone is
+		// not enough for a figure a cloud may not have: an empty string in a
+		// price field is neither a price nor a documented absence, and it is
+		// what shipped before this pair existed.
+		wantNull    []string
+		wantNonNull []string
 	}{
 		{
 			name:     "aws with published risk, zone prices and placement scores",
@@ -324,10 +331,30 @@ func TestListPayloadValidatesAgainstTheContract(t *testing.T) {
 			wantKeys: []string{"live_price", "zone_prices", "region_score", "zone_scores", "score_fetched_at"},
 		},
 		{
-			name:       "gcp without risk",
-			provider:   cloud.ProviderGCP,
-			candidates: gcpCandidates(),
-			wantKeys:   []string{"live_price"},
+			// The AWS static price feed omits some families outright and every
+			// me-* region, so a browse answer really does carry rows nobody
+			// published a spot price for — 600 of 19,353 on the committed
+			// snapshot under --region all. The row stays browsable and the
+			// absent price is null: an empty string is not a price, and it is
+			// what the document published until this case existed. The Advisor
+			// savings figure survives beside it because it comes from the
+			// advisor feed, not from the price feed.
+			name:     "aws machine the price feed does not price",
+			provider: cloud.ProviderAWS,
+			candidates: buildCandidates(testCandidate{
+				Region: "us-east-1", Machine: "dl1.24xlarge", Savings: 41,
+				RiskLabel: "10-15%", RiskMin: 10, RiskMax: 15, VCPU: 96, MemoryGiB: 768,
+			}),
+			wantKeys:    []string{"live_price"},
+			wantNull:    []string{"spot_usd_per_hour", "on_demand_usd_per_hour"},
+			wantNonNull: []string{"savings_percent"},
+		},
+		{
+			name:        "gcp without risk",
+			provider:    cloud.ProviderGCP,
+			candidates:  gcpCandidates(),
+			wantKeys:    []string{"live_price"},
+			wantNonNull: []string{"spot_usd_per_hour"},
 		},
 		{
 			name:     "an answer with no candidates",
@@ -365,6 +392,14 @@ func TestListPayloadValidatesAgainstTheContract(t *testing.T) {
 
 			for _, key := range test.wantKeys {
 				require.Contains(t, document.Candidates[0], key)
+			}
+			for _, key := range test.wantNull {
+				value, present := document.Candidates[0][key]
+				require.True(t, present, "%s must be published", key)
+				require.Nil(t, value, "%s must be null, not an empty string", key)
+			}
+			for _, key := range test.wantNonNull {
+				require.NotNil(t, document.Candidates[0][key], "%s must carry a value", key)
 			}
 		})
 	}

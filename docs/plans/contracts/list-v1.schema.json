@@ -66,7 +66,7 @@
           "os": {"type": "string", "enum": ["linux", "windows"]},
           "vcpu": {"type": "integer", "minimum": 0},
           "memory_gib": {"type": "number", "minimum": 0},
-          "spot_usd_per_hour": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.[0-9]{9}$"},
+          "spot_usd_per_hour": {"type": ["string", "null"], "pattern": "^(0|[1-9][0-9]*)\\.[0-9]{9}$"},
           "on_demand_usd_per_hour": {"type": ["string", "null"], "pattern": "^(0|[1-9][0-9]*)\\.[0-9]{9}$"},
           "savings_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
           "risk": {

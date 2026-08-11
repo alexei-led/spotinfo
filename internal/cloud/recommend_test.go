@@ -415,6 +415,14 @@ func TestRankerReappliesEveryConstraint(t *testing.T) {
 			report, err := Recommend(t.Context(), riskyProvider(candidatesOf(test.dropped, kept)...), request)
 			require.NoError(t, err)
 			assert.Equal(t, []string{"keep.me"}, machines(report))
+
+			// recommend-v3-success.schema.json types spot_usd_per_hour as a
+			// non-nullable string, where list-v1 admits null. The two differ
+			// only because accepts() drops an unpriced candidate before
+			// ranking, so that guarantee is asserted here rather than assumed.
+			for i := range report.Recommendations {
+				require.NotNil(t, report.Recommendations[i].SpotUSDPerHour)
+			}
 		})
 	}
 }
