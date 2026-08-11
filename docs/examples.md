@@ -25,7 +25,9 @@ $ spotinfo list --offline --region us-east-1 --machine '^m5\.(large|xlarge)$'
 ```
 
 `--machine` is an RE2 regexp, so anchor it with `^…$` when you mean one exact name. The
-`REGION` column appears only when more than one region is queried.
+`REGION` column is dropped when the **request** names exactly one `--region`, and is present
+otherwise. That is about the request, not the result: `--region all` keeps the column even on
+GCP, where it resolves to a single region.
 
 ### 2. Filter by size and price, then sort
 

@@ -283,7 +283,9 @@ AWS already publishes an interruption bucket in its snapshot, so it needs no liv
 
 The flag fails soft — the ranked page is complete without risk — so the answer looks the same
 whether Google has no preemption history for these machines or the call could not be made at
-all. The run exits 0 either way. Distinguish them by the warning on stderr:
+all. The run exits 0 either way. Distinguish them by the warning on stderr. Every line begins
+`live risk unavailable; reporting the snapshot's risk status`; the tail below is whatever
+Google returned, abbreviated:
 
 | stderr                                                                      | Meaning                                                                                                                             |
 | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
