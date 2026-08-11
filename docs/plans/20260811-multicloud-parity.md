@@ -1354,6 +1354,17 @@ previous snapshot, which is the check that the contaminant work cost no coverage
 before any code changed, and no `(machine, region, os)` key in them carried two different
 prices — the failure that would have made this task a no-go.
 
+➕ **The per-region floor now counts distinct machines, because keying by OS silently
+weakened it.** `verifyRegions` compared `len(region.Prices)` against `min_machines`, and each
+machine used to be exactly one row, so the two numbers were the same. Windows roughly doubled
+the row count — the thinnest region, `mexicocentral`, went from 184 rows against a floor of
+180 to 360 — which would have let a region lose half its Linux sizes and still pass a number
+chosen against the old shape. `verifyPrices` now returns the distinct machine count and the
+floor is applied to that, restoring the old margin exactly (184 against 180).
+`TestTheRegionFloorCountsMachinesRatherThanRows` is the discriminator: a region whose row
+count clears the floor while its machine count does not. No threshold moved, and the check
+runs against the committed catalogue, so `make verify-data` re-proves it without a rebuild.
+
 ➕ **Four docs asserted the refusal this task removes, and were corrected here rather than
 left for Task 16.** `docs/clouds.md` (matrix cell and the Azure section), `docs/usage.md`
 (summary table and the refusal sentence), `docs/data-sources.md` (OS coverage, snapshot

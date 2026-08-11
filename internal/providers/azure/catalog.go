@@ -441,13 +441,17 @@ func (c *Catalog) verifyRegions(contract *snapshot.SourceContract, known map[clo
 		if !slices.Contains(contract.Support.Regions, region.ID) {
 			return fmt.Errorf("%w: region %q is not in the approved support matrix", ErrCatalog, region.ID)
 		}
-		if len(region.Prices) < contract.Thresholds.MinMachines {
-			return fmt.Errorf("%w: region %s prices %d machines, contract requires at least %d",
-				ErrCatalog, region.ID, len(region.Prices), contract.Thresholds.MinMachines)
-		}
 
-		if err := c.verifyPrices(region, known, contract.Thresholds.MaxFractionalDigits, referenced); err != nil {
+		machines, err := c.verifyPrices(region, known, contract.Thresholds.MaxFractionalDigits, referenced)
+		if err != nil {
 			return err
+		}
+		// Distinct machines, not rows. Each machine used to be one row, so a row
+		// count was the same number; keying by OS roughly doubled it and would
+		// have let a region lose half its Linux sizes and still clear the floor.
+		if machines < contract.Thresholds.MinMachines {
+			return fmt.Errorf("%w: region %s prices %d machines, contract requires at least %d",
+				ErrCatalog, region.ID, machines, contract.Thresholds.MinMachines)
 		}
 	}
 	for _, region := range contract.Support.Regions {
@@ -464,10 +468,13 @@ func (c *Catalog) verifyRegions(contract *snapshot.SourceContract, known map[clo
 	return nil
 }
 
+// verifyPrices checks one region's rows and returns how many distinct machines
+// they price, which is what the region floor is measured against.
 func (c *Catalog) verifyPrices(region *CatalogRegion, known map[cloud.MachineID]struct{},
 	maxDigits int, referenced map[cloud.MachineID]struct{},
-) error {
+) (int, error) {
 	priced := make(map[machineOS]struct{}, len(region.Prices))
+	machines := make(map[cloud.MachineID]struct{}, len(region.Prices))
 
 	for i := range region.Prices {
 		price := &region.Prices[i]
@@ -475,42 +482,43 @@ func (c *Catalog) verifyPrices(region *CatalogRegion, known map[cloud.MachineID]
 		// Windows is two rows, and two rows for one pair is a duplicate.
 		row := machineOS{machine: price.Machine, os: price.OS}
 		if _, duplicate := priced[row]; duplicate {
-			return fmt.Errorf("%w: %s is priced twice for %s in %s",
+			return 0, fmt.Errorf("%w: %s is priced twice for %s in %s",
 				ErrCatalog, price.Machine, price.OS, region.ID)
 		}
 		priced[row] = struct{}{}
+		machines[price.Machine] = struct{}{}
 
 		if !slices.Contains(c.OperatingSystems, price.OS) {
-			return fmt.Errorf("%w: %s in %s is priced for %q, which the catalogue does not declare",
+			return 0, fmt.Errorf("%w: %s in %s is priced for %q, which the catalogue does not declare",
 				ErrCatalog, price.Machine, region.ID, price.OS)
 		}
 
 		if _, described := known[price.Machine]; !described {
-			return fmt.Errorf("%w: %s is priced in %s with no specification",
+			return 0, fmt.Errorf("%w: %s is priced in %s with no specification",
 				ErrCatalog, price.Machine, region.ID)
 		}
 		referenced[price.Machine] = struct{}{}
 
 		if price.Spot.IsZero() || price.OnDemand.IsZero() {
-			return fmt.Errorf("%w: %s in %s is missing a spot or on-demand price",
+			return 0, fmt.Errorf("%w: %s in %s is missing a spot or on-demand price",
 				ErrCatalog, price.Machine, region.ID)
 		}
 		// A Spot price at or above list price means the two sources were joined
 		// on different meters, not that spare capacity got expensive.
 		if price.Spot.Nanos() >= price.OnDemand.Nanos() {
-			return fmt.Errorf("%w: %s in %s is priced %s spot against %s on-demand",
+			return 0, fmt.Errorf("%w: %s in %s is priced %s spot against %s on-demand",
 				ErrCatalog, price.Machine, region.ID, price.Spot, price.OnDemand)
 		}
 
 		for _, amount := range []cloud.Money{price.Spot, price.OnDemand} {
 			if digits := amount.FractionalDigits(); digits > maxDigits {
-				return fmt.Errorf("%w: %s in %s needs %d fractional digits, contract allows %d",
+				return 0, fmt.Errorf("%w: %s in %s needs %d fractional digits, contract allows %d",
 					ErrCatalog, price.Machine, region.ID, digits, maxDigits)
 			}
 		}
 	}
 
-	return nil
+	return len(machines), nil
 }
 
 // PriceRecords flattens the catalogue into the neutral records the shared

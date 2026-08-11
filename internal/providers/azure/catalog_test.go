@@ -256,6 +256,32 @@ func TestOneSizeDocumentedByTwoSeriesIsAmbiguous(t *testing.T) {
 	assert.Contains(t, err.Error(), "Standard_D2s_v5")
 }
 
+// TestTheRegionFloorCountsMachinesRatherThanRows keeps the per-region floor at
+// the strength it had when each machine was one row. Keying by OS roughly
+// doubled the row count, so a row-count floor would let a region lose half its
+// sizes and still clear a number that was chosen against the old shape.
+func TestTheRegionFloorCountsMachinesRatherThanRows(t *testing.T) {
+	t.Parallel()
+
+	catalog, contract := buildTestCatalog(t), testContract()
+	region := &catalog.Regions[1]
+
+	kept := make([]CatalogPrice, 0, len(region.Prices))
+	for _, price := range region.Prices {
+		if price.Machine != "Standard_D4s_v5" {
+			kept = append(kept, price)
+		}
+	}
+	region.Prices = kept
+
+	require.Len(t, region.Prices, contract.Thresholds.MinMachines, "the row count still clears the floor")
+
+	err := catalog.Verify(contract)
+
+	require.ErrorIs(t, err, ErrCatalog)
+	assert.Contains(t, err.Error(), "prices 2 machines, contract requires at least 3")
+}
+
 // TestOneSizePricedTwiceForOneOperatingSystemIsADuplicate keeps the check the
 // wider key could have blunted: two rows for one machine in one region are
 // still a duplicate when they name the same OS, and only then.
