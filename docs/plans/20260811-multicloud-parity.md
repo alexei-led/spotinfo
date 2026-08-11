@@ -368,31 +368,76 @@ it pass. Do not weaken an assertion to make it green earlier.
 
 - Modify: `cmd/spotinfo/e2e_test.go`
 
-- [ ] rename every test in the file to `TestE2E…` — an **infix**, because a Go test function
+- [x] rename every test in the file to `TestE2E…` — an **infix**, because a Go test function
       must begin with `Test`; `E2ETestFoo` is not collected and the suite would vanish
-- [ ] keep the file's imports to the standard library and its own subprocess helpers only,
+- [x] keep the file's imports to the standard library and its own subprocess helpers only,
       never a production symbol, so the package still builds mid-refactor
-- [ ] replace `TestTheWorkloadChoosesThePayloadSchema` with a test asserting **one** schema,
+- [x] replace `TestTheWorkloadChoosesThePayloadSchema` with a test asserting **one** schema,
       `spotinfo.recommend/v3`, for every cloud and every workload
-- [ ] delete `TestTheDefaultWorkloadSelectsADifferentSchemaOnEachSurface` and
+- [x] delete `TestTheDefaultWorkloadSelectsADifferentSchemaOnEachSurface` and
       `TestTheCLIAndMCPDisagreeOnTheDefaultAWSAnswer`, whose premises this plan inverts;
       replace them with one test asserting the CLI and MCP return the **same** `request` echo,
       ranking policy and first result for the same question
-- [ ] rewrite `TestTheQueryCommandRendersEveryOutputFormat`,
+- [x] rewrite `TestTheQueryCommandRendersEveryOutputFormat`,
       `TestTheNumberFormatPrintsOnlyASavingsPercent` and
       `TestTheQueryCommandAlwaysPublishesPriceProvenance` against `spotinfo list`
-- [ ] rewrite `TestRejectedInputExitsNonZeroWithAnEmptyStdout` against the new flag names and
+- [x] rewrite `TestRejectedInputExitsNonZeroWithAnEmptyStdout` against the new flag names and
       the new refusals
-- [ ] add a test asserting `spotinfo list --cloud <id>` answers on all three clouds
-- [ ] add a test asserting every removed flag name produces a rename hint naming its
+- [x] add a test asserting `spotinfo list --cloud <id>` answers on all three clouds
+- [x] add a test asserting every removed flag name produces a rename hint naming its
       replacement, exits non-zero, and prints nothing to stdout
-- [ ] add a test asserting MCP tool names are exactly `list_spot_machines`,
+- [x] add a test asserting MCP tool names are exactly `list_spot_machines`,
       `recommend_spot_machines`, `list_cloud_regions`
-- [ ] add a test asserting `spotinfo --mcp` still starts and `spotinfo --version` still prints,
+- [x] add a test asserting `spotinfo --mcp` still starts and `spotinfo --version` still prints,
       while bare `spotinfo` prints help and exits non-zero
-- [ ] record in a file comment that the suite is expected to fail until Task 7
-- [ ] run `go test ./cmd/spotinfo/ -run E2E` — expected to fail; confirm every failure is an
+- [x] record in a file comment that the suite is expected to fail until Task 7
+- [x] run `go test ./cmd/spotinfo/ -run E2E` — expected to fail; confirm every failure is an
       assertion, not a compile error
+
+The suite is 17 tests, all collected by `-run E2E` and all excluded by `-skip 'E2E'`. As
+written it fails 17 top-level and 50 subtest assertions, with no compile error, no panic and
+no helper failure; `go test ./... -skip 'E2E'` passes.
+
+➕ **`--offline` is passed on AWS only, and that is a Task 8 interaction.** Task 8 refuses
+`--offline` on a cloud that declares no `CapabilityLiveEnrichment`, and Tasks 10 and 13 give
+Azure and GCP one. A suite that passed `--offline` to every cloud would therefore be green at
+Task 7, red at Task 8 and green again at Task 13 — churn that says nothing about the surface.
+`e2eOfflineFor` adds the flag for AWS and nothing else; the other two clouds are proved
+network-free by the dead proxy instead.
+
+➕ **The dead proxy moved from one test into `e2eEnv`, so every subprocess runs with it.**
+While the suite is red a command that does not exist yet falls through to the old tree, and
+some of those paths fetch. Blocking by default keeps the network-free claim true at every
+intermediate state rather than only at the end.
+`TestE2EOfflineAnswersWithEveryOutboundRequestBlocked` still reads the arrangement as its
+subject, which is the checkbox the plan asks for.
+
+➕ **`candidates` is the array key this suite defines for `spotinfo.list/v1`.** The plan names
+every other field in both schemas; the list array had no name yet, and Task 5 must publish it
+under this one. Everything else the suite decodes — `schema_version`, `status`, `request`,
+`ranking_policy`, `data_source`, `recommendations` and the candidate and risk fields — is
+already spelled by `internal/cloud/schema.go`.
+
+➕ **Two column assertions are targets Tasks 4 and 7 must land, not descriptions of today.**
+The `recommend` table carries the same neutral columns on all three clouds, AWS included; and
+`list` names a `risk` column rather than AWS's "Frequency of interruption", because the column
+is a neutral risk observation once the command is cloud-neutral.
+
+➕ **Nothing in the suite asserts a rendering style, and three places had to be written that
+way.** The two renderers disagree today — the query command draws a box, the recommend table
+does not — and which survives Task 7 is not this suite's decision. So column names are matched
+case-insensitively and searched across the whole page rather than on line 1, which is a border
+in one of the two; `dataRows` filters any line carrying no letter or digit, so the "`--top 3`
+returns three rows" count holds under either; and `text`, which prints `key=value` per row and
+no header at all, is asserted only to name the machine it priced. The `region` column is left
+out of both lists: whether it is rendered is conditional on the query naming more than one
+region, which is a separate decision from what the columns are called.
+
+➕ **A recommend-only flag passed to `list` is deliberately not in the refusal table.**
+`--workload` is undefined on `list`, so urfave/cli rejects it while parsing and writes its
+usage banner to **stdout** — which the empty-stdout assertion would fail, for a reason no task
+here owns. The command-tree test in `cmd/spotinfo/vocabulary_test.go` is what proves the flag
+is not declared there.
 
 ### Task 3: Move the AWS query path onto `cloud.Candidate`
 
