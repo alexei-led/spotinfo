@@ -2072,21 +2072,21 @@ packages.** `make build` at this commit, then each command below run and its out
 measurements deliberately reached real vendor endpoints — they are manual probes in a
 scratchpad, never tests, and nothing in `make test` gained a network call.
 
-| #   | Criterion                                                    | Verdict                                 |
-| --- | ------------------------------------------------------------ | --------------------------------------- |
-| 1   | one schema family                                            | **pass**                                |
-| 2   | CLI and MCP answer the same question identically             | **pass**                                |
-| 3   | one flag name per concept, MCP names derived                 | **pass**                                |
-| 4   | no flag accepted and ignored                                 | **pass after one fix**, one ⚠️ recorded |
-| 5   | both commands on three clouds, `--mcp` and `--version`       | **pass**                                |
-| 6   | Azure Linux and Windows, GCP refuses Windows                 | **pass**                                |
-| 7   | Azure prices live and anonymous, `--offline`/`--refresh` act | **pass**                                |
-| 8   | GCP obtainability opt-in, no Azure credential library        | **pass**                                |
-| 9   | `interruptionCappableKinds` holds exactly one kind           | **pass**                                |
-| 10  | provenance under half an Azure recommendation                | **⚠️ fails at the margin**, see below   |
-| 11  | all five gates                                               | **pass**                                |
-| 12  | built-binary matrix                                          | pending — Task 17                       |
-| 13  | human review                                                 | pending — Task 18                       |
+| #   | Criterion                                                    | Verdict                                                  |
+| --- | ------------------------------------------------------------ | -------------------------------------------------------- |
+| 1   | one schema family                                            | **pass**                                                 |
+| 2   | CLI and MCP answer the same question identically             | **pass**                                                 |
+| 3   | one flag name per concept, MCP names derived                 | **pass**                                                 |
+| 4   | no flag accepted and ignored                                 | **pass after one fix**, one ⚠️ recorded                  |
+| 5   | both commands on three clouds, `--mcp` and `--version`       | **pass**                                                 |
+| 6   | Azure Linux and Windows, GCP refuses Windows                 | **pass**                                                 |
+| 7   | Azure prices live and anonymous, `--offline`/`--refresh` act | **pass**                                                 |
+| 8   | GCP obtainability opt-in, no Azure credential library        | **pass**                                                 |
+| 9   | `interruptionCappableKinds` holds exactly one kind           | **pass**                                                 |
+| 10  | provenance under half an Azure recommendation                | **⚠️ fails at the margin**, see below                    |
+| 11  | all five gates                                               | **pass**                                                 |
+| 12  | built-binary matrix                                          | **pass** — Task 17, `docs/reviews/surface-validation.md` |
+| 13  | human review                                                 | pending — Task 18                                        |
 
 **1 — one schema family.** `strings .bin/spotinfo | grep -c 'spotinfo.recommend/v1'` is **0**, and
 the schema strings the binary carries are `spotinfo.list/v1`, `spotinfo.recommend/v3`,
@@ -2355,7 +2355,6 @@ not.
       the exact failure the `TestE2E` infix rule exists to prevent
 - [x] write `docs/reviews/surface-validation.md` recording the matrix, what passed, and every
       cell that was skipped and why
-
 
 ➕ **`text` and `csv` landed on `recommend` here, and that is the ⚠️ Task 14 handed forward.**
 The matrix cannot assert what this task's own checkbox says — only `number` refused — while

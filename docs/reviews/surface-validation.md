@@ -11,30 +11,38 @@ unit test.
 
 ## Where the assertions live, and why the split matters
 
-| Half        | File                                  | Runs in     | Reaches a vendor |
-| ----------- | ------------------------------------- | ----------- | ---------------- |
-| **Offline** | `cmd/spotinfo/e2e_test.go`            | `make test` | never            |
-| **Live**    | `cmd/spotinfo/validate_clouds_test.go` | `make validate-clouds` | yes   |
+| Half        | File                                   | Runs in                | Reaches a vendor |
+| ----------- | -------------------------------------- | ---------------------- | ---------------- |
+| **Offline** | `cmd/spotinfo/e2e_test.go`             | `make test`            | never            |
+| **Live**    | `cmd/spotinfo/validate_clouds_test.go` | `make validate-clouds` | yes              |
 
 The live half is guarded by `SPOTINFO_VALIDATE_CLOUDS`, which only `make validate-clouds`
 exports, and the file has **no build tag** — so `make test` compiles it (a rename breaks the
 build rather than silently deleting the suite) and runs none of it.
 
 `TestValidateCloudsIsNotAMergeGate` asserts that separation from **inside** the ordinary suite,
-in both directions: the `validate-clouds` target exists and exports the variable, `make test`'s
-recipe mentions neither, and no file under `.github/workflows/` mentions either. Absence alone
-would pass vacuously against a deleted target, which is why existence is asserted first.
+in both directions: the `validate-clouds` rule exists and exports the variable, and outside that
+rule and the `.PHONY` line **no Makefile line and no file under `.github/workflows/` mentions
+either name**. Absence alone would pass vacuously against a deleted target, which is why
+existence is asserted first.
+
+Checking every line rather than the test targets' recipes is not belt-and-braces. The first
+version of this test read `make test`'s recipe, and `test: validate-clouds` passed it —
+measured. A prerequisite lives on the rule line, not in the recipe, and that is how this would
+actually happen; nobody writes `@$(MAKE) validate-clouds` into a recipe by hand. Three
+discriminators were run against the final version and each turned it red: a prerequisite on
+`test`, a chain through a third target, and one workflow mentioning the target in a comment.
 
 ## The matrix: {list, recommend} × {aws, gcp, azure} × {number, text, json, table, csv}
 
 Every cell runs `--offline`, scoped to one region and one machine per cloud — the same
 acquisition path as a full sweep, at a tenth of a second instead of four seconds and 8 MB.
 
-| Cloud | Region        | Machine              |
-| ----- | ------------- | -------------------- |
-| aws   | `us-east-1`   | `m5.large`           |
-| gcp   | `us-central1` | `n2-standard-4`      |
-| azure | `eastus`      | `Standard_B16as_v2`  |
+| Cloud | Region        | Machine             |
+| ----- | ------------- | ------------------- |
+| aws   | `us-east-1`   | `m5.large`          |
+| gcp   | `us-central1` | `n2-standard-4`     |
+| azure | `eastus`      | `Standard_B16as_v2` |
 
 Asserted per cell: **exit 0, non-empty stdout, empty stderr, at least one data row**. Empty
 stderr is the load-bearing half — an empty match, an unreachable feed and a beta warning all
@@ -42,15 +50,15 @@ still exit 0 and still print something, and each is a cell that answered less th
 
 Measured, 30 cells:
 
-| Cell               | Exit | stderr  | Rows |
-| ------------------ | ---- | ------- | ---- |
-| list/aws/*         | 0    | empty   | 1    |
-| list/gcp/*         | 0    | empty   | 1    |
-| list/azure/*       | 0    | empty   | 1    |
-| recommend/*/number | 1    | refusal | —    |
-| recommend/aws/{text,json,table,csv}   | 0 | empty | 3 |
-| recommend/gcp/{text,json,table,csv}   | 0 | empty | 3 |
-| recommend/azure/{text,json,table,csv} | 0 | empty | 3 |
+| Cell                                  | Exit | stderr  | Rows |
+| ------------------------------------- | ---- | ------- | ---- |
+| list/aws/*                            | 0    | empty   | 1    |
+| list/gcp/*                            | 0    | empty   | 1    |
+| list/azure/*                          | 0    | empty   | 1    |
+| recommend/*/number                    | 1    | refusal | —    |
+| recommend/aws/{text,json,table,csv}   | 0    | empty   | 3    |
+| recommend/gcp/{text,json,table,csv}   | 0    | empty   | 3    |
+| recommend/azure/{text,json,table,csv} | 0    | empty   | 3    |
 
 `number` is `list`-only, and the refusal says where it lives rather than only that it is wrong:
 
@@ -88,10 +96,10 @@ Every `json` cell is validated against the contract file it declares, read from
 `docs/plans/contracts/` rather than restated in the test — so a schema edit that outruns the
 code fails in `cmd/spotinfo` rather than in a consumer.
 
-| Document                | Contract                            |
-| ----------------------- | ----------------------------------- |
-| `spotinfo.list/v1`      | `list-v1.schema.json`               |
-| `spotinfo.recommend/v3` | `recommend-v3-success.schema.json`  |
+| Document                | Contract                           |
+| ----------------------- | ---------------------------------- |
+| `spotinfo.list/v1`      | `list-v1.schema.json`              |
+| `spotinfo.recommend/v3` | `recommend-v3-success.schema.json` |
 
 Both pass, on all three clouds, on **both surfaces** — the CLI's `--output json` and the MCP
 tools' payloads go through the same check.
@@ -132,7 +140,7 @@ was checked by reverting it alone. The map keys are what byte-identity depends o
 them alone fails `TestGetSpotSavingsReturnsTheSameOrderEveryRun` with "run 21 returned a
 different page" and fails
 `TestE2ETheSameOfflineInvocationIsByteIdentical/aws_browses_every_region` on the binary.
-Stability is what makes the surviving order *explainable*: reverting `sort.Stable` alone keeps
+Stability is what makes the surviving order _explainable_: reverting `sort.Stable` alone keeps
 the run reproducible — pdqsort is deterministic for identical input — but permutes the ties, so
 rows in one interruption bucket no longer read as "by region, then by machine name". That
 revert fails the row-order assertion of the same unit test.
@@ -199,11 +207,11 @@ that failed quietly would make every absence true of an empty string.
 
 **Size, recorded and not gated:**
 
-| Build                                          | Bytes      |
-| ---------------------------------------------- | ---------- |
-| Pre-plan baseline, `afe3db6` (`master`)        | 43,961,634 |
-| This commit, `make build`                      | 41,551,154 |
-| Difference                                     | **−2,410,480, or −5.48%** |
+| Build                                   | Bytes                     |
+| --------------------------------------- | ------------------------- |
+| Pre-plan baseline, `afe3db6` (`master`) | 43,961,634                |
+| This commit, `make build`               | 41,551,154                |
+| Difference                              | **−2,410,480, or −5.48%** |
 
 Both built `CGO_ENABLED=0 go build -tags release`, the baseline from a `git archive` of
 `afe3db6` with `-ldflags "-s -w"`. The version-stamping `-X` flags `make build` adds cost **0
@@ -216,13 +224,13 @@ bound: that breaks on the next dependency bump for no signal.
 `make validate-clouds`, run on this tree. It reaches the AWS Spot feeds and the anonymous Azure
 Retail Prices API; it needs no credential of any kind.
 
-| Check                                        | Verdict | Observed                                     |
-| -------------------------------------------- | ------- | -------------------------------------------- |
-| AWS `list` and `recommend` from live feeds   | pass    | `data_source.mode` = `live`, rows returned   |
-| Azure `list` and `recommend`, anonymous      | pass    | `data_source.mode` = `live`, rows returned   |
-| GCP from the committed snapshot              | pass    | `data_source.mode` = `embedded-snapshot`     |
-| GCP `--gcp-billing-key`                      | **skipped** | no `SPOTINFO_GCP_BILLING_KEY` in the environment. The Cloud Billing Catalog API needs a key and there is no anonymous GCP price source to substitute. The test skips with that reason and never fails |
-| Every live path degrades to the snapshot     | pass    | all three clouds, both commands, every origin pointed at a closed port: exit 0, rows returned, `data_source.mode` = `embedded-snapshot` |
+| Check                                      | Verdict     | Observed                                                                                                                                                                                              |
+| ------------------------------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AWS `list` and `recommend` from live feeds | pass        | `data_source.mode` = `live`, rows returned                                                                                                                                                            |
+| Azure `list` and `recommend`, anonymous    | pass        | `data_source.mode` = `live`, rows returned                                                                                                                                                            |
+| GCP from the committed snapshot            | pass        | `data_source.mode` = `embedded-snapshot`                                                                                                                                                              |
+| GCP `--gcp-billing-key`                    | **skipped** | no `SPOTINFO_GCP_BILLING_KEY` in the environment. The Cloud Billing Catalog API needs a key and there is no anonymous GCP price source to substitute. The test skips with that reason and never fails |
+| Every live path degrades to the snapshot   | pass        | all three clouds, both commands, every origin pointed at a closed port: exit 0, rows returned, `data_source.mode` = `embedded-snapshot`                                                               |
 
 The Azure cell runs with `AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID` and `AZURE_CLIENT_ID`
 cleared, which is what makes "anonymous" an observation rather than a claim.

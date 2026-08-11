@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -322,6 +323,15 @@ func TestValidateEveryLivePathDegradesToTheSnapshot(t *testing.T) {
 //
 // Absence alone would pass vacuously against a deleted target, which is why the
 // target's existence is asserted first.
+//
+// The Makefile half checks every mention of the name rather than the recipes of
+// the test targets, and that is not belt-and-braces. A recipe scan misses the
+// way this would actually happen: `test: validate-clouds` is a **prerequisite**,
+// it lives on the rule line rather than in the recipe, and nobody writes
+// `@$(MAKE) validate-clouds` into a recipe by hand. Measured against the first
+// version of this test, which read recipes only — the prerequisite passed it.
+// Checking every line also closes a chain through a third target, which no
+// fixed list of rules can.
 func TestValidateCloudsIsNotAMergeGate(t *testing.T) {
 	t.Parallel()
 
@@ -329,19 +339,28 @@ func TestValidateCloudsIsNotAMergeGate(t *testing.T) {
 
 	makefile := readRepoFile(t, "Makefile")
 
-	if !strings.Contains(makefile, "\n"+target+":") {
+	from, to := makeRuleLines(makefile, target)
+	if from < 0 {
 		t.Fatalf("the Makefile declares no %s target; the live checks would have nothing to run them", target)
 	}
 
-	if !strings.Contains(makefile, validateCloudsEnv) {
-		t.Errorf("the %s target must export %s, which is what un-skips this file", target, validateCloudsEnv)
+	rule := strings.Join(strings.Split(makefile, "\n")[from:to], "\n")
+	if !strings.Contains(rule, validateCloudsEnv) {
+		t.Errorf("the %s rule must export %s, which is what un-skips this file:\n%s",
+			target, validateCloudsEnv, rule)
 	}
 
-	// `test:` must not reach the network. Its recipe is every indented line
-	// after the rule until the next unindented one.
-	if recipe := makeRecipe(makefile, "test"); strings.Contains(recipe, target) ||
-		strings.Contains(recipe, validateCloudsEnv) {
-		t.Errorf("`make test` must not run the live checks; its recipe is:\n%s", recipe)
+	for number, line := range strings.Split(makefile, "\n") {
+		trimmed := strings.TrimSpace(line)
+
+		switch {
+		case number >= from && number < to: // the rule itself
+		case trimmed == "" || strings.HasPrefix(trimmed, "#"):
+		case strings.HasPrefix(trimmed, ".PHONY"): // declaring it is not running it
+		case strings.Contains(line, target) || strings.Contains(line, validateCloudsEnv):
+			t.Errorf("Makefile line %d reaches the live cloud checks from another rule, "+
+				"which is how `make test` would come to need a vendor:\n%s", number+1, line)
+		}
 	}
 
 	workflows, err := filepath.Glob(filepath.Join("..", "..", ".github", "workflows", "*.y*ml"))
@@ -377,23 +396,24 @@ func readRepoFile(t *testing.T, name string) string {
 	return string(contents)
 }
 
-// makeRecipe returns the indented lines that follow one rule, which is what the
-// target actually runs.
-func makeRecipe(makefile, target string) string {
-	_, after, found := strings.Cut(makefile, "\n"+target+":")
-	if !found {
-		return ""
+// makeRuleLines returns the half-open line range of one rule: its header, which
+// carries the prerequisites, and the indented recipe under it. It returns
+// (-1, -1) when the Makefile declares no such rule.
+func makeRuleLines(makefile, target string) (from, to int) {
+	lines := strings.Split(makefile, "\n")
+
+	from = slices.IndexFunc(lines, func(line string) bool {
+		return strings.HasPrefix(line, target+":")
+	})
+	if from < 0 {
+		return -1, -1
 	}
 
-	var recipe []string
-
-	for _, line := range strings.Split(after, "\n")[1:] {
-		if line == "" || (line[0] != '\t' && line[0] != ' ') {
+	for to = from + 1; to < len(lines); to++ {
+		if lines[to] == "" || (lines[to][0] != '\t' && lines[to][0] != ' ') {
 			break
 		}
-
-		recipe = append(recipe, line)
 	}
 
-	return strings.Join(recipe, "\n")
+	return from, to
 }
