@@ -320,17 +320,39 @@ why it must never reach a snapshot.
 - Create: `cmd/spotinfo/vocabulary_test.go`
 - Modify: `cmd/spotinfo/provider_flags.go`
 
-- [ ] declare every flag name from the vocabulary table as a single exported constant set,
+- [x] declare every flag name from the vocabulary table as a single exported constant set,
       together with the unified default for each
-- [ ] add `mcpArgName(flag string) string` implementing the derivation rule, with the
+- [x] add `mcpArgName(flag string) string` implementing the derivation rule, with the
       repeatable-flag plural exception held as data rather than as a branch
-- [ ] add a `renamedFlags` map from every removed name to its replacement
-- [ ] write a table-driven test asserting `mcpArgName` for every flag in the vocabulary
-- [ ] write a test asserting every removed name maps to a name that exists in the vocabulary
-- [ ] write a test that walks the command tree built by `newSpotinfoApp()` and asserts the
+- [x] add a `renamedFlags` map from every removed name to its replacement
+- [x] write a table-driven test asserting `mcpArgName` for every flag in the vocabulary
+- [x] write a test asserting every removed name maps to a name that exists in the vocabulary
+- [x] write a test that walks the command tree built by `newSpotinfoApp()` and asserts the
       declared `cli.Flag` set of each command equals the vocabulary entries marked for it —
       this test is what makes acceptance criterion 3 mechanical
-- [ ] run `go test ./... -skip 'E2E'` — must pass before Task 2
+- [x] run `go test ./... -skip 'E2E'` — must pass before Task 2
+
+➕ **`vocabularyGaps` is how that test passes today, and it is a cross-task obligation.**
+The tree is still the pre-migration one, so an unconditional equality assertion would be red
+at this boundary. `cmd/spotinfo/vocabulary_test.go` therefore records every difference between
+the built tree and the vocabulary as data — per command, per flag, each row naming the task
+that closes it — and asserts the difference **equals** that table. Containment would rot; the
+equality means a task that lands a flag and leaves its row fails exactly as loudly as one that
+never lands it, and an empty table is plain equality between the tree and the vocabulary. A
+row whose extra name is not in `renamedFlags` also fails, so the table cannot degrade into a
+blessed snapshot of whatever the tree declares. Tasks 4, 11 and 13 each carry a `➕` line
+below to delete their rows.
+
+➕ `mcpArgName` lives in package `main` and cannot be imported by `internal/mcp`. Task 6's
+"every MCP argument name equals `mcpArgName` of its CLI flag" test therefore belongs in
+`cmd/spotinfo`, which already imports `internal/mcp`. Do not move the file to "fix" that
+import — `internal/cloud` forbids CLI imports and `dependencies_test.go` enforces it.
+
+➕ "Exported constant set" has no meaning in package `main`; the constants keep the existing
+`flagX` spelling and are collected in `cmd/spotinfo/vocabulary.go`, which is the single source
+the tests read. The vocabulary flag names moved there out of `main.go`, `provider_flags.go`
+and `liverisk.go`; `main.go` keeps only the mode and logging flags, which describe how the
+binary runs rather than what it is asked.
 
 ### Task 2: Write the target e2e suite, and let it fail
 
@@ -439,6 +461,10 @@ unchanged, for all five formats. That is a stronger gate than any hand-written p
 - [ ] write tests for every sort key and both orders
 - [ ] write a test asserting `spotinfo --mcp` and `spotinfo --version` still work and bare
       `spotinfo` does not run a query
+- ➕ point `commandScopes` in `cmd/spotinfo/vocabulary_test.go` at the new `list` command —
+      it currently records the list vocabulary as living on the root — and delete every
+      `vocabularyGaps` row marked "task 4". The command-tree test fails if a flag lands and
+      its row stays
 - [ ] run `go test ./... -skip 'E2E'` — must pass before Task 5
 
 ### Task 5: Retire `spotinfo.recommend/v1` and publish one schema family
@@ -724,6 +750,8 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
 - [ ] write tests for each kind's rendering in table, JSON and CSV
 - [ ] write a test asserting a placement kind is never accepted by `acceptsRisk`
 - [ ] write a test asserting the AWS path still produces the same score it does today
+- ➕ delete the four `vocabularyGaps` rows marked "task 11" in
+      `cmd/spotinfo/vocabulary_test.go`
 - [ ] run `make test` — must pass before Task 12
 
 ### Task 12: Fetch GCP obtainability
@@ -764,6 +792,8 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
 - [ ] write tests against a stub transport: success, no key, a rejected key, and a region the
       API does not price
 - [ ] write a test asserting the snapshot is unchanged after a live call
+- ➕ declare `--gcp-billing-key` on both commands and delete its two `vocabularyGaps` rows in
+      `cmd/spotinfo/vocabulary_test.go`
 - [ ] run `make verify-data` and `make test` — must pass before Task 14
 
 ---

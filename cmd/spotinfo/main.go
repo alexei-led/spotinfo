@@ -102,38 +102,17 @@ const (
 	outputTable  = "table"
 	outputCSV    = "csv"
 
-	// CLI flag names, shared by the flag definitions and the value lookups
-	flagMCP          = "mcp"
-	flagDebug        = "debug"
-	flagQuiet        = "quiet"
-	flagJSONLog      = "json-log"
-	flagType         = "type"
-	flagOS           = "os"
-	flagRegion       = "region"
-	flagOutput       = "output"
-	flagCPU          = "cpu"
-	flagMemory       = "memory"
-	flagPrice        = "price"
-	flagSort         = "sort"
-	flagOrder        = "order"
-	flagWithScore    = "with-score"
-	flagOffline      = "offline"
-	flagRefresh      = "refresh"
-	flagMinScore     = "min-score"
-	flagAZ           = "az"
-	flagScoreTimeout = "score-timeout"
-	flagArchitecture = "architecture"
-	flagInstance     = "instance"
-	flagBudget       = "budget"
-	flagWorkload     = "workload"
-	flagTop          = "top"
+	// Mode and logging flags. They select how the binary runs rather than what
+	// it is asked, so they are not vocabulary entries — see vocabulary.go, which
+	// declares every flag that describes a query.
+	flagMCP     = "mcp"
+	flagDebug   = "debug"
+	flagQuiet   = "quiet"
+	flagJSONLog = "json-log"
 
 	// Sort order values
 	orderAsc  = "asc"
 	orderDesc = "desc"
-
-	// defaultInstanceOS is the --os flag default
-	defaultInstanceOS = "linux"
 
 	// allRegions is the --region value selecting every published region.
 	allRegions = "all"
@@ -1000,11 +979,11 @@ func recommendCommand(action cli.ActionFunc) *cli.Command {
 			// "(default: 0)" with no way to suppress it, which read as "optional,
 			// defaults to no minimum" beside a Usage line saying "required".
 			&cli.IntFlag{
-				Name: flagCPU, Aliases: []string{"vcpu"},
+				Name: flagCPU, Aliases: []string{flagVCPU},
 				Usage: "required minimum vCPU cores", DefaultText: requiredFlagDefaultText,
 			},
 			&cli.IntFlag{
-				Name: flagMemory, Aliases: []string{"memory-gib"},
+				Name: flagMemory, Aliases: []string{flagMemoryGiB},
 				Usage: "required minimum memory GiB", DefaultText: requiredFlagDefaultText,
 			},
 			&cli.Float64Flag{
@@ -1094,7 +1073,7 @@ func newSpotinfoApp(rootAction, recommendationAction cli.ActionFunc) *cli.App {
 			&cli.StringFlag{
 				Name:  flagOS,
 				Usage: "instance operating system (windows/linux)",
-				Value: defaultInstanceOS,
+				Value: defaultOS,
 			},
 			&cli.StringSliceFlag{
 				Name:  flagRegion,

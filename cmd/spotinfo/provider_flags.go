@@ -10,21 +10,12 @@ import (
 	awsprovider "spotinfo/internal/providers/aws"
 )
 
-const (
-	// flagCloud selects the provider. It is declared with no default value on
-	// purpose: "not set" must stay distinguishable from "set to aws", or a
-	// --cloud placed before the subcommand loses to the subcommand's own
-	// default and a GCP question gets answered with AWS prices. The documented
-	// default is applied once, in providerID.
-	flagCloud = "cloud"
-	// flagMachine is the neutral name for a machine-type filter. The AWS
-	// spellings stay primary — --type on the root command, --instance on
-	// recommend — so every documented AWS invocation keeps working; --machine
-	// is declared as an alias of each.
-	flagMachine = "machine"
-
-	cloudFlagUsage = "cloud provider: aws|gcp|azure (default: aws; GCP/Azure require recommend)"
-)
+// cloudFlagUsage documents --cloud, which is declared with no default value on
+// purpose: "not set" must stay distinguishable from "set to aws", or a --cloud
+// placed before the subcommand loses to the subcommand's own default and a GCP
+// question gets answered with AWS prices. The documented default is applied
+// once, in providerID.
+const cloudFlagUsage = "cloud provider: aws|gcp|azure (default: aws; GCP/Azure require recommend)"
 
 // machineFilter resolves the machine-type filter from the nearest context that
 // set it. --machine is an alias of two different primary names — --type on the

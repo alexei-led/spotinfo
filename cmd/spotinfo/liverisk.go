@@ -21,14 +21,10 @@ import (
 // --live-risk turns it on for one invocation. It costs one API call per
 // recommendation on the ranked page, and it needs a project.
 
-const (
-	flagLiveRisk   = "live-risk"
-	flagGCPProject = "gcp-project"
-
-	// gcpProjectEnv is the variable the Google SDKs read. Accepted so a shell
-	// that already exports it needs no flag.
-	gcpProjectEnv = "GOOGLE_CLOUD_PROJECT"
-)
+// gcpProjectEnv is the variable the Google SDKs read. Accepted so a shell that
+// already exports it needs no flag. The flag names themselves are vocabulary
+// entries and live in vocabulary.go.
+const gcpProjectEnv = "GOOGLE_CLOUD_PROJECT"
 
 // unsupportedLiveRisk is the one refusal, shared by both report paths.
 //
