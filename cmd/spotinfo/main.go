@@ -538,9 +538,13 @@ func rootQuery(ctx *cli.Context, sortKey cloud.SortKey) (*cloud.Query, error) {
 
 	query := &cloud.Query{
 		Regions: regions,
-		// Passed through unparsed: an operating system outside the neutral
-		// vocabulary is the provider's error to report, in its own wording.
-		OS:             cloud.OperatingSystem(ctx.String(flagOS)),
+		// Folded, not validated. The capability check compares against the
+		// lowercase neutral constants exactly, so casting the raw flag refused
+		// `--os Linux` and `--os Windows` — spellings the legacy client accepted
+		// with EqualFold and the recommend path still folds the same way. An
+		// operating system outside the vocabulary survives the fold unchanged and
+		// stays the provider's error to report, in its own wording.
+		OS:             cloud.OperatingSystem(foldVocabulary(ctx.String(flagOS))),
 		MachinePattern: ctx.String(flagType),
 		MinVCPU:        ctx.Int(flagCPU),
 		MinMemoryGiB:   float64(ctx.Int(flagMemory)),

@@ -596,6 +596,33 @@ func TestExecMainCmd_ErrorConditions(t *testing.T) {
 	}
 }
 
+// The capability check compares --os against the lowercase neutral constants
+// exactly, while the legacy client it replaced compared with EqualFold. Casting
+// the raw flag into the neutral query therefore turned `--os Linux` and
+// `--os Windows` — spellings that answered before the seam — into a refusal
+// before acquisition. Driving execMainCmd covers the whole path the bug lived
+// on: the capability gate, then the provider's own SupportsOS.
+//
+// Serial: it builds a cli.App.
+func TestExecMainCmdAcceptsAnyOSSpelling(t *testing.T) {
+	for _, spelling := range []string{"linux", "Linux", "LINUX", " linux ", "windows", "Windows", "WINDOWS"} {
+		t.Run(spelling, func(t *testing.T) {
+			var output bytes.Buffer
+
+			mockClient := setupSuccessfulSpotClient(t, "us-east-1", "t2.micro", 50)
+			app := createTestApp(func(ctx *cli.Context) error {
+				return execMainCmd(ctx, context.Background(), awsOnlyRegistry(), mockClient, &output)
+			})
+
+			err := app.Run([]string{appName, "--region", "us-east-1", "--type", "t2.micro", "--os", spelling})
+
+			require.NoError(t, err, "%q must be accepted as an operating system", spelling)
+			assert.Contains(t, output.String(), "t2.micro")
+			mockClient.AssertExpectations(t)
+		})
+	}
+}
+
 func TestExecMainCmd_RegionHandling(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -520,6 +520,23 @@ provider's own capability check, rather than reported by the legacy client after
 pins that no I/O happens — Invariant 3, checked. The wording moved from
 `invalid instance OS: invalid-os` to `aws does not support os "invalid-os"`.
 
+➕ **A _valid_ `--os` in any casing still answers, and that took a follow-up fix.** The
+capability check is `slices.Contains` against the lowercase neutral constants, so casting the
+raw flag into `cloud.Query` also refused `--os Linux` and `--os Windows` — spellings the legacy
+client accepted with `strings.EqualFold` and the recommend path already folds through
+`foldVocabulary`. `rootQuery` now folds the flag the same way, which restores both spellings and
+leaves the invalid-OS wording above untouched (`foldVocabulary("invalid-os")` is the identity).
+The fold is at the CLI boundary, not in `Capabilities.SupportsOS`: a case-folding comparator
+would let a mixed-case `OS` survive the gate and reach the GCP and Azure lookups, which key on
+the lowercase constants, turning a clear refusal into a silent empty answer.
+`TestExecMainCmdAcceptsAnyOSSpelling` drives `execMainCmd` over seven spellings, so it covers
+the gate and the provider's own `SupportsOS` rather than the mapping alone. Folding also trims,
+so `--os " linux "` now answers where it previously errored — that one is new behaviour, not
+restored behaviour, and it is deliberate: `ParseOperatingSystem` trims, so the recommend path
+already accepted it and the whole point of the fold is that one spelling means one thing on
+both commands. The MCP v1 tool needs no equivalent fix: `find_spot_instances` exposes no `os`
+argument and pins `cloud.OSLinux` (`internal/mcp/tools.go:263`).
+
 ➕ **Verified against the shipped binary, not only against the goldens.** The goldens are three
 fixed rows with no zone prices, no zone scores, no unpriced instance and no zero savings, so
 they cannot see the two type changes this task is really about. Building the binary at this
@@ -560,6 +577,15 @@ from `cloud.Candidate` since the seam was added — never published it either.
 `cmd/spotinfo/v1json.go` says so at the field. **Task 5 must delete the field with the schema**,
 which it already does by replacing the whole document with `spotinfo.list/v1`. Do not
 reintroduce it into the neutral domain to close this.
+
+⚠️ **Do not cut a release between Task 3 and Task 5.** A review confirmed the scale from the
+shipped binaries: comparing `--offline --output json` record sets built at this commit and its
+parent, 724 of 1,145 records differ in `us-east-1`, 655 of 929 in `eu-west-1` and 179 of 254 in
+`me-south-1` — and in every differing record `info.emr` is the only changed field. `false` is a
+wrong value, not an omission, so any tag in that window publishes a false EMR claim for the
+majority of rows. The field cannot be dropped inside Task 3 (that moves the golden Task 3 must
+keep byte-identical) and cannot be restored (see above), so the only remedy is to finish Task 5
+before tagging.
 
 ### Task 4: Rename the command to `spotinfo list` and make it cloud-neutral
 
