@@ -60,9 +60,18 @@ func diagnoseNoCandidates(ctx context.Context, provider Provider, request *Recom
 	// provider *has* a live path. Every provider now declares live enrichment —
 	// AWS from its feeds, Azure from the Retail Prices API, GCP from the billing
 	// catalogue behind a key — so a capability test alone would disable this
-	// diagnosis everywhere and leave the whole file dead. An answer served from
-	// the committed snapshot was served from bytes already in memory, and asking
-	// again for a wider slice of them costs nothing.
+	// diagnosis everywhere and leave the whole file dead.
+	//
+	// An answer served from the committed snapshot was served from bytes already
+	// in memory. On GCP and Azure that makes the second query free outright. On
+	// AWS it is weaker than it sounds and the gap is accepted deliberately:
+	// `embedded-snapshot` there means the *feeds* fell back, which is what
+	// --offline guarantees (it also clears the live-price provider) but is
+	// equally what happens when the feeds are unreachable and the EC2 API is
+	// not. In that one state the widened query can still spend a live-price
+	// timeout. It is bounded, it happens only on a run that has already failed
+	// and is already degraded, and it buys the caller the one sentence that says
+	// which constraint emptied the set.
 	if provider.Capabilities().LiveEnrichment && mode != DataModeEmbeddedSnapshot {
 		return plain
 	}

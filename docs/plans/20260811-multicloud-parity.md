@@ -1852,8 +1852,8 @@ missing three placement fields now misses four: `region_estimated_uptime_seconds
       API does not price
 - [x] write a test asserting the snapshot is unchanged after a live call
 - [x] ➕ declare `--gcp-billing-key` on both commands and delete its two `vocabularyGaps` rows in
-  `cmd/spotinfo/vocabulary_test.go` — `vocabularyGaps` is now empty, so the command-tree test is
-  plain equality between the tree and the vocabulary, which is what criterion 3 asks for
+      `cmd/spotinfo/vocabulary_test.go` — `vocabularyGaps` is now empty, so the command-tree test is
+      plain equality between the tree and the vocabulary, which is what criterion 3 asks for
 - [x] run `make verify-data` and `make test` — must pass before Task 14
 
 ➕ **This path _derives_ prices where the snapshot _scrapes_ them, and that is the design
@@ -1897,10 +1897,16 @@ capability.** The guard skipped the widened diagnostic query for any provider de
 `LiveEnrichment`; after this task all three declare it, so that guard would have left the whole
 of `internal/cloud/diagnose.go` unreachable and every `NO_CANDIDATES` message back to the
 generic sentence — caught by the pinned e2e row that asks GCP for `eu-west-1`. The diagnosis now
-runs when the failed answer was served from the committed snapshot, which is exactly when the
-second query costs nothing, and is skipped on `live`/`cached`. This also restores the message on
-Azure, which lost it silently in Task 10. `internal/cloud/diagnose_test.go` covers all three
-cases.
+runs when the failed answer was served from the committed snapshot and is skipped on
+`live`/`cached`. This also restores the message on Azure, which lost it silently in Task 10.
+`internal/cloud/diagnose_test.go` covers all three cases.
+
+**The new guard is exact on GCP and Azure and deliberately approximate on AWS.**
+`spot.Client.DataSource` returns `embedded` whenever _either feed_ fell back, which is what
+`--offline` guarantees — it clears the live-price provider too — but is equally what happens
+when the feeds are unreachable and the EC2 API is not. In that one state the widened query can
+still spend a live-price timeout. Accepted: it is bounded, it happens only on a run that has
+already failed and is already degraded, and the alternative is no diagnosis on any cloud.
 
 ➕ **Files this task's list omits.** `internal/cloud/money.go` (`MoneyFromNanos`, the
 constructor a composed price needs so two nano terms are summed exactly instead of rounded
@@ -1929,6 +1935,20 @@ a price, and a document that drops too much falls back to the snapshot. Post-Com
 lists `--gcp-billing-key` against a real key as maintainer verification; that run is what turns
 the grammar from plausible into known. Expect `m1`/`m2` to drop — Google describes them as
 `Memory-optimized Instance Core`, which carries no series token.
+
+**A thin overlay warns on stderr with both counts**, because a region outside the contract has
+a floor of one: a grammar that stopped reading most descriptions would compose a handful of
+machines and publish a page that is thin but entirely plausible. Below half the catalogue,
+`regionPrices` warns instead of logging at debug —
+`TestAThinlyPricedRegionWarnsWithBothCounts` pins it — so that first real-key run diagnoses in
+one pass rather than a bisect.
+
+⚠️ **One link is untested: that `--offline` reaches the GCP live path through the CLI.**
+`TestOfflineMakesNoRequestEvenWithAKey` proves the provider honours the policy and
+`TestOnlyTheGCPProviderIsWiredForLivePrices` proves the key reaches `WithLivePrices`, but
+nothing asserts `withGCPPrices` passes `fetchPolicy(ctx)` — an in-process test would have to
+plumb a stub endpoint through the command. Low risk, recorded rather than chased; **Task 17's
+matrix run is where it becomes observable.**
 
 ⚠️ **Task 16 doc debt, added to Tasks 11 and 12's.** `docs/clouds.md` and `docs/data-sources.md`
 still say GCP is `us-central1` only and that its answers are always `embedded-snapshot`; both are

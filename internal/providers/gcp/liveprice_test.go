@@ -1,12 +1,15 @@
 package gcp
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -462,6 +465,33 @@ func TestTheCommittedRegionKeepsItsReviewedFloorAndAWidenedRegionDoesNot(t *test
 	assert.Equal(t, cloud.DataModeEmbeddedSnapshot, committed.Mode,
 		"a live document thinner than the reviewed floor may not replace the snapshot")
 	assert.Len(t, committed.Candidates, len(provider.catalog.Machines))
+}
+
+// A thin overlay is the one failure of this path nothing downstream can catch:
+// it answers, it clears the floor, and it looks like a real page. The counts
+// therefore reach stderr, where the first run against a real key will show them.
+func TestAThinlyPricedRegionWarnsWithBothCounts(t *testing.T) {
+	provider, err := New()
+	require.NoError(t, err)
+
+	var logged bytes.Buffer
+
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	stub := newBillingStub(t, [][]byte{
+		skuPage(t, seriesOfCatalogue(t, provider)[:1], []cloud.Region{widenedRegion}, ""),
+	})
+	live := livePriceProvider(t, stub, stubKey, cloud.FetchPolicy{})
+
+	result, err := live.Query(context.Background(), regionQuery(widenedRegion))
+	require.NoError(t, err)
+	require.Equal(t, cloud.DataModeLive, result.Mode)
+
+	assert.Contains(t, logged.String(), "fraction of the catalogue")
+	assert.Contains(t, logged.String(), string(widenedRegion))
+	assert.Contains(t, logged.String(), "catalogue="+strconv.Itoa(len(provider.catalog.Machines)))
 }
 
 // The snapshot is data this binary ships, and a live call may never rewrite it.

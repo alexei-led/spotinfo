@@ -133,6 +133,12 @@ const (
 	// floor, because thinning there is a regression against data a reviewer
 	// accepted.
 	minLiveMachines = 1
+
+	// thinOverlayDivisor is where a composed region stops being "this region
+	// sells fewer series" and starts being "this parser stopped reading the
+	// document": fewer than half the catalogue's machines. It gates a warning,
+	// never a refusal — half is a judgement, not a contract.
+	thinOverlayDivisor = 2
 )
 
 // The failures that discard an overlay. Each is a fallback to the committed
@@ -356,10 +362,24 @@ func (p *Provider) regionPrices(items []billingSKU, region cloud.Region) (map[cl
 		return nil, fmt.Errorf("%w: %d machines against a floor of %d", errThinRegion, len(priced), floor)
 	}
 
-	slog.Debug("gcp live prices composed",
-		slog.String("region", string(region)),
-		slog.Int("machines", len(priced)),
-		slog.Int("catalogue", len(p.catalog.Machines)))
+	// A region outside the contract has no reviewed count to be held to, so a
+	// grammar that stopped recognising most SKU descriptions would compose a
+	// handful of machines, clear the floor of one, and publish an answer that is
+	// thin but entirely plausible. The counts therefore reach stderr rather than
+	// only a debug log: this is the one failure mode of this path that nothing
+	// downstream can catch, and the maintainer's first run against a real key is
+	// where it has to be visible.
+	if len(priced)*thinOverlayDivisor < len(p.catalog.Machines) {
+		slog.Warn("gcp live prices cover a fraction of the catalogue; the billing catalogue may have changed shape",
+			slog.String("region", string(region)),
+			slog.Int("machines", len(priced)),
+			slog.Int("catalogue", len(p.catalog.Machines)))
+	} else {
+		slog.Debug("gcp live prices composed",
+			slog.String("region", string(region)),
+			slog.Int("machines", len(priced)),
+			slog.Int("catalogue", len(p.catalog.Machines)))
+	}
 
 	return priced, nil
 }
