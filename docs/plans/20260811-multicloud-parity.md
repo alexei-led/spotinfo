@@ -1468,6 +1468,36 @@ capability this task lands. Task 8's registry-driven
 `TestOfflineAndRefreshAreRefusedExactlyWhereThereIsNoLiveFeed` was **not** edited and goes green
 on its own, which is exactly the design it was written for.
 
+➕ **A bare `azureprovider.New()` is live, and that made a test reach Azure for real.** The
+zero `LivePriceConfig` has `Offline: false` and `liveBase()` falls back to the contracted
+endpoint, so any test that queries one or two covered regions through a bare provider issues a
+real HTTPS request — and, because the path fails soft, nothing goes red and nothing says a
+request was made. It was caught by temporarily panicking in `sweepRegion` when
+`live.Endpoint == ""` and running `go test ./...`: it fired inside this task's own
+`TestALiveSweepAnswersWithFetchedPricesAndReportsLive`, which built the snapshot reference
+provider that way. `newTestProvider` in `internal/providers/azure/provider_test.go` now returns
+a provider with `Offline: true` and says why, which closes the trap for every current and future
+test in the package; `liveProvider` builds its own from `New()` because it wires a stub endpoint.
+With that fix the probe fires nowhere in the module. The default itself stays live, because it
+matches `spot.Client` and because a bare provider that silently ignored `--offline` would be the
+very silent no-op Phase 2 exists to remove.
+
+➕ **The live sweep is held to `verifyOperatingSystems`' second half as well as the machine
+floor.** A sweep that clears 180 machines on Linux alone is refused (`errUnpricedOS`): all 55
+committed regions price both operating systems, so a Windows half that stops arriving would
+otherwise answer `--os windows --region westeurope` with nothing while the snapshot it replaced
+has rows. A _renamed_ suffix was already caught upstream — the two meters collide on one key at
+two amounts and `SelectCurrent` refuses — so this covers only the disappearance case.
+
+⚠️ **The MCP `refresh` argument is sticky, and this task made it expensive. Task 15 should
+check it.** `mcpProviders.registry` memoises by `policy.Offline` alone, so a registry built for
+a `refresh: true` call is stored under the same key as the default one and every later call
+reuses it. The Azure provider inside it then carries `Policy.Refresh`, and re-sweeps 5.5 MB per
+named region for the life of the process. The shape predates this task — the AWS client carried
+the same sticky flag — but an AWS re-fetch is a conditional GET answered with a 304, where an
+Azure re-sweep is ten full pages. Not a correctness bug: a re-fetched answer reports `live`, and
+that is true.
+
 ⚠️ **`CLAUDE.md:433` is now wrong and Task 16 owns it.** It reads "AWS runs with `--offline`,
 GCP and Azure have no live path" in the e2e testing note. Azure now has one. The suite is still
 network-free — every Azure invocation in `cmd/spotinfo/e2e_test.go` uses the default

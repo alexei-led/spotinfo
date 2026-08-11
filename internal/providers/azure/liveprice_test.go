@@ -167,7 +167,10 @@ func liveProvider(t *testing.T, stub *retailStub, policy cloud.FetchPolicy) *Pro
 	t.Helper()
 	t.Setenv(feedcache.DirEnv, t.TempDir())
 
-	return newTestProvider(t).WithLivePrices(LivePriceConfig{
+	provider, err := New()
+	require.NoError(t, err)
+
+	return provider.WithLivePrices(LivePriceConfig{
 		Endpoint: stub.server.URL,
 		Budget:   2 * time.Second,
 		Policy:   policy,
@@ -271,6 +274,34 @@ func TestAThinSweepIsRefusedRatherThanPublished(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, cloud.DataModeEmbeddedSnapshot, result.Mode)
 	assert.Greater(t, len(result.Candidates), 20, "the snapshot answers, not the thin sweep")
+}
+
+// A sweep that prices a full region for Linux alone is refused too. The
+// " Windows" suffix that classifies a meter is undocumented, so a sweep that
+// stopped producing Windows rows would otherwise clear the machine floor and
+// answer --os windows with nothing while the snapshot it replaced has rows.
+func TestASweepMissingAnOperatingSystemIsRefused(t *testing.T) {
+	provider := newTestProvider(t)
+
+	linuxOnly := make([]CatalogPrice, 0)
+	for _, price := range snapshotPrices(t, provider) {
+		if price.OS == cloud.OSLinux {
+			linuxOnly = append(linuxOnly, price)
+		}
+	}
+	require.Greater(t, len(linuxOnly), provider.minMachines, "the sweep must clear the machine floor")
+
+	stub := newRetailStub(t, retailItems(linuxOnly))
+	live := liveProvider(t, stub, cloud.FetchPolicy{})
+
+	result, err := live.Query(context.Background(), stubRegionQuery())
+	require.NoError(t, err)
+	assert.Equal(t, cloud.DataModeEmbeddedSnapshot, result.Mode)
+
+	windows, err := live.Query(context.Background(),
+		&cloud.Query{OS: cloud.OSWindows, Regions: []cloud.Region{stubRegion}})
+	require.NoError(t, err)
+	assert.NotEmpty(t, windows.Candidates, "the snapshot's windows rows must survive the refusal")
 }
 
 // --offline is the one promise this path must keep exactly: no request at all.

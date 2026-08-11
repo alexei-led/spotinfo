@@ -79,9 +79,19 @@ const (
 	liveUserAgent = "spotinfo/1.0 (+https://github.com/alexei-led/spotinfo)"
 )
 
-// errThinRegion reports a live sweep that priced fewer machines than the
-// reviewed per-region floor the committed snapshot is held to.
-var errThinRegion = errors.New("live sweep prices fewer machines than the contract floor")
+// The two shapes a completed sweep is still refused for. Both mirror a check
+// Catalog.Verify applies to the committed snapshot, because a live region
+// replaces a committed one and must be held to the same shape.
+var (
+	// errThinRegion reports a sweep that priced fewer machines than the reviewed
+	// per-region floor.
+	errThinRegion = errors.New("live sweep prices fewer machines than the contract floor")
+	// errUnpricedOS reports a sweep that priced no machine for an operating
+	// system the catalogue publishes. Every one of the 55 committed regions
+	// prices both, so this is the shape that would let Windows meters simply
+	// disappear and leave a Linux-only region that still clears the floor.
+	errUnpricedOS = errors.New("live sweep prices no machine for an operating system the catalogue publishes")
+)
 
 // LivePriceConfig is what a composer hands the provider. Client, Endpoint and
 // Budget are injection points for tests — the only way the request shape and
@@ -349,8 +359,35 @@ func (p *Provider) livePricesFrom(payload []byte, at time.Time) ([]CatalogPrice,
 	if machines := distinctMachines(prices); machines < p.minMachines {
 		return nil, fmt.Errorf("%w: %d machines against a floor of %d", errThinRegion, machines, p.minMachines)
 	}
+	// The other half of Catalog.verifyOperatingSystems, for the same reason it
+	// exists: the " Windows" suffix that classifies a meter is undocumented, and
+	// a sweep that stopped producing Windows rows would otherwise clear the floor
+	// on Linux alone and answer --os windows with nothing while the snapshot it
+	// replaced has rows. A renamed suffix is already caught upstream — the two
+	// meters collide on one key at two amounts and SelectCurrent refuses — so
+	// this covers the case where they simply stop arriving.
+	if missing := unpricedOS(prices, p.catalog.OperatingSystems); missing != "" {
+		return nil, fmt.Errorf("%w: %s", errUnpricedOS, missing)
+	}
 
 	return prices, nil
+}
+
+// unpricedOS names the first operating system the catalogue publishes that this
+// sweep priced no machine for.
+func unpricedOS(prices []CatalogPrice, published []cloud.OperatingSystem) cloud.OperatingSystem {
+	priced := make(map[cloud.OperatingSystem]struct{}, len(published))
+	for i := range prices {
+		priced[prices[i].OS] = struct{}{}
+	}
+
+	for _, operatingSystem := range published {
+		if _, found := priced[operatingSystem]; !found {
+			return operatingSystem
+		}
+	}
+
+	return ""
 }
 
 // pairLivePrices joins each size's Spot and On-Demand rows, through the same

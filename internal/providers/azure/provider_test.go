@@ -60,13 +60,22 @@ func TestACorruptedSnapshotDisablesTheProvider(t *testing.T) {
 	}
 }
 
+// newTestProvider builds the committed provider with its live price path shut
+// off.
+//
+// The explicit policy is load-bearing, not decoration. A bare New() is live by
+// default — the same way a bare spot.Client is — so a test that queries one or
+// two covered regions through it reaches prices.azure.com for real, and fails
+// soft, so nothing goes red and nothing says a request was made. Every test that
+// means "the committed catalogue" must go through this helper; a test that means
+// "a live sweep" wires its own stub with WithLivePrices.
 func newTestProvider(t *testing.T) *Provider {
 	t.Helper()
 
 	provider, err := New()
 	require.NoError(t, err)
 
-	return provider
+	return provider.WithLivePrices(LivePriceConfig{Policy: cloud.FetchPolicy{Offline: true}})
 }
 
 func TestCapabilitiesNeverClaimRisk(t *testing.T) {
