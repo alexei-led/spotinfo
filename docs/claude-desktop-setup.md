@@ -76,7 +76,7 @@ spotinfo --mcp
 # Should start and wait for input (press Ctrl+C to exit)
 ```
 
-`--offline` answers from the embedded snapshot and makes no request. It belongs to the
+`--offline` answers from the embedded snapshot and makes no price or risk request. It belongs to the
 `list` and `recommend` subcommands, not to the root command: `spotinfo --offline --mcp` exits
 1 with `flag provided but not defined: -offline`. Over MCP, pass `offline: true` as a tool
 argument instead.

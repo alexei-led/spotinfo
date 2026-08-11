@@ -92,7 +92,7 @@ the static price feed does not price falls through to a live EC2 call that the c
 for. Seconds, not milliseconds.
 
 **When speed matters, reach for `--offline` first.** It is the lever that always collapses the
-wait, because it makes no request at all. Naming a region helps only when that region's
+wait, because it makes no price or risk request. Naming a region helps only when that region's
 machines are all priced in the static feed. Measured on one machine, with no AWS credentials
 to answer the fallback:
 
@@ -161,14 +161,17 @@ spotinfo: invalid argument: no command given; run "spotinfo list" to browse or "
 spotinfo recommend --architecture x86_64 --min-vcpu 2 --min-memory-gib 8 --offline
 ```
 
-`--offline` answers from the snapshot inside the binary and makes no request at all. It is
-accepted on every cloud, and it changes what happens on each of them:
+`--offline` answers from the snapshot inside the binary and makes no price or risk request. It
+is accepted on every cloud, and it changes what happens on each of them:
 
 - **AWS** stops fetching the advisor and price feeds, and stops the live EC2 price fallback.
   That is the whole four-second wait from section 5.
 - **Azure** stops the Retail Prices refresh that a one- or two-region query would make.
 - **GCP** stops the Cloud Billing Catalog lookup that `--gcp-billing-key` enables. With no key
   there is nothing to stop, so the flag changes nothing you can see.
+
+It does **not** suppress `--with-score`. A placement figure has no snapshot to come from, so
+that one flag still calls the cloud even under `--offline`.
 
 `--offline` is a flag on `list` and on `recommend`, not on the root command. Over MCP, pass
 the `offline: true` tool argument instead.

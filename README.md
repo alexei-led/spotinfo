@@ -38,7 +38,8 @@ Four properties make that output worth trusting:
 **It works with no credentials.** Price snapshots ship inside the binary, and a weekly job
 refreshes them through a reviewed pull request. AWS and Azure additionally read live feeds
 when they can reach them — AWS on every run, Azure when you name one or two regions — and
-fall back to the snapshot when they cannot. `--offline` skips every request.
+fall back to the snapshot when they cannot. `--offline` skips every price and risk request;
+only `--with-score` still reaches a cloud, because no snapshot carries a placement figure.
 
 **It says what it does not know.** GCP and Azure publish no redistributable interruption
 data, so every candidate reports `RISK: unavailable`. It is never a zero and never a low
@@ -153,6 +154,7 @@ Setup: [MCP server](docs/mcp-server.md) and [Claude Desktop](docs/claude-desktop
 | [AWS placement scores](docs/aws-spot-placement-scores.md) | What a score means, and does not                             |
 | [Data sources](docs/data-sources.md)                      | Every feed, snapshot, cache and refresh rule                 |
 | [Troubleshooting](docs/troubleshooting.md)                | Errors, causes, fixes                                        |
+| [Migrating to v2](docs/migration-v2.md)                   | Every renamed flag, tool, schema and field                   |
 | [Multi-cloud parity](docs/reviews/multicloud-parity.md)   | What GCP and Azure cannot do yet, and why                    |
 
 ## AWS credentials

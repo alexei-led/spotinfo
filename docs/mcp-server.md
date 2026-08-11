@@ -123,7 +123,7 @@ List every Spot machine matching a filter, with its price and its risk status. R
 | `max_price`      | number > 0                                     | —         | omit for no ceiling                                             |
 | `sort`           | `machine\|price\|region\|risk\|savings\|score` | —         | omit to keep the order the cloud publishes                      |
 | `order`          | `asc\|desc`                                    | `asc`     |                                                                 |
-| `offline`        | boolean                                        | `false`   | answer from the committed snapshots and make no request at all  |
+| `offline`        | boolean                                        | `false`   | answer from the committed snapshots; no price or risk request   |
 | `refresh`        | boolean                                        | `false`   | ignore any locally cached provider document for this call       |
 | `with_score`     | boolean                                        | `false`   | placement figures; see the constraints below                    |
 | `min_score`      | integer 0-10                                   | —         | needs `with_score`                                              |
@@ -419,7 +419,7 @@ Configuration file location: `~/.config/claude-desktop/claude_desktop_config.jso
 
 **No data returned:**
 
-- Every cloud ships a committed snapshot, so an unreachable feed degrades the answer rather than failing it. `offline: true` pins that behaviour and makes no request at all
+- Every cloud ships a committed snapshot, so an unreachable feed degrades the answer rather than failing it. `offline: true` pins that behaviour and makes no price or risk request. It does not suppress `with_score`, which has no snapshot to answer from
 - A `list_spot_machines` call that matches nothing is not an error: it returns a normal payload with an empty `candidates` array
 - Check whether a machine exists in a region with the CLI:
 

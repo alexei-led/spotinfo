@@ -24,7 +24,8 @@ and their SHA-256.
 - [API Reference](docs/api-reference.md) - the published payloads and the three MCP tools
 - [Examples](docs/examples.md)
 - [Troubleshooting](docs/troubleshooting.md)
-- [Placement Scores](docs/aws-spot-placement-scores.md)
+- [Migrating to v2](docs/migration-v2.md) - every renamed flag, MCP tool, schema and field
+- [Placement Scores](docs/aws-spot-placement-scores.md) - AWS 1-10 scores and GCP obtainability
 - [Claude Desktop Setup](docs/claude-desktop-setup.md)
 - [CLI and MCP surface review](docs/reviews/cli-and-mcp-surface-review.md)
 - [Surface validation](docs/reviews/surface-validation.md) - the built binary across the

@@ -53,7 +53,7 @@ case worth refusing. The `general-purpose` page was stable across the same
 window, so instability is per-page and every page is checked.
 
 **A second gate brackets the whole read window.** Comparing a page against itself
-cannot see a rollover that lands *between* two pages, and that is the one which
+cannot see a rollover that lands _between_ two pages, and that is the one which
 actually corrupts a snapshot: a Spot price from one generation over an On-Demand
 price from the next. After the last page is read, the updater re-reads the first
 one and refuses when its hash moved:
@@ -188,14 +188,41 @@ The committed snapshot predates both defects, carries the correct 32 GiB for
   `manifest.json`. 333 machine types, both price classes, 5,815 compressed bytes.
 - **Update frequency**: weekly, through the `update-gcp-data` workflow.
 - **Region coverage**: `us-central1` only. The pages server-render one region and switch the
-  rest in with JavaScript, which spotinfo does not execute. A request for any other region
-  returns `NO_CANDIDATES`; no other region is ever substituted.
+  rest in with JavaScript, which spotinfo does not execute. No other region is ever substituted.
+  Without a billing key, an uncovered region is an empty page and a `WARN` at exit 0 on `list`,
+  and `no candidates: gcp publishes no machines in <region>` at exit 1 on `recommend`.
+  `--gcp-billing-key` unlocks further regions for one invocation — see **Live GCP prices** below.
 - **OS coverage**: Linux only.
 - **Risk**: none. GCP publishes preemption history only through the authenticated
   `advice.capacityHistory` beta, so every GCP candidate reports
   `risk.status = "unavailable"` rather than a low number. Consequently GCP serves only the
-  risk-free `cost` workload.
-- **Runtime**: entirely offline. No credential, token, project, or network request.
+  risk-free `cost` workload. `--live-risk` makes the beta figure visible on a ranked page; its
+  kind is `preemption_rate`, so it is never filterable.
+- **Runtime**: credential-free and request-free **by default**, and each of the three ways past
+  that is an explicit opt-in flag: `--gcp-billing-key` for prices, `--live-risk` for a
+  preemption rate, `--with-score` for obtainability. None of the three ever writes to a
+  snapshot.
+
+**Live GCP prices.**
+
+`--gcp-billing-key` (or `SPOTINFO_GCP_BILLING_KEY`) reads the Cloud Billing Catalog API for one
+invocation. It needs an API key and no IAM permission, and Google states no redistribution
+terms for it — which is exactly why nothing it returns may be written into a snapshot.
+
+- **It derives prices; the snapshot scrapes them.** The API prices _components_ — a per-core
+  and a per-GiB-of-memory rate per machine series — and a machine price is their weighted sum,
+  which is how Google documents predefined machine types being billed. The two derivations are
+  never mixed: an overlay covers every queried region or is dropped whole. A caller with a key
+  therefore sees slightly different `us-central1` numbers from one without — same vendor, same
+  instant, two derivations — and that is the honest reading, not a defect to blend away.
+- **Its own provenance.** A live answer appends one `sources[]` entry under the parser version
+  `gcp-billing-catalog/1`, so a composed price is never published under the scrape's provenance.
+- **Cached for 24 hours**, in the shared feed cache, so `SPOTINFO_CACHE_DIR` and
+  `SPOTINFO_CACHE=off` apply. The key travels in the `X-Goog-Api-Key` header, never in a URL, a
+  cache file name, a log line or published provenance.
+- **Fail soft, always.** A missing key, a rejected key, a 500, a document that no longer parses,
+  a region the API does not price — each discards the overlay and answers from the committed
+  snapshot, which for an uncovered region means the same empty answer as without the key.
 
 ### 7. Azure Retail Prices API and Microsoft Learn VM size pages
 
@@ -263,7 +290,7 @@ seconds**. That cost is what bounds the feature:
   because a half-fetched answer cannot report one honest mode.
 - **Cached for 24 hours.** Of the 9,022 rows in that sweep, **8,896 carry an
   `effectiveStartDate` on the first of a month and 126 do not**: the API publishes price
-  *intervals*, and their boundaries land on a monthly cadence. The response also carries
+  _intervals_, and their boundaries land on a monthly cadence. The response also carries
   `cache-control: no-cache` with **neither an `ETag` nor a `Last-Modified`**, so an expired
   entry cannot be revalidated with a conditional request the way both AWS feeds are — it is
   re-downloaded in full. A document that turns over monthly, costs 5.5 MB and ten round trips
@@ -310,10 +337,17 @@ is dropped and reported; a machine with two different prices in effect fails the
 
 ### Excluded GCP sources
 
+Excluded **from the committed snapshot**. Two of them are reachable at runtime behind an
+explicit flag, which is the whole point of the distinction: a source with no redistribution
+terms may be read for one invocation and never written to a snapshot.
+
 - The 12 MB `AF_initDataCallback` blob that powers the region switcher: an undocumented
-  positional array, not a published interface.
-- The Cloud Billing Catalog API: requires an API key.
-- `advice.capacityHistory` and any third-party aggregator.
+  positional array, not a published interface. Excluded outright.
+- The Cloud Billing Catalog API: requires an API key, and Google states no redistribution
+  terms. Runtime only, behind `--gcp-billing-key`.
+- `advice.capacityHistory` and `compute.advice.capacity`: per-project advisory data, requiring
+  Application Default Credentials. Runtime only, behind `--live-risk` and `--with-score`.
+- Any third-party aggregator. Excluded outright.
 
 ## Data Flow Architecture
 
@@ -361,11 +395,13 @@ AWS feed resolution runs in this order. The first tier that answers wins:
    `If-Modified-Since` rather than downloading again; a `304` costs one round trip and no
    payload, and the answer is still reported as `live`.
 3. **Expired cache**: AWS data that is merely old. It outranks the snapshot, which is AWS
-   data that is old *and* frozen at build time.
+   data that is old _and_ frozen at build time.
 4. **Committed snapshot**: the embedded copy. Always available.
 
 Every cache failure is non-fatal: a read-only filesystem costs time, not answers.
-`--offline` answers from tier 4 alone and makes no request. `--refresh` skips tiers 1 and 3.
+`--offline` answers from tier 4 alone and makes no price or risk request. `--refresh` skips
+tiers 1 and 3. Neither governs placement: `--with-score` has no snapshot tier to read, so it
+still calls the provider's placement API even under `--offline`.
 Because a cached answer is neither live nor embedded, it is reported as its own state:
 `cached`.
 
@@ -378,9 +414,14 @@ Beyond the feeds:
   succeeds completely or is discarded completely, in which case the committed catalogue answers
   and the result says `embedded-snapshot`. See **Live Azure prices** under source 7 for what
   triggers a sweep and what it costs.
-- **GCP**: no fallback exists, because no live price path exists. It answers from its committed
-  catalogue and makes no request at run time; `--live-risk` is a separate, opt-in,
-  authenticated path that adds a risk figure and never a price.
+- **GCP**: the same all-or-nothing rule. Without `--gcp-billing-key` there is nothing to fall
+  back from — the catalogue answers and no request is made. With one, the billing overlay
+  covers every queried region or is discarded whole, and the answer falls back to the committed
+  catalogue. `--live-risk` and `--with-score` are separate opt-in authenticated paths that add
+  a risk figure and an obtainability figure respectively, never a price. Neither degrades
+  silently: without a project both are refused before acquisition
+  (`--live-risk needs a project; pass --gcp-project or set GOOGLE_CLOUD_PROJECT`), for the same
+  reason an AWS placement score is an error rather than a substituted number.
 
 ## Data Processing Pipeline
 

@@ -397,7 +397,7 @@ where the last column says otherwise.
 | `--sort`            | the order the cloud publishes | `machine`, `price`, `region`, `risk`, `savings`, `score`                               |
 | `--order`           | `asc`                         | `asc` or `desc`                                                                        |
 | `--output`          | `table`                       | `number` is `list`-only                                                                |
-| `--offline`         | off                           | answer from the embedded snapshot, make no request                                     |
+| `--offline`         | off                           | answer from the embedded snapshot; no price or risk request                            |
 | `--refresh`         | off                           | ignore any cached feed and fetch again                                                 |
 | `--workload`        | `cost`                        | `recommend` only                                                                       |
 | `--top`             | `3`                           | `recommend` only; 1-50                                                                 |
@@ -756,10 +756,18 @@ path:
 | `gcp`   | the Cloud Billing Catalog API behind `--gcp-billing-key`                                                  |
 | `azure` | the anonymous Azure Retail Prices API                                                                     |
 
-`--offline` answers from the embedded snapshot and makes no request. `--refresh` ignores any
-cached feed and fetches again. Both are accepted on all three clouds. A cloud with nothing to
-fetch answers from the snapshot anyway rather than failing — `spotinfo list --cloud gcp
---refresh` with no billing key reports `mode: "embedded-snapshot"` and exits 0.
+`--offline` answers from the embedded snapshot and makes no price or risk request. `--refresh`
+ignores any cached feed and fetches again. Both are accepted on all three clouds. A cloud with
+nothing to fetch answers from the snapshot anyway rather than failing — `spotinfo list --cloud
+gcp --refresh` with no billing key reports `mode: "embedded-snapshot"` and exits 0.
+
+Neither flag governs placement. `--with-score` has no snapshot to read from, so it still calls
+the provider's placement API under `--offline`:
+
+```console
+$ spotinfo list --offline --region us-east-1 --machine '^m5\.large$' --with-score --score-timeout 3
+spotinfo: failed to get spot savings: aws candidate acquisition: score enrichment failed: region us-east-1: spot placement scores unavailable: requires AWS credentials and the ec2:GetSpotPlacementScores permission: …
+```
 
 `data_source.mode` in a JSON answer reports which of the three it was:
 
@@ -1041,9 +1049,10 @@ spotinfo recommend --cloud azure --region westeurope --architecture arm64 \
 - The default `--score-timeout` is 30 seconds, bounded at 300.
 - `--region all` on AWS queries every published region. Pass `--offline` or an explicit
   `--region` when speed matters.
-- `--offline` answers from embedded data and makes no request at all. Measured on one
-  machine, the same single-region AWS query took about 0.1 s offline, about 0.1 s from a warm
-  feed cache, and 2.4 s with `--refresh`, which re-downloads both feeds.
+- `--offline` answers from embedded data and makes no price or risk request — but it does not
+  suppress `--with-score`, which has no snapshot to answer from. Measured on one machine, the
+  same single-region AWS query took about 0.1 s offline, about 0.1 s from a warm feed cache,
+  and 2.4 s with `--refresh`, which re-downloads both feeds.
 
 ## See Also
 

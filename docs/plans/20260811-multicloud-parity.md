@@ -875,7 +875,7 @@ value. The reasoning is under Task 7; nothing empty reached a golden.
 
 ⚠️ **`CLAUDE.md` still describes `spotinfo.recommend/v1` as a live contract** (lines 12,
 15, 68 and 129). Task 16 owns that file and already carries a checkbox for it; it was left alone
-rather than half-rewritten here, but it is wrong as of this commit.
+rather than half-rewritten here, but it is wrong as of this commit. **Resolved in Task 16.**
 
 ### Task 6: Rebuild the MCP surface on the same vocabulary
 
@@ -1540,7 +1540,8 @@ GCP and Azure have no live path" in the e2e testing note. Azure now has one. The
 network-free — every Azure invocation in `cmd/spotinfo/e2e_test.go` uses the default
 `--region all`, which never sweeps, and `e2eEnv` pins a dead proxy on top — but the sentence
 must be corrected, and a future e2e test that names an explicit Azure region needs
-`e2eOfflineFor` extended to Azure.
+`e2eOfflineFor` extended to Azure. **Resolved in Task 16**: the bullet now names both
+arrangements, says Azure and GCP have live paths, and carries the `e2eOfflineFor` obligation.
 
 ---
 
@@ -2253,16 +2254,21 @@ are outside the suite.** They are shell probes over `.bin/spotinfo`, not tests; 
 ### Task 16: [Final] Update documentation
 
 - [x] rewrite `docs/usage.md` against the new vocabulary and both commands
-- [ ] update `README.md`, `docs/quick-start.md`, `docs/clouds.md`, `docs/installation.md`,
+- [x] update `README.md`, `docs/quick-start.md`, `docs/clouds.md`, `docs/installation.md`,
       `docs/mcp-server.md`, `docs/api-reference.md`, `docs/examples.md`,
       `docs/troubleshooting.md`, `docs/claude-desktop-setup.md` and `llms.txt`
-- [ ] verify every documented command by running it, as was done for the current docs
-- [ ] add a migration table to the release notes: every removed flag and its replacement, and
+- [x] verify every documented command by running it, as was done for the current docs — every
+      command was executed; the five in `docs/aws-spot-placement-scores.md` that need
+      `ec2:GetSpotPlacementScores` were confirmed to parse and reach acquisition instead, since
+      no credential on this machine can produce their output
+- [x] add a migration table to the release notes: every removed flag and its replacement, and
       every renamed MCP tool
-- [ ] update `CLAUDE.md` — it names the old MCP tools and the v1 golden rule in several places,
+- [x] update `CLAUDE.md` — it names the old MCP tools and the v1 golden rule in several places,
       and must carry the vocabulary rule, the unified defaults and the new invariants
-- [ ] leave this plan in place — Phase 10 still has to run against the documented surface, so
+- [x] leave this plan in place — Phase 10 still has to run against the documented surface, so
       archiving it here would file it as done before anyone has run the binary
+- ➕ `docs/aws-spot-placement-scores.md`, which the ten-file list never named and which the
+  retired-name grep flagged, and the new `docs/migration-v2.md`: **done**, detail below
 
 ➕ **`docs/usage.md` is done.** Rewritten whole against `.bin/spotinfo` at `2f2b80b`: the old
 page documented a root query command that does not exist, `--type`/`--cpu`/`--memory`/`--price`
@@ -2354,6 +2360,80 @@ On `--cloud gcp` the refusal is different again and arrives from the provider:
 Both are in `troubleshooting.md`. Also left undocumented on purpose: the two `--offline` /
 `--refresh` refusals in `cmd/spotinfo/provider_flags.go:228-238`, which are unreachable
 because all three providers declare `LiveEnrichment`.
+
+➕ **`CLAUDE.md` is rewritten, and the debt recorded at :876-879 is closed.** It carries the
+flag vocabulary and its derivation rule, the unified defaults with the `--sort` exception, the
+eight retired names, the three MCP tools, the four-member schema family, all eight invariants,
+`internal/feedcache` and `internal/reproducible` in Core Components, both placement kinds, the
+per-scope provenance trim, and seven new entries under Common Mistakes. Two claims it made were
+falsified before being rewritten rather than carried forward: the sentence at the old :437-440
+saying `--offline` composes with `--mcp` — it does not, `spotinfo --offline --mcp` exits 1 with
+`flag provided but not defined: -offline`, and the replacement is the per-call `offline` tool
+argument (measured on `list_spot_machines`: **0.13 s with it against 5.60 s without**, feed
+cache off; `list_cloud_regions` declares no such argument and fetches regardless, 7.25 s, mode
+`live`) — and the golden rule at the old :459-463, which named two deleted golden sets. The
+replacement states the stronger property commit `9af906b` actually landed: every golden is
+rendered from one fixed `cloud.Provider` stub, so a weekly data-refresh pull request cannot
+rewrite a contract.
+
+➕ **The `--offline` claim contradicted itself across seven files, and that is the class of
+defect this task exists to remove.** `49d97d5` corrected `api-reference.md` and `llms.txt` to
+"skips the price feeds; does not suppress `--with-score`", but `README.md`, `CLAUDE.md`,
+`docs/data-sources.md`, `docs/usage.md`, `docs/quick-start.md`, `docs/mcp-server.md` and
+`docs/claude-desktop-setup.md` all still said "makes no request at all". Re-measured here
+before changing any of them: `list --offline --with-score --score-timeout 3` blocks for 4.4 s
+and fails on `dial tcp 169.254.169.254:80` — the SDK's IMDS probe — so the old claim is false
+in that one combination and true in every other. All seven now say the same thing.
+
+➕ **`docs/data-sources.md` §6 was never updated for Tasks 12 and 13**, and contradicted five
+other pages. It said GCP's runtime was "entirely offline. No credential, token, project, or
+network request", listed the Cloud Billing Catalog API and `advice.capacityHistory` under
+"Excluded GCP sources" with no note that both are reachable at runtime, and said any uncovered
+region "returns `NO_CANDIDATES`" — measured, that is an empty page and a `WARN` at exit 0 on
+`list` and exit 1 on `recommend`. The section now carries a **Live GCP prices** block matching
+the Azure one beside it, the exclusion list says "excluded **from the committed snapshot**" and
+names the runtime flag for each, and the fallback strategy records that neither `--live-risk`
+nor `--with-score` degrades silently — both are refused without a project
+(`--live-risk needs a project; pass --gcp-project or set GOOGLE_CLOUD_PROJECT`), verified.
+
+➕ **`docs/aws-spot-placement-scores.md` was owned by nobody and was the worst page in the
+tree.** It is not in the ten-file list, not in any commit since `74d6a58`, and is linked from
+the README table and `llms.txt`. Eleven invocations drove `spotinfo --type …`, a root command
+that exits 1. It also carried an internal contradiction — "The tool falls back to embedded data
+if API unavailable" three lines above "reports an error rather than substituting a score" — and
+two score cells (`3 🔴`, `9 🟢`) presented as the answers to two named queries, which no run on
+this machine could have produced. Rewritten whole under the precedent this plan set at :2334
+for the fabricated `--live-risk` table: the illustrative cells are gone rather than re-dressed,
+and the page now opens with the two-kind table (AWS `placement_score` 1-10, GCP `obtainability`
+0.0-1.0, Azure none) and states that they are never normalised. The emoji bands, the
+`Placement Score (Regional)`/`(AZ)` headers and the thirty-minute asterisk were checked against
+`cmd/spotinfo/main.go` and the recorded goldens and are accurate; the three refusals quoted are
+measured. **Its five AWS invocations are the only documented commands in the tree whose output
+could not be produced** — they need `ec2:GetSpotPlacementScores` and this machine has no
+credentials — so each was instead run to prove it is well-formed. A rejected flag is refused
+_before_ acquisition, so the two outcomes are distinguishable, and all five reached acquisition
+and failed with `spot placement scores unavailable: requires AWS credentials and the
+ec2:GetSpotPlacementScores permission`, not with `invalid argument` or `flag provided but not
+defined`. That covers the three-flag combination the page introduces,
+`--with-score --min-score 7 --sort score --order desc`. The page states the credential
+requirement rather than pasting output nobody produced.
+
+➕ **`docs/migration-v2.md` is the single upgrade table, and it is linked from `README.md` and
+`llms.txt`.** It carries all eight retired flags with the verbatim rename hint each one prints,
+the command rename, the two invocations that stopped parsing, the changed defaults, the three
+MCP tool renames, the retired tool arguments, both retired schemas and the new `regions/v1`,
+the renamed response fields, and `info.emr` as **the one dropped capability** — recounted here
+from the committed advisor snapshot rather than copied forward: **731 of 1,192 instance types**
+publish it as `true`. `docs/api-reference.md` keeps its own four-part table as local context;
+the two were read against each other and agree.
+
+➕ **The retired-name grep is clean.** `find_spot_instances`, `recommend_spot_instances`,
+`list_spot_regions`, `spotinfo.recommend/v1`, `/v2`, `recommend-spot-instances-v2`, the eight
+retired flags and `info.emr` appear outside `docs/plans/` and `docs/reviews/` only inside a
+migration or retirement table. Widened to `.github/`, `Makefile`, `scripts/`, `Dockerfile`,
+`.archfit.yaml` and `.mockery.yaml`: zero hits. Counts were re-measured out of `--output csv`
+rather than trusted: AWS 34 regions and 1,155 machines, GCP 333 machines in 1 region, Azure 224
+sizes in 55 regions — every page that states one agrees.
 
 ---
 
