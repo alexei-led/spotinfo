@@ -359,6 +359,11 @@ func execRecommend(ctx *cli.Context, execCtx context.Context, provider cloud.Pro
 		return err
 	}
 
+	provider, err = withPlacement(ctx, provider, request)
+	if err != nil {
+		return err
+	}
+
 	report, err := cloud.Recommend(execCtx, provider, request)
 	if err != nil {
 		return err

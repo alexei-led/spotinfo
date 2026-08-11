@@ -23,9 +23,10 @@ import (
 // converted onto the other's numbers.
 
 // obtainabilityCapabilities is a cloud that publishes a placement figure which
-// is not an integer score. GCP will be one from task 12; the shape is declared
-// here so the surface that has to refuse an integer floor can be tested before
-// the fetcher exists.
+// is not an integer score. GCP is one, and declares zone detail on top so the
+// zone-splitting half of the rendering can be driven from a fixed answer: the
+// real GCP provider serves a regional figure only, and fetches it rather than
+// carrying it in its catalogue.
 func obtainabilityCapabilities() cloud.Capabilities {
 	capabilities := offlineLinuxCapabilities()
 	capabilities.PlacementScore = true
@@ -617,4 +618,48 @@ func TestAnEmptyLookupIsDistinguishableFromNoLookup(t *testing.T) {
 			"a published figure is available by construction; restating it says nothing new")
 		assert.Contains(t, document, `"region_score": 8`)
 	})
+}
+
+// A GCP obtainability call is billed to whatever project it names, so the
+// project has to be stated. It is refused before acquisition and before any
+// credential is resolved, which is what keeps a mistyped flag from costing an
+// API call against a project the caller never mentioned.
+func TestObtainabilityNeedsAProjectToBillItTo(t *testing.T) {
+	// Cleared rather than trusted: a developer machine that exports the variable
+	// would otherwise wire a real lookup from this test.
+	t.Setenv(gcpProjectEnv, "")
+
+	output, err := runRankedPage(t, gcpOnlyRegistry(t), "--cloud", "gcp", "--with-score")
+
+	require.ErrorIs(t, err, cloud.ErrInvalidArgument)
+	assert.Contains(t, err.Error(), "--"+flagGCPProject)
+	assert.Contains(t, err.Error(), gcpProjectEnv)
+	assert.Empty(t, output, "a refusal writes nothing to stdout")
+}
+
+// The figure is fetched for a ranked page, so a browse answer says so instead of
+// drawing an empty column and exiting 0. The refusal lives in the provider,
+// which is the one place both the CLI and the MCP browse tool pass through.
+func TestObtainabilityIsRefusedOnABrowseAnswer(t *testing.T) {
+	t.Setenv(gcpProjectEnv, "")
+
+	output, err := runListWith(t, gcpOnlyRegistry(t), nil,
+		"--cloud", "gcp", "--with-score", "--gcp-project", "example-project")
+
+	require.ErrorIs(t, err, cloud.ErrUnsupportedCapability)
+	assert.Contains(t, err.Error(), "ranked recommendation")
+	assert.Empty(t, output)
+}
+
+// --sort score on a browse answer is refused there too, and for a different
+// reason: the catalogue carries no placement column at all, so the key would
+// order nothing and exit 0.
+func TestSortingABrowsedGCPCatalogueByPlacementIsRefused(t *testing.T) {
+	t.Setenv(gcpProjectEnv, "")
+
+	output, err := runListWith(t, gcpOnlyRegistry(t), nil, "--cloud", "gcp", "--sort", "score")
+
+	require.ErrorIs(t, err, cloud.ErrUnsupportedCapability)
+	assert.Contains(t, err.Error(), string(cloud.PlacementKindObtainability))
+	assert.Empty(t, output)
 }

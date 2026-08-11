@@ -190,7 +190,13 @@ type PlacementDTO struct { //nolint:govet // field order follows the published s
 	ScoreFetchedAt      *string            `json:"score_fetched_at,omitempty"`
 	RegionObtainability *float64           `json:"region_obtainability,omitempty"`
 	ZoneObtainability   map[string]float64 `json:"zone_obtainability,omitempty"`
-	PlacementStatus     PlacementStatus    `json:"placement_status,omitempty"`
+	// RegionEstimatedUptimeSeconds is the uptime estimate Google publishes beside
+	// a regional obtainability. It is seconds rather than a duration string so a
+	// consumer can compare it without parsing, and it is named for its unit the
+	// way window_days and memory_gib are. Absent for every other kind: no other
+	// vendor publishes it.
+	RegionEstimatedUptimeSeconds *float64        `json:"region_estimated_uptime_seconds,omitempty"`
+	PlacementStatus              PlacementStatus `json:"placement_status,omitempty"`
 }
 
 // ListCandidateDTO is one browsable machine: the shared candidate block plus
@@ -437,6 +443,13 @@ func placementDTO(candidate *Candidate) PlacementDTO {
 		case PlacementKindObtainability:
 			if placement.Obtainability != nil {
 				publishObtainability(&published, zone, *placement.Obtainability, len(candidate.Placements))
+			}
+			// Published only beside a regional obtainability, because that is the
+			// only shape it is measured in: the estimate belongs to one advice
+			// answer, and a zone-level answer would need its own field.
+			if zone == "" && placement.EstimatedUptime != nil {
+				seconds := placement.EstimatedUptime.Seconds()
+				published.RegionEstimatedUptimeSeconds = &seconds
 			}
 		}
 	}

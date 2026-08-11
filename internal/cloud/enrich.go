@@ -63,3 +63,50 @@ func enrichRankedRisk(ctx context.Context, provider Provider, request *Recommend
 			slog.String("provider", string(provider.ID())), slog.Any("error", err))
 	}
 }
+
+// PlacementEnricher is implemented by a provider whose placement figures come
+// from an authenticated API rather than from acquisition.
+//
+// AWS does not implement it: GetSpotPlacementScores takes a whole batch of
+// instance types, so its scores are attached while candidates are acquired. GCP
+// does, because compute advice.capacity is billed to the caller's own project
+// and answers about one machine at a time — asking it for a 333-machine
+// catalogue is hundreds of requests for an answer the caller will read three
+// rows of.
+//
+// The same fail-soft rule applies as for risk: a candidate that cannot be
+// enriched keeps PlacementStatusUnavailable, which is the honest report of a
+// figure nobody could fetch.
+type PlacementEnricher interface {
+	// EnrichPlacement attaches placement figures to the candidates it can, in
+	// place, and records the absence on the ones it cannot.
+	EnrichPlacement(ctx context.Context, candidates []*Candidate) error
+}
+
+// enrichRankedPlacement attaches placement figures to a ranked page, if the
+// provider fetches them separately and the request asked for them.
+//
+// Ranked, not raw, for the reason above: it is the difference between at most
+// Top requests and one per catalogue entry. A provider that attaches its own
+// scores during acquisition does not implement the interface and is skipped
+// here, so a page never gets two sets of figures.
+func enrichRankedPlacement(ctx context.Context, provider Provider, request *RecommendRequest, ranked []scored) {
+	if !request.Placement.Enabled {
+		return
+	}
+
+	enricher, ok := provider.(PlacementEnricher)
+	if !ok {
+		return
+	}
+
+	candidates := make([]*Candidate, 0, len(ranked))
+	for i := range ranked {
+		candidates = append(candidates, ranked[i].candidate)
+	}
+
+	if err := enricher.EnrichPlacement(ctx, candidates); err != nil {
+		slog.Warn("live placement figures unavailable; reporting them as unavailable",
+			slog.String("provider", string(provider.ID())), slog.Any("error", err))
+	}
+}

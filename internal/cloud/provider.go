@@ -47,8 +47,14 @@ type Capabilities struct {
 	MachineSpec      bool
 	Risk             bool
 	PlacementScore   bool
-	ZoneDetail       bool
-	LiveEnrichment   bool
+	// PlacementBeta says the vendor interface behind PlacementScore is a beta or
+	// preview API. It is declared rather than inferred from the cloud, because a
+	// caller reading a figure is entitled to know its interface can change or be
+	// withdrawn — Google's advice.capacity is beta, AWS's placement score is GA,
+	// and nothing else in the answer distinguishes them.
+	PlacementBeta  bool
+	ZoneDetail     bool
+	LiveEnrichment bool
 }
 
 // SupportsOS reports whether the provider publishes prices for an OS.

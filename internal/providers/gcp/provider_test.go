@@ -74,9 +74,16 @@ func TestProviderDeclaresOnlyWhatTheCommittedPagesPublish(t *testing.T) {
 	assert.True(t, capabilities.Has(cloud.CapabilityOnDemandPrice))
 	assert.True(t, capabilities.Has(cloud.CapabilityMachineSpec))
 	assert.False(t, capabilities.Has(cloud.CapabilityRisk), "gcp publishes no anonymous preemption history")
-	assert.False(t, capabilities.Has(cloud.CapabilityPlacementScore))
 	assert.False(t, capabilities.Has(cloud.CapabilityZoneDetail))
 	assert.False(t, capabilities.Has(cloud.CapabilityLiveEnrichment))
+
+	// Declared, and named. compute advice.capacity publishes a probability, so a
+	// consumer must read it as one: an integer floor over it has no reviewed
+	// meaning, and SupportsScoreFloor is the single rule both surfaces read.
+	assert.True(t, capabilities.Has(cloud.CapabilityPlacementScore))
+	assert.Equal(t, cloud.PlacementKindObtainability, capabilities.PlacementKind)
+	assert.False(t, capabilities.SupportsScoreFloor())
+	assert.True(t, capabilities.PlacementBeta, "the advice API has no v1 form, and a caller is entitled to know")
 }
 
 func TestQueryPublishesBothPricesAndAnExplicitlyUnavailableRisk(t *testing.T) {

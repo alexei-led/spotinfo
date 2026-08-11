@@ -99,6 +99,7 @@
             "type": "object",
             "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}
           },
+          "region_estimated_uptime_seconds": {"type": "number", "exclusiveMinimum": 0},
           "placement_status": {"type": "string", "enum": ["unavailable"]}
         }
       }

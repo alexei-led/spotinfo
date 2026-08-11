@@ -1727,13 +1727,90 @@ against its schema file.
 - Create: `internal/providers/gcp/placement.go`, `internal/providers/gcp/placement_test.go`
 - Modify: `internal/providers/gcp/provider.go`
 
-- [ ] call `compute.advice.capacity` (beta) with the ADC machinery already built for
+- [x] call `compute.advice.capacity` (beta) with the ADC machinery already built for
       `--live-risk`, reusing the same lazy credential resolution
-- [ ] respect the documented limit of 5 machine types per request
-- [ ] carry `estimatedUptime` alongside `obtainability`
-- [ ] mark the capability as beta in `Capabilities()` and say so in the help text
-- [ ] write tests against a stub transport: success, over-limit batching, no credentials
-- [ ] run `make test` — must pass before Task 13
+- [x] respect the documented limit of 5 machine types per request
+- [x] carry `estimatedUptime` alongside `obtainability`
+- [x] mark the capability as beta in `Capabilities()` and say so in the help text
+- [x] write tests against a stub transport: success, over-limit batching, no credentials
+- [x] run `make test` — must pass before Task 13
+
+➕ **One machine type per request, and that is a reading of the _response_ rather than of the
+limit.** Google's REST reference for `advice.capacity` sends two `instanceSelections` and
+answers with **one** `recommendations[]` entry carrying a single `scores` block over two
+`shards`, and the availability guide states the score "applies to the entire configuration
+rather than per individual machine type". A five-type request therefore scores the _set_:
+attaching that figure to each member would publish a number Google measured for none of them,
+which is precisely what `PlacementKind` exists to prevent. So `maxMachineTypesPerRequest` is
+the documented ceiling and `capacityAdviceBody` refuses above it — never truncates, which is
+the failure `docs/reviews/multicloud-parity.md` §5 asks to avoid — while `obtainability` asks
+one type at a time. `TestCapacityAdviceBodyHonoursGooglesMachineTypeCeiling` drives 0, 1, 5 and
+6 types, and `TestEnrichPlacementAsksAboutEveryMachineOverTheRequestCeiling` drives a
+seven-machine page and asserts seven requests with no machine dropped. Raising the batch is
+only correct if Google starts scoring each selection separately.
+
+➕ **`--with-score` on `list --cloud gcp` is refused, so Task 4's ⚠️ note is answered the other
+way: `list` still has no use for `--gcp-project`.** The figure is fetched, not read from the
+catalogue, and it is fetched for the ranked page — one authenticated request per row against a
+333-machine catalogue is hundreds of calls billed to the caller's own project for an answer
+nobody browses. The refusal lives in `gcp.Provider.Query`, which is the one place the CLI and
+the MCP `list_spot_machines` tool both pass through; a CLI-only check would have left the MCP
+browse tool answering an empty column and exiting 0. `Capabilities().PlacementScore` is
+declared **unconditionally** and not from whether a fetcher is wired: both surfaces check
+capabilities on the provider they resolved, before `withPlacement` attaches one, so a
+conditional declaration would refuse the single request that can be served.
+
+➕ **Two more refusals landed in the same place, for different reasons.** `--sort score` on a
+browsed GCP catalogue can never be honoured — there is no placement column at acquisition at
+all — and an integer `--min-score` states no reviewed mapping onto a probability. Both surfaces
+already refuse the second (`SupportsScoreFloor`); the provider refuses it too, which is where a
+surface that forgot is caught. This makes GCP stricter than AWS `list`, whose `--sort score`
+silent no-op Task 11 recorded as deferred: that one is a key AWS _can_ serve under
+`--with-score`, so it is a different defect.
+
+➕ **`estimatedUptime` is published as `region_estimated_uptime_seconds`.**
+`PlacementObservation` gained `EstimatedUptime *time.Duration` and `PlacementDTO` a nullable
+seconds field, added to both `docs/plans/contracts/{list-v1,recommend-v3-success}.schema.json`.
+Seconds rather than Google's `"600s"` duration string so a consumer compares without parsing,
+and named for its unit the way `window_days` and `memory_gib` are. It is `omitempty` and only
+GCP sets it, so every recorded golden stayed byte-identical with no `UPDATE_GOLDEN` run. It is
+not rendered in the table or CSV: those pages carry one placement column, and a second column
+empty on two of three clouds buys less than the JSON field does.
+
+➕ **`Capabilities.PlacementBeta` has exactly one reader, and it is not GCP-specific.**
+`withPlacement` logs one warning on stderr when the resolved provider declares it, naming the
+cloud and the kind. Nothing in the published answer distinguishes a GA interface from a preview
+one, and the advice API has no v1 form. The `--with-score` help text says the same thing
+statically.
+
+➕ **`perPair` is now shared by both authenticated lookups.** `EnrichRisk` and
+`EnrichPlacement` deduplicate the page by (machine, region) and fan out under the same
+`maxConcurrentLookups` bound; the loop was written twice and is now written once, with the
+failure accounting under a mutex and the candidate writes outside it — the groups partition the
+page, so no two callbacks can touch the same candidate. `endpointOr` and `transportOr` are the
+matching extraction for the endpoint override and the lazy ADC client, so there is one
+`sync.OnceValues` credential resolution however many APIs are asked. `go test -race` is clean
+on `internal/providers/gcp` and `internal/cloud`.
+
+➕ **No test resolves real credentials or reaches Google.** Every success path injects a
+`httptest` server through `PlacementConfig.Client`; the no-credentials test swaps the
+package-level `httpClient` for a failing resolver and is deliberately serial. The two CLI tests
+that could have wired a real lookup clear `GOOGLE_CLOUD_PROJECT` with `t.Setenv` and assert a
+refusal, so neither ever reaches `google.DefaultClient` — a developer machine with Application
+Default Credentials would otherwise have made this suite call the live API.
+
+➕ **Files this task's list omits.** `internal/cloud/{enrich,recommend,observations,provider,
+schema}.go` (the `PlacementEnricher` seam, `enrichRankedPlacement`, the uptime field and
+`PlacementBeta`), `internal/providers/gcp/live.go` (the three extractions),
+`cmd/spotinfo/placement.go` (new, `withPlacement`), `cmd/spotinfo/liverisk.go`
+(`resolveGCPProject`, shared with `--live-risk`), `cmd/spotinfo/{recommend,provider_flags}.go`,
+both contract schema files, and `cmd/spotinfo/{placement,e2e}_test.go` plus
+`internal/providers/gcp/provider_test.go`.
+
+⚠️ **A ranked page's obtainability is reachable only from the CLI**, for the same reason Task 11
+recorded: `recommend_spot_machines` declares none of the four score arguments, and the MCP
+surface has no `gcp_project` argument at all. **Task 15 should check this** alongside the
+existing criterion-2 notes.
 
 ---
 

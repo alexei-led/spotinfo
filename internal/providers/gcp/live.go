@@ -117,18 +117,29 @@ type LiveRiskConfig struct {
 }
 
 // endpoint returns the advice API URL template for this configuration.
-func (c *LiveRiskConfig) endpoint() string {
-	if c.Endpoint != "" {
-		return c.Endpoint
-	}
-
-	return capacityHistoryEndpoint
-}
+func (c *LiveRiskConfig) endpoint() string { return endpointOr(c.Endpoint, capacityHistoryEndpoint) }
 
 // transport returns the injected client, or the ADC one resolved on first use.
-func (c *LiveRiskConfig) transport() (*http.Client, error) {
-	if c.Client != nil {
-		return c.Client, nil
+func (c *LiveRiskConfig) transport() (*http.Client, error) { return transportOr(c.Client) }
+
+// endpointOr resolves a test override against the contracted endpoint. Shared by
+// every authenticated lookup in this package so one of them cannot quietly stop
+// honouring the override its tests depend on.
+func endpointOr(override, contracted string) string {
+	if override != "" {
+		return override
+	}
+
+	return contracted
+}
+
+// transportOr returns an injected client, or the Application Default Credentials
+// one resolved on first use. Every authenticated call in this package goes
+// through it, so there is exactly one credential resolution and one cached
+// negative result however many APIs are asked.
+func transportOr(injected *http.Client) (*http.Client, error) {
+	if injected != nil {
+		return injected, nil
 	}
 
 	return httpClient()
@@ -210,6 +221,51 @@ func (p *Provider) EnrichRisk(ctx context.Context, candidates []*cloud.Candidate
 	ctx, cancel := context.WithTimeout(ctx, liveRiskTimeout)
 	defer cancel()
 
+	attempted, failed, firstErr := perPair(ctx, candidates,
+		func(ctx context.Context, machine, region string, group []*cloud.Candidate) error {
+			risk, lookupErr := p.preemptionRisk(ctx, client, machine, region)
+			if lookupErr != nil {
+				slog.Debug("no preemption history",
+					slog.String("machine", machine), slog.String("region", region),
+					slog.Any("error", lookupErr))
+
+				return lookupErr
+			}
+
+			for _, candidate := range group {
+				candidate.Risk = risk
+			}
+
+			return nil
+		})
+
+	// One machine with no history is routine and stays at Debug. Every lookup
+	// failing is not: it is one cause for the whole page — the Compute API
+	// disabled, an unknown project, no compute.advice permission — and it is
+	// indistinguishable from success in the rendered answer, because both leave
+	// every candidate at RiskStatusUnavailable. The caller asked for this data
+	// explicitly and paid an API call per pair for it, so the batch reports.
+	if failed > 0 && failed == attempted {
+		return fmt.Errorf("all %d preemption lookups failed, first: %w", failed, firstErr)
+	}
+
+	return nil
+}
+
+// perPair runs one lookup per distinct (machine, region) pair on a page and
+// reports how many were attempted, how many failed, and the first failure.
+//
+// A page usually repeats a machine across regions or a region across machines,
+// and both authenticated APIs answer per pair, so the deduplication is the
+// difference between one call per row and one call per question. Lookups run
+// concurrently up to maxConcurrentLookups.
+//
+// The groups partition the page — a candidate belongs to exactly one pair — so
+// a callback writes only to candidates no other callback can see. The mutex
+// here guards the failure accounting alone.
+func perPair(ctx context.Context, candidates []*cloud.Candidate,
+	lookup func(ctx context.Context, machine, region string, group []*cloud.Candidate) error,
+) (attempted, failed int, firstErr error) {
 	type key struct{ machine, region string }
 
 	pending := make(map[key][]*cloud.Candidate)
@@ -222,8 +278,6 @@ func (p *Provider) EnrichRisk(ctx context.Context, candidates []*cloud.Candidate
 		waitGroup sync.WaitGroup
 		mutex     sync.Mutex
 		slots     = make(chan struct{}, maxConcurrentLookups)
-		failed    int
-		firstErr  error
 	)
 
 	for k, group := range pending {
@@ -235,43 +289,24 @@ func (p *Provider) EnrichRisk(ctx context.Context, candidates []*cloud.Candidate
 			slots <- struct{}{}
 			defer func() { <-slots }()
 
-			risk, lookupErr := p.preemptionRisk(ctx, client, k.machine, k.region)
+			lookupErr := lookup(ctx, k.machine, k.region, group)
+			if lookupErr == nil {
+				return
+			}
 
 			mutex.Lock()
 			defer mutex.Unlock()
 
-			if lookupErr != nil {
-				slog.Debug("no preemption history",
-					slog.String("machine", k.machine), slog.String("region", k.region),
-					slog.Any("error", lookupErr))
-
-				failed++
-				if firstErr == nil {
-					firstErr = lookupErr
-				}
-
-				return
-			}
-
-			for _, candidate := range group {
-				candidate.Risk = risk
+			failed++
+			if firstErr == nil {
+				firstErr = lookupErr
 			}
 		}(k, group)
 	}
 
 	waitGroup.Wait()
 
-	// One machine with no history is routine and stays at Debug. Every lookup
-	// failing is not: it is one cause for the whole page — the Compute API
-	// disabled, an unknown project, no compute.advice permission — and it is
-	// indistinguishable from success in the rendered answer, because both leave
-	// every candidate at RiskStatusUnavailable. The caller asked for this data
-	// explicitly and paid an API call per pair for it, so the batch reports.
-	if failed > 0 && failed == len(pending) {
-		return fmt.Errorf("all %d preemption lookups failed, first: %w", failed, firstErr)
-	}
-
-	return nil
+	return len(pending), failed, firstErr
 }
 
 // preemptionRisk fetches and summarises one machine-region history.

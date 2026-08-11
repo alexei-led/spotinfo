@@ -19,7 +19,11 @@ type Provider struct {
 	// liveRisk is nil unless the caller opted into the authenticated preemption
 	// lookup. See live.go: it is per-project data and cannot be committed.
 	liveRisk *LiveRiskConfig
-	sources  []cloud.SourceRef
+	// placement is nil unless the caller opted into the authenticated capacity
+	// advice lookup. See placement.go: it is a real-time reading, valid only when
+	// it is taken, and it is fetched for a ranked page rather than a catalogue.
+	placement *PlacementConfig
+	sources   []cloud.SourceRef
 }
 
 // New builds the GCP provider from the committed snapshot. A snapshot that
@@ -43,20 +47,34 @@ func New() (*Provider, error) {
 // ID identifies this provider.
 func (p *Provider) ID() cloud.ProviderID { return cloud.ProviderGCP }
 
-// Capabilities reports what the committed pages can answer.
+// Capabilities reports what this provider can answer.
 //
 // Risk is false and stays false: GCP publishes preemption history only through
 // the authenticated `advice.capacityHistory` beta, so this provider has nothing
-// to report and must not let silence be ranked as low interruption. Placement
-// scores, zone detail and live enrichment would all require an authenticated
-// API, which the offline contract rules out.
+// to report and must not let silence be ranked as low interruption. Zone detail
+// and live enrichment stay false for the same offline-contract reason.
+//
+// PlacementScore is true, and it is declared unconditionally rather than from
+// whether a lookup is wired. Both surfaces check capabilities on the provider
+// they resolved, before the ranked path attaches the fetcher, so a conditional
+// declaration would refuse the one request that can be served. What is not
+// served — a placement figure on a browse answer — is refused by Query, which
+// is the one place both surfaces pass through.
 func (p *Provider) Capabilities() cloud.Capabilities {
 	return cloud.Capabilities{
 		OperatingSystems: []cloud.OperatingSystem{p.catalog.OS},
 		Architectures:    []cloud.Architecture{cloud.ArchitectureX8664, cloud.ArchitectureARM64},
-		SpotPrice:        true,
-		OnDemandPrice:    true,
-		MachineSpec:      true,
+		// compute advice.capacity returns a probability in 0.0-1.0, not the
+		// integer 1-10 AWS publishes, which is why SupportsScoreFloor refuses an
+		// integer --min-score here rather than mapping one onto it.
+		PlacementKind:  cloud.PlacementKindObtainability,
+		SpotPrice:      true,
+		OnDemandPrice:  true,
+		MachineSpec:    true,
+		PlacementScore: true,
+		// The advice API has no v1 form; beta is the only channel that serves it,
+		// so a caller reading the figure is told the interface can still change.
+		PlacementBeta: true,
 	}
 }
 
@@ -88,6 +106,9 @@ func (p *Provider) Query(_ context.Context, query *cloud.Query) (cloud.Result, e
 	if err := capabilities.Require(query.CapabilityNeeds()); err != nil {
 		return cloud.Result{}, fmt.Errorf("gcp: %w", err)
 	}
+	if err := p.acceptsPlacement(query, capabilities); err != nil {
+		return cloud.Result{}, err
+	}
 
 	pattern, err := machinePattern(query.MachinePattern)
 	if err != nil {
@@ -113,6 +134,36 @@ func (p *Provider) Query(_ context.Context, query *cloud.Query) (cloud.Result, e
 		Sources:    slices.Clone(p.sources),
 		Candidates: candidates,
 	}, nil
+}
+
+// acceptsPlacement refuses the placement requests this catalogue cannot answer,
+// before acquisition and rather than answering an empty column with an exit code
+// of zero.
+//
+// Three different refusals, because the reasons differ. A figure asked for here
+// is fetched afterwards, for a ranked page: one authenticated request per
+// machine against a 333-machine catalogue is hundreds of calls billed to the
+// caller's own project for an answer nobody browses. A sort by placement can
+// never be honoured at acquisition, because the catalogue carries no such
+// column at all. And an integer floor states no reviewed mapping onto a
+// probability — the surfaces refuse it too, and this is where a surface that
+// forgot is caught.
+func (p *Provider) acceptsPlacement(query *cloud.Query, capabilities cloud.Capabilities) error {
+	if query.Placement.Enabled && p.placement == nil {
+		return fmt.Errorf(
+			"%w: gcp obtainability is fetched for a ranked recommendation only, and needs a Google Cloud project",
+			cloud.ErrUnsupportedCapability)
+	}
+	if query.Sort.Key == cloud.SortByPlacementScore {
+		return fmt.Errorf("%w: gcp cannot order a catalogue by %s, which it fetches for a ranked page instead",
+			cloud.ErrUnsupportedCapability, capabilities.PlacementKind)
+	}
+	if query.Placement.MinScore > 0 && !capabilities.SupportsScoreFloor() {
+		return fmt.Errorf("%w: gcp publishes %s, and an integer 1-%d floor states no reviewed mapping onto it",
+			cloud.ErrUnsupportedCapability, capabilities.PlacementKind, cloud.MaxPlacementScore)
+	}
+
+	return nil
 }
 
 // covers reports whether the requested regions include the one region this

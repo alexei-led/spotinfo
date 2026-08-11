@@ -918,6 +918,16 @@ func TestE2ERejectedInputExitsNonZeroWithAnEmptyStdout(t *testing.T) {
 			contains: "subscription",
 		},
 		{
+			// GCP does publish a placement figure, and this build does fetch
+			// it — for a ranked page, one authenticated request per row. A
+			// browse answer would be hundreds of calls billed to the caller's
+			// own project, so it is refused rather than answered with an empty
+			// column and an exit code of 0.
+			name:     "a browse answer asking for a figure fetched per recommendation",
+			args:     []string{"list", "--cloud", "gcp", "--with-score"},
+			contains: "ranked recommendation",
+		},
+		{
 			// The same companion rule on the other command, where the four
 			// score flags are newly declared. It is here rather than only in a
 			// unit test because this is where the process exit code and the

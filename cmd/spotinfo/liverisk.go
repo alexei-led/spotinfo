@@ -110,23 +110,37 @@ func withLiveRisk(ctx *cli.Context, provider cloud.Provider, request *cloud.Reco
 		return nil, unsupportedLiveRisk(provider.ID())
 	}
 
-	project := strings.TrimSpace(lineageString(ctx, flagGCPProject))
-	if project == "" {
-		project = strings.TrimSpace(os.Getenv(gcpProjectEnv))
-	}
-	if project == "" {
-		return nil, fmt.Errorf("%w: --%s needs a project; pass --%s or set %s",
-			cloud.ErrInvalidArgument, flagLiveRisk, flagGCPProject, gcpProjectEnv)
-	}
-	// Refused here rather than at the request, because the identifier is
-	// interpolated into the API path: an unchecked value redirects the call to a
-	// different compute endpoint, whose 404 is then reported as "no preemption
-	// history" for every machine on the page.
-	if err := gcpprovider.ValidateProjectID(project); err != nil {
-		return nil, fmt.Errorf("%w: %w", cloud.ErrInvalidArgument, err)
+	project, err := resolveGCPProject(ctx, flagLiveRisk)
+	if err != nil {
+		return nil, err
 	}
 
 	request.EnrichRisk = true
 
 	return gcp.WithLiveRisk(gcpprovider.LiveRiskConfig{ProjectID: project}), nil
+}
+
+// resolveGCPProject reads the project an authenticated GCP call is billed to,
+// naming the flag that asked for the call in its refusal.
+//
+// Shared by every such flag, so --live-risk and --with-score cannot come to
+// disagree about where the project comes from or what an invalid one does. The
+// identifier is validated here rather than at the request because it is
+// interpolated into the API path: an unchecked value redirects the call to a
+// different compute endpoint, whose 404 is then reported as "no data" for every
+// machine on the page.
+func resolveGCPProject(ctx *cli.Context, asking string) (string, error) {
+	project := strings.TrimSpace(lineageString(ctx, flagGCPProject))
+	if project == "" {
+		project = strings.TrimSpace(os.Getenv(gcpProjectEnv))
+	}
+	if project == "" {
+		return "", fmt.Errorf("%w: --%s needs a project; pass --%s or set %s",
+			cloud.ErrInvalidArgument, asking, flagGCPProject, gcpProjectEnv)
+	}
+	if err := gcpprovider.ValidateProjectID(project); err != nil {
+		return "", fmt.Errorf("%w: %w", cloud.ErrInvalidArgument, err)
+	}
+
+	return project, nil
 }

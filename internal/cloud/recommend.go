@@ -330,6 +330,7 @@ func Recommend(ctx context.Context, provider Provider, request *RecommendRequest
 	// After ranking, so a live call can neither reorder the answer nor be made
 	// for a candidate that did not survive the filters.
 	enrichRankedRisk(ctx, provider, request, ranked)
+	enrichRankedPlacement(ctx, provider, request, ranked)
 
 	// The v2 success contract declares data_source.sources with minItems 1, so a
 	// result that cannot say where its data came from cannot be published as a

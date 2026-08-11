@@ -221,8 +221,14 @@ type PlacementObservation struct {
 	// Obtainability is the PlacementKindObtainability value, 0.0-1.0. It is a
 	// pointer because 0.0 is a real obtainability, not an absent one.
 	Obtainability *float64
-	Location      Location
-	Kind          PlacementKind
+	// EstimatedUptime accompanies an obtainability: the minimum time most of the
+	// requested Spot machines are expected to run before preemption. Google
+	// publishes it beside the probability, and the two answer different halves of
+	// "is this machine worth asking for" — how likely the request is to succeed,
+	// and how long it is likely to last. Absent unless the provider published it.
+	EstimatedUptime *time.Duration
+	Location        Location
+	Kind            PlacementKind
 	// Score is the PlacementKindPlacementScore value, an integer 1-10.
 	Score int
 }

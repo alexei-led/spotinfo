@@ -55,8 +55,10 @@ func providerID(ctx *cli.Context) (cloud.ProviderID, error) {
 func scoreFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.BoolFlag{
-			Name:  flagWithScore,
-			Usage: "include provider placement figures (experimental)",
+			Name: flagWithScore,
+			Usage: "include provider placement figures (experimental; on " + string(cloud.ProviderGCP) +
+				" the figure is obtainability from a beta Google API, fetched for a recommendation " +
+				"and needing --" + flagGCPProject + ")",
 		},
 		&cli.IntFlag{
 			Name: flagMinScore,
