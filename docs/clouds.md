@@ -10,21 +10,21 @@ move without a code change.
 
 ## Matrix
 
-|                          | AWS                       | GCP                              | Azure                    |
-| ------------------------ | ------------------------- | -------------------------------- | ------------------------ |
-| `spotinfo recommend`     | yes                       | yes                              | yes                      |
-| `spotinfo` query command | yes                       | no                               | no                       |
-| Regions in the snapshot  | 34 (Advisor), 40 (prices) | 1 — `us-central1`                | 55                       |
-| Machine types            | 1,192                     | 333                              | 224                      |
-| Machine series           | not enumerated            | 18                               | 26                       |
-| Architectures            | x86_64, arm64             | x86_64 (275), arm64 (58)         | x86_64 (187), arm64 (37) |
-| Operating systems        | linux, windows            | linux                            | linux, windows           |
-| Interruption risk        | published buckets         | `unavailable`, or opt-in live    | `unavailable`            |
-| Workloads accepted       | cost, web, ci, batch      | cost                             | cost                     |
-| On-Demand price in v2    | no                        | yes                              | yes                      |
-| Placement scores         | yes                       | no                               | no                       |
-| Live price fallback      | yes                       | no                               | yes, 1-2 named regions   |
-| Credentials              | optional                  | optional, for `--live-risk` only | none                     |
+|                         | AWS                       | GCP                                   | Azure                    |
+| ----------------------- | ------------------------- | ------------------------------------- | ------------------------ |
+| `spotinfo recommend`    | yes                       | yes                                   | yes                      |
+| `spotinfo list`         | yes                       | yes                                   | yes                      |
+| Regions in the snapshot | 34 (Advisor), 40 (prices) | 1 — `us-central1`                     | 55                       |
+| Machine types           | 1,192                     | 333                                   | 224                      |
+| Machine series          | not enumerated            | 18                                    | 26                       |
+| Architectures           | x86_64, arm64             | x86_64 (275), arm64 (58)              | x86_64 (187), arm64 (37) |
+| Operating systems       | linux, windows            | linux                                 | linux, windows           |
+| Interruption risk       | published buckets         | `unavailable`, or opt-in live         | `unavailable`            |
+| Workloads accepted      | cost, web, ci, batch      | cost                                  | cost                     |
+| On-Demand price in v2   | no                        | yes                                   | yes                      |
+| Placement figures       | score, 1-10               | obtainability, beta                   | no                       |
+| Live price fallback     | yes                       | yes, with an API key                  | yes, 1-2 named regions   |
+| Credentials             | optional                  | optional, for `--live-risk`, `--with-score` and `--gcp-billing-key` | none |
 
 Every limit on this page is either a vendor limit or a reviewed decision.
 [reviews/multicloud-parity.md](reviews/multicloud-parity.md) says which is which, and what it
@@ -69,12 +69,13 @@ does not tell you.
 
 ## GCP
 
-**Entry point.** `spotinfo recommend --cloud gcp` only. The query command renders an
-interruption column, which GCP cannot fill:
+**Entry points.** Both. `spotinfo list --cloud gcp` browses the catalogue and
+`spotinfo recommend --cloud gcp` ranks it. The risk column prints its status, never a number
+GCP did not publish:
 
 ```console
-$ spotinfo --cloud gcp --type "n2.*"
-spotinfo: gcp: unsupported capability: risk; the query command renders interruption risk and is AWS-only; use "spotinfo recommend --cloud gcp" instead
+$ spotinfo list --cloud gcp --machine "^n2-standard-4$" --output text
+region=us-central1, machine=n2-standard-4, vCPU=4, memory=16GiB, saving=47%, risk='unavailable', price=0.1013
 ```
 
 **Regions.** `us-central1` only. Google publishes Spot prices per region through a page
@@ -85,7 +86,13 @@ selector, and the committed snapshot covers the one reviewed region. Any other r
 `m2`, `m3`, `n1`, `n2`, `n2d`, `n4`, `n4a`, `n4d`, `t2a`, `t2d`. The Arm series are `c4a`,
 `n4a` and `t2a`.
 
-**Operating systems.** Linux only. `--os windows` returns `UNSUPPORTED_CAPABILITY`.
+**Operating systems.** Linux only, and that is Google's limit rather than a missing feature —
+see [What stays refused](#what-stays-refused-and-why).
+
+```console
+$ spotinfo list --cloud gcp --os windows
+spotinfo: gcp: unsupported capability: os windows: this cloud publishes spot prices for linux only
+```
 
 **Prices.** Every machine carries a Spot price, a paired On-Demand price and a derived
 savings percent. The catalogue ships in the binary and makes no request at run time.
@@ -127,7 +134,7 @@ application-default login`, a service account, or the GCE metadata server. Witho
 
 ## Azure
 
-**Entry point.** `spotinfo recommend --cloud azure` only, for the same reason as GCP.
+**Entry points.** Both, as on GCP. The risk column prints `unavailable`.
 
 **Regions.** 55. They are enumerated in
 [data-sources.md](data-sources.md#7-azure-retail-prices-api-and-microsoft-learn-vm-size-pages)
@@ -160,6 +167,47 @@ already name. `data_source.mode` then reads `live`, or `cached` when a copy insi
 that fails for any reason is discarded whole and the snapshot answers, never an error. The
 cost is what bounds it — one region is 10 pages and 5.5 MB. See
 [data-sources.md](data-sources.md#7-azure-retail-prices-api-and-microsoft-learn-vm-size-pages).
+
+## What stays refused, and why
+
+Three questions are refused on every cloud but AWS, and none of them is a feature waiting to
+be built. Each message names the limit, so a reader can tell "no vendor publishes this" from
+"this build does not serve it".
+[reviews/multicloud-parity.md](reviews/multicloud-parity.md) carries the verdicts and the
+vendor citations.
+
+**Windows on GCP.** Google's Spot pricing pages publish no Windows Spot line. The licence is
+priced on a page the source contract does not name, and pairing the two would join documents
+the parser cannot check against each other.
+
+```console
+$ spotinfo recommend --cloud gcp --os windows --architecture x86_64 --min-vcpu 2 --min-memory-gib 4
+spotinfo: gcp: unsupported capability: os windows: this cloud publishes spot prices for linux only
+```
+
+**Zone-level prices on GCP and Azure.** The Azure Retail Prices API publishes region-level
+amounts, and Google publishes Spot prices per region. Both vendors' placement APIs do accept a
+zone, which is why the message is about prices and not about zones in general.
+
+```console
+$ spotinfo list --cloud gcp --with-score --az
+spotinfo: gcp: unsupported capability: zone_detail: this cloud publishes prices per region, not per zone, and only its region-level figures are served here
+```
+
+**`--workload web`, `ci` and `batch` on GCP and Azure.** The 5%, 16% and 22% ceilings are AWS
+Spot Advisor bucket boundaries. Google's preemption rate divides preempted Spots by Spots that
+stopped running; Azure's eviction rate is a per-hour probability over 7 days. Neither is the
+fraction of running machines interrupted over 30 days that the ceilings were drawn from, so
+the ceiling has no meaning against them. This survives both deferred Azure features: shipping
+the eviction rate would make the figure visible, never filterable.
+
+```console
+$ spotinfo recommend --cloud azure --workload web --architecture x86_64 --min-vcpu 2 --min-memory-gib 4
+spotinfo: azure: unsupported capability: risk: the web workload caps interruption frequency at 5%, an AWS Spot Advisor bucket boundary, and azure publishes no figure measured that way; workload cost applies no ceiling and answers on every cloud
+```
+
+`--workload cost` is the answer in every case. It applies no interruption constraint, so it
+claims nothing a cloud did not measure.
 
 ## Refreshing a snapshot
 

@@ -116,20 +116,88 @@ type CapabilityRequest struct {
 // OS, architecture, then Needed as given — so the reported shortfall is
 // deterministic. Callers run this before acquisition, so an unsupported request
 // costs no I/O.
+//
+// Every message carries the capability name and then the limit behind it. The
+// name alone reads as a feature nobody built yet; the limit says what the cloud
+// publishes, which is what separates "no vendor serves this" from "this build
+// does not". docs/reviews/multicloud-parity.md records which of the two each
+// refusal is.
 func (c Capabilities) Require(request CapabilityRequest) error {
 	if request.OS != "" && !c.SupportsOS(request.OS) {
-		return fmt.Errorf("%w: os %s", ErrUnsupportedCapability, request.OS)
+		return fmt.Errorf("%w: os %s: %s", ErrUnsupportedCapability, request.OS, c.osLimit())
 	}
 	if request.Architecture != "" && !c.SupportsArchitecture(request.Architecture) {
-		return fmt.Errorf("%w: architecture %s", ErrUnsupportedCapability, request.Architecture)
+		return fmt.Errorf("%w: architecture %s: %s",
+			ErrUnsupportedCapability, request.Architecture, c.architectureLimit())
 	}
 	for _, capability := range request.Needed {
 		if !c.Has(capability) {
-			return fmt.Errorf("%w: %s", ErrUnsupportedCapability, capability)
+			return fmt.Errorf("%w: %s: %s", ErrUnsupportedCapability, capability, capabilityLimit(capability))
 		}
 	}
 
 	return nil
+}
+
+// osLimit says which operating systems this cloud is priced for. It is read
+// from the declaration rather than written per cloud: the list is the vendor
+// fact, and a cloud that gains an OS retires its own refusal wording.
+func (c Capabilities) osLimit() string {
+	if len(c.OperatingSystems) == 0 {
+		return "this cloud publishes no spot price for any operating system"
+	}
+
+	names := make([]string, 0, len(c.OperatingSystems))
+	for _, name := range c.OperatingSystems {
+		names = append(names, string(name))
+	}
+
+	return "this cloud publishes spot prices for " + strings.Join(names, " and ") + " only"
+}
+
+// architectureLimit mirrors osLimit over the reviewed architecture list.
+func (c Capabilities) architectureLimit() string {
+	if len(c.Architectures) == 0 {
+		return "this cloud classifies no machine architecture from reviewed data"
+	}
+
+	names := make([]string, 0, len(c.Architectures))
+	for _, name := range c.Architectures {
+		names = append(names, string(name))
+	}
+
+	return "this cloud classifies " + strings.Join(names, " and ") + " machines only"
+}
+
+// capabilityLimits says, for each optional capability, why a cloud that does
+// not declare it cannot serve it. Each is a statement about what is published,
+// never about what this build implements — the two are different answers to
+// "will this ever work", and a caller has to be able to tell them apart.
+//
+// zone_detail is the one that needed care. Both vendors' placement APIs accept
+// a zone, so "nothing is published per zone" would be false in the very request
+// that prints it (--with-score --az). What is a vendor limit is the price
+// granularity, and what is a build limit is the rest; the message says both.
+var capabilityLimits = map[Capability]string{
+	CapabilitySpotPrice:      "this cloud publishes no spot price",
+	CapabilityOnDemandPrice:  "this cloud publishes no on-demand price to compare a spot price against",
+	CapabilityMachineSpec:    "this cloud publishes no vcpu and memory figures for its machines",
+	CapabilityRisk:           "this cloud's catalogue carries no risk figure",
+	CapabilityPlacementScore: "this cloud publishes no placement figure",
+	CapabilityZoneDetail: "this cloud publishes prices per region, not per zone, " +
+		"and only its region-level figures are served here",
+	CapabilityLiveEnrichment: "this cloud has no live api to read a missing value from",
+}
+
+// capabilityLimit words one shortfall. An unrecognised capability has no
+// reviewed limit to state, so it says only that the cloud does not declare it
+// rather than inventing a vendor fact.
+func capabilityLimit(capability Capability) string {
+	if limit, known := capabilityLimits[capability]; known {
+		return limit
+	}
+
+	return "this cloud does not declare it"
 }
 
 // SortKey names the observation a result is ordered by. An empty key leaves the

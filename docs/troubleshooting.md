@@ -416,24 +416,35 @@ chmod +x /path/to/spotinfo
 
 ### "gcp: unsupported capability: risk" (`UNSUPPORTED_CAPABILITY`)
 
-**Cause:** Two distinct triggers:
+**Cause:** Two distinct triggers, and the message says which:
 
-1. Running the root query command with `--cloud gcp` (e.g., `spotinfo --cloud gcp --type 'c4.*'`). The root command renders an interruption column, which requires risk data that GCP does not publish.
-2. Running `spotinfo recommend --cloud gcp --workload web` (or `ci` or `batch`). These workloads cap interruption frequency and require risk data.
+1. `--workload web`, `ci` or `batch` on `recommend`. Those ceilings are AWS Spot Advisor
+   interruption buckets, and Google measures something else, so the ceiling cannot be applied.
+   The message ends `publishes no figure measured that way`.
+2. `--sort risk` on `list`. There is no risk figure in the GCP catalogue to order by. The
+   message ends `this cloud's catalogue carries no risk figure`.
 
-**Solution:** Use `spotinfo recommend --cloud gcp` with `--workload cost` (the default on GCP). The root query command is AWS-only.
+Both refuse before any data is read. Neither is a missing feature — see
+[clouds.md](clouds.md#what-stays-refused-and-why).
 
-`--architecture`, `--cpu` and `--memory` are required on `recommend`, so the full command is:
+**Solution:** Drop the flag. `--workload cost` is the default and applies no interruption
+constraint; leaving `--sort` unset leaves the order to the provider.
+
+`--architecture`, `--min-vcpu` and `--min-memory-gib` are required on `recommend`, so the full
+command is:
 
 ```bash
-spotinfo recommend --cloud gcp --architecture x86_64 --cpu 2 --memory 4
+spotinfo recommend --cloud gcp --architecture x86_64 --min-vcpu 2 --min-memory-gib 4
 ```
 
 ### "gcp: unsupported capability: os windows" (`UNSUPPORTED_CAPABILITY`)
 
-**Cause:** `--os windows` on `--cloud gcp`. GCP Spot VMs are served with Linux pricing only.
+**Cause:** `--os windows` on `--cloud gcp`. Google's Spot pricing pages publish no Windows Spot
+line, so the catalogue prices Linux only. The full message is
+`this cloud publishes spot prices for linux only`.
 
-**Solution:** Omit `--os` or set `--os linux`.
+**Solution:** Omit `--os` or set `--os linux`. Azure prices both, so `--cloud azure --os windows`
+answers.
 
 ### "no candidates for architecture ... and workload cost" (`NO_CANDIDATES`) on GCP
 
@@ -472,21 +483,20 @@ and hyphens, not ending in a hyphen.
 
 ### "azure: unsupported capability: risk" (`UNSUPPORTED_CAPABILITY`)
 
-**Cause:** Either of:
+**Cause:** The same two triggers as on GCP: `--workload web`, `ci` or `batch` on `recommend`, or
+`--sort risk` on `list`. Azure's eviction rate is a per-hour probability over 7 days, not the
+fraction of running machines interrupted over 30 days that the workload ceilings were drawn from,
+and it needs a subscription this build does not authenticate to. Neither is a missing feature —
+see [clouds.md](clouds.md#what-stays-refused-and-why).
 
-1. Running the root query command with `--cloud azure` (e.g., `spotinfo --cloud azure --type 'Standard_D2s.*'`).
-   The root command renders an interruption column, which requires risk data that Azure does not publish
-   without a subscription.
-2. Running `spotinfo recommend --cloud azure --workload web` (or `ci` or `batch`). These workloads cap
-   interruption frequency and require risk data.
+**Solution:** Drop the flag. `--workload cost` is the default and applies no interruption
+constraint.
 
-**Solution:** Use `spotinfo recommend --cloud azure` with `--workload cost` (the default on Azure). The
-root query command is AWS-only.
-
-`--architecture`, `--cpu` and `--memory` are required on `recommend`, so the full command is:
+`--architecture`, `--min-vcpu` and `--min-memory-gib` are required on `recommend`, so the full
+command is:
 
 ```bash
-spotinfo recommend --cloud azure --architecture x86_64 --cpu 2 --memory 4
+spotinfo recommend --cloud azure --architecture x86_64 --min-vcpu 2 --min-memory-gib 4
 ```
 
 ### "no candidates for architecture ... and workload cost" (`NO_CANDIDATES`) on Azure

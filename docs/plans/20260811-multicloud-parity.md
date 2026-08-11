@@ -1984,15 +1984,59 @@ that GCP `mode` can now be `live` or `cached`.
 - Modify: `docs/reviews/multicloud-parity.md`
 - Create: `internal/cloud/refusals_test.go`
 
-- [ ] keep Windows on GCP, zone-level prices on both, and `--workload web|ci|batch` on both
+- [x] keep Windows on GCP, zone-level prices on both, and `--workload web|ci|batch` on both
       refused, each with a message naming the vendor limit rather than implying a missing
       feature
-- [ ] write a test asserting `interruptionCappableKinds` holds exactly one kind, so a future
+- [x] write a test asserting `interruptionCappableKinds` holds exactly one kind, so a future
       change to it fails a test rather than a consumer
-- [ ] do not duplicate the per-cloud refusal tests already written in Task 9; assert
+- [x] do not duplicate the per-cloud refusal tests already written in Task 9; assert
       only the message wording here
-- [ ] update the verdict table in `docs/reviews/multicloud-parity.md` with what shipped
-- [ ] run `make test` — must pass before Task 15
+- [x] update the verdict table in `docs/reviews/multicloud-parity.md` with what shipped
+- [x] run `make test` — must pass before Task 15
+
+➕ **The wording lives in `Capabilities.Require`, not in either surface.** All three refusals
+came out of that one gate, which serves the CLI and MCP both — and Azure `zone_detail` is
+reachable only from MCP, because the CLI refuses `--with-score` on Azure first. A second table
+in `cmd/spotinfo` would have left the MCP surface saying `unsupported capability: zone_detail`
+and nothing else. `capabilityLimits` carries one reviewed sentence per capability, and the OS
+and architecture limits are read from the declaration, so a cloud that gains one retires its
+own wording without an edit.
+
+➕ **The risk-capped workload needed its own refusal, because `Require` cannot word it.**
+`unsupported capability: risk` is returned for two different questions — a risk-capped
+workload, and `--sort risk` — and only the first is about the AWS Spot Advisor bucket
+boundaries. `refuseUncappableWorkload` in `internal/cloud/recommend.go` runs immediately
+before `Require`, still ahead of acquisition (Invariant 3), and still wraps
+`ErrUnsupportedCapability` so `UNSUPPORTED_CAPABILITY` is unchanged. `--sort risk` keeps the
+plain "this cloud's catalogue carries no risk figure", where the ceiling sentence would be
+noise. Running first also means `--os windows --workload web` on GCP now reports the workload
+rather than the OS; both are true, and the workload is the one whose reason cannot be derived
+from the declaration.
+
+➕ **The `zone_detail` message says which half is the vendor's.** Both vendors' placement APIs
+accept a zone (review §8), so "nothing is published per zone" would be false in the very
+request that prints it, `--with-score --az`. The message names the price granularity as the
+vendor limit and "only its region-level figures are served here" as this build's, which is the
+distinction the checkbox asks for. `TestARefusedZoneRequestNamesThePriceGranularity` asserts
+the message does **not** contain "no zone".
+
+➕ **`recommend_test.go:520` was left where it is.** It already asserts the same equality as a
+premise of the placement-kind test. `TestInterruptionCappableKindsHoldsExactlyOneKind` in
+`internal/cloud/refusals_test.go` is the declaration's own test — length, contents, and that
+`RiskKindPreemptionRate` is absent — and its comment names the other so a reader knows why
+both exist. Moving the line would have read as deleting an assertion.
+
+➕ **Files this task's list omits.** `internal/cloud/recommend.go` (the workload refusal),
+`README.md:45-51` and `docs/troubleshooting.md` (six quoted messages and four retired flag
+names in the three refusal sections). Every console block written here was run against
+`.bin/spotinfo` at this commit and pasted, including the exit codes.
+
+⚠️ **`text` and `csv` are still refused on `recommend`, and Task 17 will fail on it.**
+Measured: `spotinfo recommend --cloud gcp … --output csv` prints
+`invalid argument: output must be table or json` and exits 1. Task 17's matrix sweeps
+`{list, recommend} x {number, text, json, table, csv}` and expects only `number` to be refused
+on `recommend`. The verdict table row in `docs/reviews/multicloud-parity.md` is marked **Open**
+rather than shipped for that reason. No task between here and Task 17 owns it.
 
 ### Task 15: Verify acceptance criteria
 

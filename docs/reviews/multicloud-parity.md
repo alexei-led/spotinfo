@@ -1,6 +1,8 @@
 # Multi-cloud parity: what is missing, and what can be added
 
-Date: 2026-08-11.
+Date: 2026-08-11. Verdict table updated 2026-08-11 with what
+[../plans/20260811-multicloud-parity.md](../plans/20260811-multicloud-parity.md) actually
+shipped; the reasoning below each verdict is unchanged.
 
 [cli-and-mcp-surface-review.md](cli-and-mcp-surface-review.md) lists what is inconsistent
 today. This page answers the next question: for every capability AWS has and the other clouds
@@ -32,26 +34,40 @@ snapshot, or opt-in runtime.
 
 ## Verdict table
 
-| Capability                             | GCP                     | Azure                        |
-| -------------------------------------- | ----------------------- | ---------------------------- |
-| `--os windows`                         | Blocked                 | **Ready**                    |
-| Interruption risk in the snapshot      | Blocked                 | Blocked                      |
-| Risk at run time (`--live-risk`)       | Done                    | Buildable — **deferred** |
-| `--workload web` / `ci` / `batch`      | Blocked by measurement  | Blocked by measurement       |
-| `--with-score` (placement score)       | **Runtime only** — beta | GA — **deferred**        |
-| More regions                           | Runtime only            | Not needed — 55 already      |
-| Live prices                            | Runtime only            | **Runtime only** — anonymous |
-| Zone-level prices (`--az`)             | Blocked for prices      | Blocked for prices           |
-| Root query command                     | Follows risk            | Follows risk                 |
-| `--offline` / `--refresh`              | Consistency             | Consistency                  |
-| `--sort` / `--order` on `recommend`    | Consistency             | Consistency                  |
-| `text`, `csv`, `number` on `recommend` | Consistency             | Consistency                  |
+Two statuses were added when the plan landed. **Shipped** means the capability is in the
+binary now. **Deferred — not built** means the verdict below still stands and nobody wrote
+the code: both Azure entries need a subscription this build deliberately does not
+authenticate to, so neither could be exercised even once. A blocked row is a vendor limit and
+has no code to write at all.
+
+| Capability                             | GCP                                | Azure                        |
+| -------------------------------------- | ---------------------------------- | ---------------------------- |
+| `--os windows`                         | Blocked                            | **Shipped**                  |
+| Interruption risk in the snapshot      | Blocked                            | Blocked                      |
+| Risk at run time (`--live-risk`)       | **Shipped**                        | **Deferred — not built**     |
+| `--workload web` / `ci` / `batch`      | Blocked by measurement             | Blocked by measurement       |
+| `--with-score` (placement figure)      | **Shipped** — beta, `--gcp-project` | **Deferred — not built**    |
+| More regions                           | **Shipped** — `--gcp-billing-key`  | Not needed — 55 already      |
+| Live prices                            | **Shipped** — `--gcp-billing-key`  | **Shipped** — anonymous      |
+| Zone-level prices (`--az`)             | Blocked for prices                 | Blocked for prices           |
+| Browse command (`spotinfo list`)       | **Shipped**                        | **Shipped**                  |
+| `--offline` / `--refresh`              | **Shipped**                        | **Shipped**                  |
+| `--sort` / `--order` on `recommend`    | **Shipped**                        | **Shipped**                  |
+| `text`, `csv`, `number` on `recommend` | Open — `json` and `table` only     | Open — `json` and `table` only |
+
+The three blocked rows are the ones this page exists to close. They are recorded as answered
+in [../clouds.md](../clouds.md#what-stays-refused-and-why), and every refusal message names
+the vendor limit behind it rather than the capability it could not serve.
 
 ---
 
-## 1. Windows on Azure — Ready
+## 1. Windows on Azure — Shipped
 
-**Status: the data is already downloaded and then thrown away.**
+**Status: shipped.** The catalogue is keyed by machine, region and OS, and
+`spotinfo recommend --cloud azure --os windows` answers. The rest of this section is the
+reasoning that got it there.
+
+**Why it was worth doing: the data was already downloaded and then thrown away.**
 
 The Azure updater fetches the Retail Prices API per region. That response already contains
 Windows Spot rows, keyed by the same `armSkuName` as the Linux row. The parser drops them on
@@ -94,7 +110,9 @@ the matrix without asking anyone for credentials.
 
 ## 1a. Two defects in the Azure meter filter, found while checking item 1
 
-Neither breaks a build today. Both are latent, and the first one fails in the dangerous
+**Status: both fixed**, in the same parser change as item 1.
+
+Neither broke a build at the time. Both were latent, and the first one failed in the dangerous
 direction.
 
 **`Contains` where the rule is a suffix.** `internal/providers/azure/prices.go:248` tests
@@ -148,9 +166,23 @@ each other.
 **Verdict: do not build.** `--os windows` on GCP must keep returning
 `UNSUPPORTED_CAPABILITY`. That is the correct answer, not a missing feature.
 
-## 3. Azure eviction rate — Runtime only, and a trap
+**Status: answered, and still refused.** The message now names the limit rather than the
+capability, so the distinction above survives contact with a reader:
 
-**Status: buildable, and the obvious implementation is wrong.**
+```console
+$ spotinfo list --cloud gcp --os windows
+spotinfo: gcp: unsupported capability: os windows: this cloud publishes spot prices for linux only
+```
+
+## 3. Azure eviction rate — Deferred, not built
+
+**Status: deferred, and nothing below was implemented.** Reaching Resource Graph needs an
+Azure subscription and `azidentity`, at +4.83 MB of binary, and the maintainer has none to
+test against — see the decision at the end of this page. The plan states as an invariant that
+nothing in it authenticates to Azure. The design below is still accurate and still the way to
+build it.
+
+**It is buildable, and the obvious implementation is wrong.**
 
 Azure publishes an eviction rate per SKU per region through Azure Resource Graph:
 
@@ -208,7 +240,20 @@ choice this tool must not make on the caller's behalf.
 **Verdict: `cost` stays the only cross-cloud workload.** This is not a gap to close. It is the
 honest answer, and it is why `RISK: unavailable` is printed instead of a zero.
 
-## 5. Placement scores (`--with-score`) — Runtime only, on both clouds
+**Status: answered, and still refused.** The refusal names the measurement that caps the
+workload, which is what makes it readable as a vendor limit and not as missing data:
+
+```console
+$ spotinfo recommend --cloud azure --workload web --architecture x86_64 --min-vcpu 2 --min-memory-gib 4
+spotinfo: azure: unsupported capability: risk: the web workload caps interruption frequency at 5%, an AWS Spot Advisor bucket boundary, and azure publishes no figure measured that way; workload cost applies no ceiling and answers on every cloud
+```
+
+## 5. Placement scores (`--with-score`) — GCP shipped, Azure deferred
+
+**Status: GCP shipped, Azure deferred and not built.** `--with-score --cloud gcp` fetches
+obtainability from the beta advice API for the ranked page, needs `--gcp-project`, and warns
+that the interface is beta. Azure's is GA and free and is still not built, for the credential
+reason in item 3.
 
 **Correction.** An earlier draft of this page said both clouds were blocked. That was wrong.
 Both publish an equivalent, and Azure's has been GA since 2025-06-05.
@@ -256,9 +301,12 @@ and never presented as a promise.
 neither publishes zone-level _prices_. That is why the zone row in the verdict table says
 "blocked for prices" rather than "blocked".
 
-## 6. More GCP regions — Runtime only
+## 6. More GCP regions — Shipped as opt-in
 
-Today the snapshot serves `us-central1`, because that is the only region Google's pricing
+**Status: shipped, path (a).** `--gcp-billing-key`, or `SPOTINFO_GCP_BILLING_KEY`, prices
+regions beyond the snapshot for one invocation. Nothing entered the snapshot.
+
+The snapshot still serves `us-central1`, because that is the only region Google's pricing
 pages **server-render**. Other regions are switched in by JavaScript from a 12 MB
 `AF_initDataCallback` positional array, which the contract excludes as an undocumented
 interface. That exclusion is correct and should stand.
@@ -278,11 +326,16 @@ contract change and a coverage-floor change, with no new parser.
 
 **Verdict: buildable as opt-in, never as a snapshot.**
 
-## 7. Live prices on GCP and Azure — Runtime only
+## 7. Live prices on GCP and Azure — Shipped on both
+
+**Status: shipped on both.** Naming one or two Azure regions refreshes their prices from the
+anonymous Retail Prices API and `data_source.mode` reads `live`; GCP prices a named region
+through `--gcp-billing-key`. Both are runtime paths, and neither writes a byte into a
+snapshot.
 
 AWS falls back to `DescribeSpotPriceHistory` when the static feed prices something at $0.
-Neither other cloud has a live path at all, so both are exactly as fresh as the last weekly
-refresh.
+Before this, neither other cloud had a live path at all, so both were exactly as fresh as the
+last weekly refresh.
 
 - **Azure**: the Retail Prices API is **anonymous**. A `--refresh`-style live path needs no
   credentials at all. This is the cheapest freshness win available on any non-AWS cloud.
@@ -304,7 +357,18 @@ price column.
 
 **Verdict: do not build zone pricing. Zone scores follow item 5.**
 
+**Status: answered, and still refused.** The message is careful about which half is a vendor
+limit, because both placement APIs do accept a zone:
+
+```console
+$ spotinfo list --cloud gcp --with-score --az
+spotinfo: gcp: unsupported capability: zone_detail: this cloud publishes prices per region, not per zone, and only its region-level figures are served here
+```
+
 ## 9. Consistency work — no data needed
+
+**Status: every row below shipped except the last.** `text` and `csv` are still refused on
+`recommend`, which answers in `json` and `table` only.
 
 None of these needs a vendor API. Each is a case where the same flag means different things,
 or silently means nothing.
@@ -330,10 +394,13 @@ chain is the whole price.
 `docs/plans/20260811-multicloud-parity.md` carries the rest and states as an invariant that
 nothing in it authenticates to Azure. Revisit when a subscription exists.
 
-Everything else on this page stands: Windows on Azure, live Azure prices, GCP obtainability
-and wider GCP regions all need no Azure credentials at all.
+Everything else on this page stands, and all four shipped: Windows on Azure, live Azure
+prices, GCP obtainability and wider GCP regions need no Azure credentials at all.
 
 ## Suggested order
+
+This is the order the work was planned in, kept as written. Items 1 to 4 and 7 shipped; item 5
+and the Azure half of item 6 are deferred and not built.
 
 Ordered by value delivered against effort, and by how much each one reduces the surprise a
 person meets when they change `--cloud`.
@@ -354,8 +421,10 @@ person meets when they change `--cloud`.
    because it introduces a second credential type.
 
 Only three verdicts are genuinely blocked by the vendors: Windows on GCP, zone-level _prices_
-on both, and risk-capped workloads on both. Record those as answered, so the question is not
-re-opened every time someone reads the matrix.
+on both, and risk-capped workloads on both. They are recorded as answered in items 2, 8 and 4
+above and in [../clouds.md](../clouds.md#what-stays-refused-and-why), each with the message
+the binary prints, so the question does not have to be re-opened every time someone reads the
+matrix.
 
 ## Sources
 

@@ -102,6 +102,34 @@ func ParseWorkload(value string) (Workload, error) {
 // needs a provider that publishes risk.
 func (w Workload) RequiresRisk() bool { return w != WorkloadCost }
 
+// refuseUncappableWorkload refuses a risk-capped workload on a cloud that
+// publishes no figure the ceiling is expressed in.
+//
+// It runs ahead of Capabilities.Require, which refuses the same request as a
+// bare "risk" shortfall. That names what was asked for, not why no cloud but
+// AWS can answer it: the web, ci and batch ceilings are AWS Spot Advisor
+// interruption-bucket boundaries, and a vendor measuring something else —
+// Google's preemption rate, Azure's per-hour eviction rate — publishes no
+// figure they can be compared against. That is a vendor limit, and it survives
+// both deferred Azure features; a reader who cannot see it in the message reads
+// the refusal as a feature nobody has built yet. docs/reviews/multicloud-parity.md
+// §4 is the verdict this wording carries.
+//
+// Running before Require also means a request that is wrong twice — windows on
+// GCP with --workload web — reports the workload first. Both are true; the
+// workload is the one whose reason is not derivable from the declaration.
+func refuseUncappableWorkload(id ProviderID, capabilities Capabilities, workload Workload) error {
+	if !workload.RequiresRisk() || capabilities.Has(CapabilityRisk) {
+		return nil
+	}
+
+	return fmt.Errorf("%s: %w: %s: the %s workload caps interruption frequency at %g%%, "+
+		"an AWS Spot Advisor bucket boundary, and %s publishes no figure measured that way; "+
+		"workload %s applies no ceiling and answers on every cloud",
+		id, ErrUnsupportedCapability, CapabilityRisk,
+		workload, workload.maxInterruptionPercent(), id, WorkloadCost)
+}
+
 // maxInterruptionPercent is the ceiling this policy applies to a candidate's
 // worst published interruption frequency.
 func (w Workload) maxInterruptionPercent() float64 {
@@ -304,7 +332,12 @@ func Recommend(ctx context.Context, provider Provider, request *RecommendRequest
 	if request.Cloud != provider.ID() {
 		return nil, fmt.Errorf("%w: request names %q but provider is %q", ErrInvalidArgument, request.Cloud, provider.ID())
 	}
-	if err := provider.Capabilities().Require(request.capabilityNeeds()); err != nil {
+
+	capabilities := provider.Capabilities()
+	if err := refuseUncappableWorkload(provider.ID(), capabilities, request.Workload); err != nil {
+		return nil, err
+	}
+	if err := capabilities.Require(request.capabilityNeeds()); err != nil {
 		return nil, fmt.Errorf("%s: %w", provider.ID(), err)
 	}
 

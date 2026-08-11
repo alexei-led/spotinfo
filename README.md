@@ -42,12 +42,14 @@ when it can reach them, and falls back to the snapshot when it cannot.
 data, so every candidate reports `RISK: unavailable`. It is never a zero and never a low
 bucket. A cloud that measures nothing must not outrank a cloud that measures honestly.
 
-**It refuses questions it cannot answer.** `--workload web` needs interruption data. Ask for
-it on a cloud that has none and the command stops before it reads a price:
+**It refuses questions it cannot answer, and says why.** `--workload web` caps interruption
+frequency at an AWS Spot Advisor bucket boundary. Ask for it on a cloud that measures
+something else and the command stops before it reads a price, naming the vendor limit rather
+than a feature nobody built:
 
 ```console
-$ spotinfo recommend --cloud gcp --workload web --architecture x86_64 --cpu 4 --memory 16
-spotinfo: gcp: unsupported capability: risk
+$ spotinfo recommend --cloud gcp --workload web --architecture x86_64 --min-vcpu 4 --min-memory-gib 16
+spotinfo: gcp: unsupported capability: risk: the web workload caps interruption frequency at 5%, an AWS Spot Advisor bucket boundary, and gcp publishes no figure measured that way; workload cost applies no ceiling and answers on every cloud
 ```
 
 **Every answer carries its source.** The JSON report names each source URL and the SHA-256 of
