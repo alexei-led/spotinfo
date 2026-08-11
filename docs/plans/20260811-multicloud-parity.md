@@ -2149,7 +2149,12 @@ presence** rather than on the parsed value, because `score_timeout` carries a de
 test cannot tell an omitted argument from a sent one. The `min_score` branch it replaces emitted
 the same sentence, so that message is unchanged. Verified on the rebuilt binary: all three
 arguments now return `INVALID_ARGUMENT` with the CLI's wording modulo the `--` prefix, and
-`with_score` + `az` still reaches the lookup. `TestACompanionScoreArgumentIsRefusedRatherThanIgnored`
+`with_score` + `az` still reaches the lookup. One input the fix newly refuses, and it is the
+point rather than a side effect: the tool schema declares `min_score` with `mcp.Min(0)`, so
+`min_score: 0` without `with_score` was in contract and was accepted, while the CLI's
+`lineageIsSet` has always refused an explicit `--min-score 0` there. Presence closes that last
+gap between the two surfaces — measured on the binary, both now print the same sentence for it.
+`TestACompanionScoreArgumentIsRefusedRatherThanIgnored`
 drives the table and asserts the refusal costs no acquisition; two rows joined `TestListErrorContract`,
 and its "score timeout out of range" row gained `with_score: true` so the range check stays covered
 rather than being shadowed by the new companion rule.
@@ -2226,6 +2231,15 @@ task — no parser, contract or manifest changed, and `verify-data` re-proves th
 5 holds — no source was added. 6 holds — `build` still declares no data dependency and the binary
 was built with the feeds untouched. 7 is the referenced-source finding under criterion 10, plus
 the fail-closed retention `TestAnUnparseableSourceURLIsRetained` covers. 8 is criterion 8.
+
+⚠️ **One quarter of Overview item 3 is unverifiable in this repository, and the tick above does
+not claim it.** "GCP regions beyond `us-central1`" was evidenced only as far as the request path:
+an invalid key produces a real, refused Cloud Billing Catalog call and a soft fall back to the
+snapshot. That a **successful** call widens `--region` past `us-central1` cannot be observed
+without a key, and neither can Task 13's ⚠️ about the SKU description grammar and the Compute
+service id. Both are already listed under Post-Completion as maintainer verification against a
+real key; neither is closed here. Windows on Azure, live Azure prices and GCP obtainability —
+the other three quarters of item 3 — are evidenced above.
 
 ➕ **Task 13's "one link is untested" ⚠️ is now answered, ahead of Task 17.** With a billing key
 present, `--debug list --cloud gcp --gcp-billing-key … --offline` logs **0** billing-catalogue
