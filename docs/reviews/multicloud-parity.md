@@ -19,7 +19,7 @@ Each verdict is one of four:
 `internal/providers/<cloud>/data/source-contract.json` governs the **committed snapshot**.
 The excluded sources in [../data-sources.md](../data-sources.md) were excluded for one of two
 reasons: they need credentials, or their redistribution terms are unclear. Both reasons are
-about *shipping the data to other people*.
+about _shipping the data to other people_.
 
 Neither reason forbids reading a source **at run time, with the caller's own credentials, for
 one invocation**. GCP `--live-risk` already does exactly this: it calls
@@ -32,20 +32,20 @@ snapshot, or opt-in runtime.
 
 ## Verdict table
 
-| Capability | GCP | Azure |
-|---|---|---|
-| `--os windows` | Blocked | **Ready** |
-| Interruption risk in the snapshot | Blocked | Blocked |
-| Risk at run time (`--live-risk`) | Done | **Runtime only** — buildable |
-| `--workload web` / `ci` / `batch` | Blocked by measurement | Blocked by measurement |
-| `--with-score` (placement score) | **Runtime only** — beta | **Runtime only** — GA |
-| More regions | Runtime only | Not needed — 55 already |
-| Live prices | Runtime only | **Runtime only** — anonymous |
-| Zone-level prices (`--az`) | Blocked for prices | Blocked for prices |
-| Root query command | Follows risk | Follows risk |
-| `--offline` / `--refresh` | Consistency | Consistency |
-| `--sort` / `--order` on `recommend` | Consistency | Consistency |
-| `text`, `csv`, `number` on `recommend` | Consistency | Consistency |
+| Capability                             | GCP                     | Azure                        |
+| -------------------------------------- | ----------------------- | ---------------------------- |
+| `--os windows`                         | Blocked                 | **Ready**                    |
+| Interruption risk in the snapshot      | Blocked                 | Blocked                      |
+| Risk at run time (`--live-risk`)       | Done                    | Buildable — **deferred** |
+| `--workload web` / `ci` / `batch`      | Blocked by measurement  | Blocked by measurement       |
+| `--with-score` (placement score)       | **Runtime only** — beta | GA — **deferred**        |
+| More regions                           | Runtime only            | Not needed — 55 already      |
+| Live prices                            | Runtime only            | **Runtime only** — anonymous |
+| Zone-level prices (`--az`)             | Blocked for prices      | Blocked for prices           |
+| Root query command                     | Follows risk            | Follows risk                 |
+| `--offline` / `--refresh`              | Consistency             | Consistency                  |
+| `--sort` / `--order` on `recommend`    | Consistency             | Consistency                  |
+| `text`, `csv`, `number` on `recommend` | Consistency             | Consistency                  |
 
 ---
 
@@ -75,8 +75,8 @@ alone and fails with "is priced twice in <region>" the moment one size carries t
 
 **How to add it:**
 
-1. Read the OS from `productName`. There are **three** states, not two: a ` Windows` suffix
-   marks Windows, a ` Linux` suffix marks Linux on newer families, and no suffix also means
+1. Read the OS from `productName`. There are **three** states, not two: a `" Windows"` suffix
+   marks Windows, a `" Linux"` suffix marks Linux on newer families, and no suffix also means
    Linux on older families. Never infer OS from the size name, for the same reason
    architecture is never inferred.
 2. Key the catalogue and the price row by (machine, region, **os**).
@@ -178,11 +178,11 @@ exactly the shape `--live-risk` was built for.
 **The trap.** Azure publishes the bands `0%-5%`, `5%-10%`, `10%-15%`, `15%-20%`, `20+%`.
 Those look identical to AWS Spot Advisor buckets, and they are not the same statistic:
 
-| | AWS interruption frequency | Azure eviction rate |
-|---|---|---|
-| What it measures | fraction of *running* instances interrupted | probability that a VM is evicted in the **next hour** |
-| History window | trailing 30 days | trailing 7 days |
-| Normalisation | over the period | per hour |
+|                  | AWS interruption frequency                  | Azure eviction rate                                   |
+| ---------------- | ------------------------------------------- | ----------------------------------------------------- |
+| What it measures | fraction of _running_ instances interrupted | probability that a VM is evicted in the **next hour** |
+| History window   | trailing 30 days                            | trailing 7 days                                       |
+| Normalisation    | over the period                             | per hour                                              |
 
 An implementer who sees `0%-5%` next to AWS `<5%` will be tempted to add
 `RiskKindEvictionRate` to `interruptionCappableKinds` and let `--workload web` work on Azure.
@@ -213,14 +213,14 @@ honest answer, and it is why `RISK: unavailable` is printed instead of a zero.
 **Correction.** An earlier draft of this page said both clouds were blocked. That was wrong.
 Both publish an equivalent, and Azure's has been GA since 2025-06-05.
 
-| | AWS | Azure | GCP |
-|---|---|---|---|
+|           | AWS                      | Azure                           | GCP                       |
+| --------- | ------------------------ | ------------------------------- | ------------------------- |
 | Interface | `GetSpotPlacementScores` | `placementScores/spot/generate` | `compute.advice.capacity` |
-| Score | integer 1-10 | `High` / `Medium` / `Low` | `obtainability`, 0.0-1.0 |
-| Extra | — | `isQuotaAvailable` | `estimatedUptime` |
-| Stage | GA | GA (`2025-06-05`) | beta / preview |
-| Auth | SigV4 | Entra OAuth + subscription | OAuth or ADC + project |
-| Limits | — | 8 regions x 5 sizes | 5 machine types |
+| Score     | integer 1-10             | `High` / `Medium` / `Low`       | `obtainability`, 0.0-1.0  |
+| Extra     | —                        | `isQuotaAvailable`              | `estimatedUptime`         |
+| Stage     | GA                       | GA (`2025-06-05`)               | beta / preview            |
+| Auth      | SigV4                    | Entra OAuth + subscription      | OAuth or ADC + project    |
+| Limits    | —                        | 8 regions x 5 sizes             | 5 machine types           |
 
 Azure's own words: the score "evaluates the likelihood of success for individual Spot
 deployments", and "a score of High indicates that the deployment is highly likely to succeed".
@@ -253,7 +253,7 @@ it's requested" and does not guarantee fulfilment — so it must never be cached
 and never presented as a promise.
 
 **Zones.** Both APIs accept a zone, so `--az` has meaning for scores on both clouds even though
-neither publishes zone-level *prices*. That is why the zone row in the verdict table says
+neither publishes zone-level _prices_. That is why the zone row in the verdict table says
 "blocked for prices" rather than "blocked".
 
 ## 6. More GCP regions — Runtime only
@@ -309,15 +309,29 @@ price column.
 None of these needs a vendor API. Each is a case where the same flag means different things,
 or silently means nothing.
 
-| Gap | Fix |
-|---|---|
-| `--offline` / `--refresh` accepted and ignored on GCP and Azure | Either implement item 7 so they act, or refuse them with a message naming the cloud |
-| `--az`, `--min-score`, `--score-timeout` accepted without `--with-score` | Refuse, the way `--live-risk` is refused off GCP |
-| `--with-score` is on the AWS-only query command | Until item 5 ships, refuse it with `UNSUPPORTED_CAPABILITY` on a cloud with no score, instead of silently ignoring `--cloud` |
-| `--sort` and `--order` missing on `recommend` | Add them. Ranking is cloud-neutral; nothing blocks this |
-| `text`, `csv`, `number` missing on `recommend` | `csv` and `text` port cleanly. `number` does not — it prints one savings percent, which has no meaning for a ranked list |
-| Root query command is AWS-only | It renders an interruption column. It stays AWS-only until a cloud publishes a comparable figure, which per item 4 is not in sight |
-| `--gcp-project` ignored on AWS and Azure | Refuse it, matching `--live-risk` |
+| Gap                                                                      | Fix                                                                                                                                |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `--offline` / `--refresh` accepted and ignored on GCP and Azure          | Either implement item 7 so they act, or refuse them with a message naming the cloud                                                |
+| `--az`, `--min-score`, `--score-timeout` accepted without `--with-score` | Refuse, the way `--live-risk` is refused off GCP                                                                                   |
+| `--with-score` is on the AWS-only query command                          | Until item 5 ships, refuse it with `UNSUPPORTED_CAPABILITY` on a cloud with no score, instead of silently ignoring `--cloud`       |
+| `--sort` and `--order` missing on `recommend`                            | Add them. Ranking is cloud-neutral; nothing blocks this                                                                            |
+| `text`, `csv`, `number` missing on `recommend`                           | `csv` and `text` port cleanly. `number` does not — it prints one savings percent, which has no meaning for a ranked list           |
+| Root query command is AWS-only                                           | It renders an interruption column. It stays AWS-only until a cloud publishes a comparable figure, which per item 4 is not in sight |
+| `--gcp-project` ignored on AWS and Azure                                 | Refuse it, matching `--live-risk`                                                                                                  |
+
+## Decision, 2026-08-11: no Azure credentials
+
+The maintainer has no Azure subscription, so items 3 and the Azure half of item 5 are
+**deferred**, not rejected. Both remain accurate and buildable; what changed is that neither
+can be exercised or tested today, and reaching them costs `azidentity` at **+4.83 MB**, or
++11.7% of the shipped binary. The ARM SDK on top of that is only +136 KB, so the credential
+chain is the whole price.
+
+`docs/plans/20260811-multicloud-parity.md` carries the rest and states as an invariant that
+nothing in it authenticates to Azure. Revisit when a subscription exists.
+
+Everything else on this page stands: Windows on Azure, live Azure prices, GCP obtainability
+and wider GCP regions all need no Azure credentials at all.
 
 ## Suggested order
 
@@ -339,7 +353,7 @@ person meets when they change `--cloud`.
 7. **GCP regions and live prices behind an API key** (items 6 and 7). Largest design surface,
    because it introduces a second credential type.
 
-Only three verdicts are genuinely blocked by the vendors: Windows on GCP, zone-level *prices*
+Only three verdicts are genuinely blocked by the vendors: Windows on GCP, zone-level _prices_
 on both, and risk-capped workloads on both. Record those as answered, so the question is not
 re-opened every time someone reads the matrix.
 

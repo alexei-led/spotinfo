@@ -14,11 +14,31 @@ This plan does three things, in this order:
    naming drifts cannot recur.
 2. **Fixes two latent defects in the Azure meter filter** before anything widens the
    catalogue key.
-3. **Adds every capability the vendors publish**: Windows on Azure, live Azure prices, Azure
-   eviction rate, placement scores on Azure and GCP, and GCP regions beyond `us-central1`.
+3. **Adds every capability reachable without a new credential type**: Windows on Azure, live
+   Azure prices, GCP obtainability, and GCP regions beyond `us-central1`.
 
 Three things stay refused, because no vendor publishes them: Windows on GCP, zone-level
-*prices* on either cloud, and risk-capped workloads (`web`/`ci`/`batch`) on either cloud.
+_prices_ on either cloud, and risk-capped workloads (`web`/`ci`/`batch`) on either cloud.
+
+**Two Azure capabilities are deferred, by decision.** The eviction rate (Azure Resource
+Graph) and the Spot Placement Score both need an Azure **subscription**, and reaching them
+needs `azidentity` for the credential chain. Measured cost of that dependency alone:
+
+| Build                                | Bytes     |
+| ------------------------------------ | --------- |
+| `net/http` + `encoding/json`         | 3,615,410 |
+| + `azidentity`                       | 8,443,266 |
+| + `armresourcegraph`, client invoked | 8,579,298 |
+
+`azidentity` is **+4.83 MB, or +11.7% of the shipped binary**; the ARM SDK on top of it is
++136 KB. The maintainer has no Azure subscription, so neither feature could be exercised or
+tested even once. Both stay documented as buildable in
+`docs/reviews/multicloud-parity.md` and out of this plan. Everything below needs **no Azure
+credentials at all** — the Retail Prices API is anonymous, and GCP reuses the ADC machinery
+`--live-risk` already ships.
+
+Do not add `azidentity`, `armresourcegraph` or `armrecommender` while executing this plan.
+Reopening that decision needs a subscription to test against.
 
 **This is a major version.** Backward compatibility is explicitly waived by the maintainer.
 `spotinfo.recommend/v1` is retired, the query command is renamed, and every golden file is
@@ -52,11 +72,11 @@ An executing agent must not change these. They are the reason the tool can be tr
 clouds.
 
 1. **`interruptionCappableKinds` stays exactly `[RiskKindInterruptionFrequencyRange]`.**
-   New kinds land in this plan — `eviction_rate`, and the placement kinds. **None of them
-   joins that list.** AWS measures the fraction of *running* instances interrupted over 30
-   days. Azure publishes a per-hour eviction probability from 7 days of history. A placement
-   score measures *provisioning success*, not interruption. The `web`/`ci`/`batch` ceilings are
-   AWS Advisor bucket boundaries and transfer to none of them.
+   This plan lands two placement kinds. **Neither joins that list**, and neither would
+   `eviction_rate` if it is ever built. AWS measures the fraction of _running_ instances
+   interrupted over 30 days. Azure publishes a per-hour eviction probability from 7 days of
+   history. A placement score measures _provisioning success_, not interruption at all. The
+   `web`/`ci`/`batch` ceilings are AWS Advisor bucket boundaries and transfer to none of them.
 2. **A cloud that does not publish a figure reports its absence.** Never a zero, never a low
    bucket, never a substituted value from another cloud.
 3. **A capability check happens before acquisition.** An unanswerable request is refused
@@ -70,6 +90,9 @@ clouds.
 6. **Builds stay hermetic.** No target that builds or tests may fetch.
 7. **`content_sha256` provenance stays verifiable.** Trimming the published source list may
    never drop the provenance for a value a candidate actually carries.
+8. **No Azure credential dependency.** Nothing in this plan authenticates to Azure. Adding
+   `azidentity` costs +4.83 MB and unlocks only the two deferred features, neither of which
+   can be tested without a subscription. A task reaching for it has left the plan.
 
 ## The vocabulary
 
@@ -78,31 +101,30 @@ This table is the single source. Every task below references it rather than re-d
 **Derivation rule, MCP argument from CLI flag:** strip the leading `--`, replace `-` with `_`.
 One exception: a repeatable CLI flag becomes a plural JSON array (`--region` → `regions`).
 
-| Concept | CLI flag | MCP argument | Commands |
-|---|---|---|---|
-| Cloud | `--cloud` | `cloud` | both |
-| Region | `--region` (repeatable, `all`) | `regions` | both |
-| Machine-name filter | `--machine` (RE2) | `machine` | both |
-| Architecture | `--architecture` | `architecture` | both |
-| Operating system | `--os` | `os` | both |
-| Minimum vCPU | `--min-vcpu` | `min_vcpu` | both |
-| Minimum memory | `--min-memory-gib` | `min_memory_gib` | both |
-| Price ceiling | `--max-price` | `max_price` | both |
-| Workload policy | `--workload` | `workload` | recommend |
-| Result count | `--top` | `top` | recommend |
-| Sort key | `--sort` | `sort` | both |
-| Sort order | `--order` | `order` | both |
-| Output format | `--output` | — (MCP is always JSON) | both |
-| Snapshot only | `--offline` | `offline` | both |
-| Ignore cache | `--refresh` | `refresh` | both |
-| Placement scores | `--with-score` | `with_score` | both |
-| Minimum score | `--min-score` | `min_score` | both |
-| Zone detail | `--az` | `az` | both |
-| Score timeout | `--score-timeout` | `score_timeout` | both |
-| Live risk | `--live-risk` | `live_risk` | recommend |
-| GCP project | `--gcp-project` | — (env only on MCP) | both |
-| GCP billing key | `--gcp-billing-key` | — (env only on MCP) | both |
-| Azure subscription | `--azure-subscription` | — (env only on MCP) | both |
+| Concept             | CLI flag                       | MCP argument           | Commands  |
+| ------------------- | ------------------------------ | ---------------------- | --------- |
+| Cloud               | `--cloud`                      | `cloud`                | both      |
+| Region              | `--region` (repeatable, `all`) | `regions`              | both      |
+| Machine-name filter | `--machine` (RE2)              | `machine`              | both      |
+| Architecture        | `--architecture`               | `architecture`         | both      |
+| Operating system    | `--os`                         | `os`                   | both      |
+| Minimum vCPU        | `--min-vcpu`                   | `min_vcpu`             | both      |
+| Minimum memory      | `--min-memory-gib`             | `min_memory_gib`       | both      |
+| Price ceiling       | `--max-price`                  | `max_price`            | both      |
+| Workload policy     | `--workload`                   | `workload`             | recommend |
+| Result count        | `--top`                        | `top`                  | recommend |
+| Sort key            | `--sort`                       | `sort`                 | both      |
+| Sort order          | `--order`                      | `order`                | both      |
+| Output format       | `--output`                     | — (MCP is always JSON) | both      |
+| Snapshot only       | `--offline`                    | `offline`              | both      |
+| Ignore cache        | `--refresh`                    | `refresh`              | both      |
+| Placement scores    | `--with-score`                 | `with_score`           | both      |
+| Minimum score       | `--min-score`                  | `min_score`            | both      |
+| Zone detail         | `--az`                         | `az`                   | both      |
+| Score timeout       | `--score-timeout`              | `score_timeout`        | both      |
+| Live risk           | `--live-risk`                  | `live_risk`            | recommend |
+| GCP project         | `--gcp-project`                | — (env only on MCP)    | both      |
+| GCP billing key     | `--gcp-billing-key`            | — (env only on MCP)    | both      |
 
 **Removed names**, each replaced by exactly one above: `--type`, `--instance`, `--vcpu`,
 `--memory`, `--memory-gib`, `--cpu`, `--price`, `--budget`. A removed name produces a rename
@@ -117,13 +139,13 @@ mechanical instead of a table of exceptions. This override is deliberate; do not
 
 **Unified defaults.** The CLI and MCP defaults are the same value on both surfaces:
 
-| Flag | Commands | Default, everywhere |
-|---|---|---|
-| `--workload` | recommend only | `cost` — the only value every cloud accepts, and it makes no interruption claim |
-| `--region` | both | `all` — cross-region comparison is the tool's value, and it is already the GCP, Azure and MCP default |
-| `--top` | recommend only | 3 |
-| `--os` | both | `linux` |
-| `--output` | both | `table` |
+| Flag         | Commands       | Default, everywhere                                                                                   |
+| ------------ | -------------- | ----------------------------------------------------------------------------------------------------- |
+| `--workload` | recommend only | `cost` — the only value every cloud accepts, and it makes no interruption claim                       |
+| `--region`   | both           | `all` — cross-region comparison is the tool's value, and it is already the GCP, Azure and MCP default |
+| `--top`      | recommend only | 3                                                                                                     |
+| `--os`       | both           | `linux`                                                                                               |
+| `--output`   | both           | `table`                                                                                               |
 
 The **Commands** column must agree with the vocabulary table above; the Task 1 command-tree
 test reads both, so a disagreement fails a test rather than shipping.
@@ -155,11 +177,11 @@ flag is present. `--mcp` and `--version` keep working on the root command.
 
 **MCP tools.** Three, each mirroring the CLI, none with a cloud baked into its name:
 
-| Tool | Mirrors | Replaces |
-|---|---|---|
-| `list_spot_machines` | `spotinfo list` | `find_spot_instances` |
+| Tool                      | Mirrors              | Replaces                   |
+| ------------------------- | -------------------- | -------------------------- |
+| `list_spot_machines`      | `spotinfo list`      | `find_spot_instances`      |
 | `recommend_spot_machines` | `spotinfo recommend` | `recommend_spot_instances` |
-| `list_cloud_regions` | — | `list_spot_regions` |
+| `list_cloud_regions`      | —                    | `list_spot_regions`        |
 
 **Schemas.** `spotinfo.list/v1` and `spotinfo.recommend/v3`, sharing the candidate, risk,
 price and source DTOs. `spotinfo.recommend/v1` and the v1 MCP response shape are deleted.
@@ -192,6 +214,7 @@ price and source DTOs. `spotinfo.recommend/v1` and the v1 MCP response shape are
   mid-refactor package still builds. And `TestMain` runs regardless of `-skip`, so a broken
   build surfaces as a package-level failure rather than a skipped test — read that failure as
   a compile error, not as an e2e assertion.
+
 - From Task 7 onward the gate is the full `make test`, with no skip.
 - Keep `t.Parallel()` where it is safe. Tests in `cmd/spotinfo` that build a `cli.App` stay
   serial — urfave/cli writes to a package-level `HelpFlag` during `Apply`. Subprocess e2e
@@ -241,7 +264,7 @@ The design keeps the existing seam and widens it.
 
 ## Technical Details
 
-**Azure OS marker.** Three states in `productName`: a ` Windows` suffix, a ` Linux` suffix on
+**Azure OS marker.** Three states in `productName`: a `" Windows"` suffix, a `" Linux"` suffix on
 newer families, and no suffix, which also means Linux on older families. The rule is a
 suffix, not a substring, and Microsoft does not document it — treat it as a high-confidence
 convention defended by a coverage floor.
@@ -253,30 +276,25 @@ roughly doubles priced rows, so the size cap is the threshold most likely to bin
 
 **Azure provenance composition.** The manifest carries **81 sources: 55 region-scoped Retail
 Prices URLs and 26 Microsoft Learn size pages.** The Learn pages are the provenance for vCPU,
-memory and architecture on *every* candidate. Trimming must be per-scope — region sources by
+memory and architecture on _every_ candidate. Trimming must be per-scope — region sources by
 answer region, size-page sources by the machine series present in the answer — or Invariant 7
 is broken. Trimming region sources alone leaves provenance the majority of the payload, which
 is why the full list also moves to a separate interface.
 
-**Azure eviction rate.** Azure Resource Graph, requires a subscription:
-
-```kusto
-SpotResources
-| where type =~ 'microsoft.compute/skuspotevictionrate/location'
-| project skuName = tostring(sku.name), location = location,
-          spotEvictionRate = tostring(properties.evictionRate)
-```
-
-Bands: `0%-5%`, `5%-10%`, `10%-15%`, `15%-20%`, `20+%`. Per-hour probability from 7 days.
+**Azure eviction rate — deferred, not in this plan.** It is reachable only through Azure
+Resource Graph, which needs a subscription. The query, the band values and the reason it
+must never join `interruptionCappableKinds` are recorded in
+`docs/reviews/multicloud-parity.md` §3, so the work is one read away if a subscription
+appears.
 
 **Placement interfaces.**
 
-| | AWS | Azure | GCP |
-|---|---|---|---|
+|           | AWS                      | Azure                           | GCP                       |
+| --------- | ------------------------ | ------------------------------- | ------------------------- |
 | Interface | `GetSpotPlacementScores` | `placementScores/spot/generate` | `compute.advice.capacity` |
-| Value | integer 1-10 | `High` / `Medium` / `Low` | `obtainability` 0.0-1.0 |
-| Stage | GA | GA (`2025-06-05`) | beta |
-| Limits | — | 8 regions x 5 sizes | 5 machine types |
+| Value     | integer 1-10             | `High` / `Medium` / `Low`       | `obtainability` 0.0-1.0   |
+| Stage     | GA                       | GA (`2025-06-05`)               | beta                      |
+| Limits    | —                        | 8 regions x 5 sizes             | 5 machine types           |
 
 **GCP prices beyond us-central1.** Cloud Billing Catalog API, needs an API key and no special
 IAM permission. Runtime only — Google does not state redistribution terms, which is exactly
@@ -297,6 +315,7 @@ why it must never reach a snapshot.
 ### Task 1: Define the flag vocabulary and prove the command tree matches it
 
 **Files:**
+
 - Create: `cmd/spotinfo/vocabulary.go`
 - Create: `cmd/spotinfo/vocabulary_test.go`
 - Modify: `cmd/spotinfo/provider_flags.go`
@@ -319,6 +338,7 @@ This task deliberately ends red. The suite describes the intended surface; Tasks
 it pass. Do not weaken an assertion to make it green earlier.
 
 **Files:**
+
 - Modify: `cmd/spotinfo/e2e_test.go`
 
 - [ ] rename every test in the file to `TestE2E…` — an **infix**, because a Go test function
@@ -353,6 +373,7 @@ The command keeps its current name here. This is the migration; Task 4 is the re
 them keeps a ~500-line rendering change out of a task that reads like a rename.
 
 **Files:**
+
 - Modify: `cmd/spotinfo/main.go`
 - Modify: `cmd/spotinfo/provider_flags.go`
 - Modify: `internal/providers/aws/provider.go`
@@ -364,7 +385,7 @@ them keeps a ~500-line rendering change out of a task that reads like a rename.
 
 **The proof is the unchanged goldens, not a new test.** `contract_v1_test.go:63` drives the
 whole app through `execMainCmd` with a mocked `spotClient`, and
-`internal/providers/aws/provider.go:39` consumes that *same* `GetSpotSavings` interface. Build
+`internal/providers/aws/provider.go:39` consumes that _same_ `GetSpotSavings` interface. Build
 the AWS provider over the existing mock and keep `cmd/spotinfo/testdata/aws-root-v1.*` green,
 unchanged, for all five formats. That is a stronger gate than any hand-written parity test.
 
@@ -379,7 +400,7 @@ unchanged, for all five formats. That is a stronger gate than any hand-written p
       command made it inherit every input the provider needs, so an unreadable architecture
       manifest or sidecar — neither of which this command reads — failed
       `spotinfo --type t3.micro` with `SNAPSHOT_UNAVAILABLE` while the advisor and price data
-      it *does* read were intact. Keep construction cheap and let **acquisition** verify
+      it _does_ read were intact. Keep construction cheap and let **acquisition** verify
       payloads, so a snapshot this command never reads cannot fail it
 - [ ] write a test that makes the architecture manifest unreadable and asserts
       `spotinfo list --machine "t3.micro"` still answers — this is the regression guard for the
@@ -397,6 +418,7 @@ unchanged, for all five formats. That is a stronger gate than any hand-written p
 ### Task 4: Rename the command to `spotinfo list` and make it cloud-neutral
 
 **Files:**
+
 - Create: `cmd/spotinfo/list.go`
 - Modify: `cmd/spotinfo/main.go`
 - Create: `cmd/spotinfo/list_test.go`
@@ -422,6 +444,7 @@ unchanged, for all five formats. That is a stronger gate than any hand-written p
 ### Task 5: Retire `spotinfo.recommend/v1` and publish one schema family
 
 **Files:**
+
 - Modify: `internal/cloud/schema.go`
 - Create: `docs/plans/contracts/list-v1.schema.json`
 - Rename: `docs/plans/contracts/recommend-spot-instances-v2-{success,input,error}.schema.json`
@@ -474,6 +497,7 @@ unchanged, for all five formats. That is a stronger gate than any hand-written p
 ### Task 6: Rebuild the MCP surface on the same vocabulary
 
 **Files:**
+
 - Modify: `internal/mcp/server.go`, `internal/mcp/tools.go`, `internal/mcp/recommend.go`
 - Delete: `internal/mcp/testdata/find-spot-instances-v1-input-schema.json`
 - Delete: `internal/mcp/testdata/find-spot-instances-v1-response.json`
@@ -512,6 +536,7 @@ unchanged, for all five formats. That is a stronger gate than any hand-written p
 ### Task 7: Regenerate every golden once and review the diff
 
 **Files:**
+
 - Modify: `cmd/spotinfo/testdata/*`, `internal/mcp/testdata/*`
 - Rename: `cmd/spotinfo/contract_v1_test.go` → `cmd/spotinfo/contract_test.go`
 - Modify: `cmd/spotinfo/contract_v2_test.go`
@@ -537,24 +562,28 @@ unchanged, for all five formats. That is a stronger gate than any hand-written p
 ### Task 8: Replace the surviving silent no-ops with capability refusals
 
 Scoped to the refusals that **survive** the rest of the plan. `--offline` and `--refresh` are
-deliberately excluded: Tasks 10 and 15 give them real behaviour on Azure and GCP, and writing
+deliberately excluded: Tasks 10 and 13 give them real behaviour on Azure and GCP, and writing
 refusal tests here only to delete them there is churn.
 
 **Files:**
+
 - Modify: `cmd/spotinfo/provider_flags.go`
 - Create: `cmd/spotinfo/refusals_test.go`
 
 - [ ] refuse `--az`, `--min-score` and `--score-timeout` when `--with-score` is absent
 - [ ] refuse `--with-score` on a cloud without `CapabilityPlacementScore`, with
       `UNSUPPORTED_CAPABILITY` — reuse the existing capability, do not add a new one
+- [ ] on Azure, make the `--with-score` and `--live-risk` refusals name the reason: both
+      exist as vendor APIs but need an Azure subscription, which this build does not
+      authenticate to. A reader must be able to tell "not built" from "not published" 
 - [ ] refuse `--gcp-project` when the cloud is not GCP, matching how `--live-risk` is refused
 - [ ] refuse `--offline` and `--refresh` **only** on a cloud without
       `CapabilityLiveEnrichment` (`internal/cloud/provider.go:29`, already declared by AWS);
-      Tasks 10 and 15 set it for Azure and GCP, which retires the refusal without a test edit
+      Tasks 10 and 13 set it for Azure and GCP, which retires the refusal without a test edit
 - [ ] write the refusal test **driven by the registry, not by a hard-coded cloud list**: for
       each registered provider, assert `--offline` is refused **if and only if**
       `Capabilities().Has(CapabilityLiveEnrichment)` is false. A literal cloud table would have
-      to be edited by Tasks 10 and 15, which is the churn this rescoping exists to avoid
+      to be edited by Tasks 10 and 13, which is the churn this rescoping exists to avoid
 - [ ] write a table-driven test for the remaining refusals: exit code, empty stdout, message
       names both the flag and the cloud
 - [ ] run `make test` — must pass before Task 9
@@ -576,6 +605,7 @@ The ordering that mattered survives as bullet order: shrink the contaminant surf
 widening the catalogue key. It never needed a task boundary, only a code-change boundary.
 
 **Files:**
+
 - Modify: `internal/providers/azure/prices.go`, `internal/providers/azure/catalog.go`
 - Modify: `internal/providers/azure/prices_test.go`,
   `internal/providers/azure/catalog_test.go`
@@ -601,8 +631,9 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
 
 **Then, widen the key:**
 
-- [ ] read the OS from the `productName` suffix, handling all three states: ` Windows`,
-      ` Linux`, and no suffix meaning Linux
+- [ ] read the OS from the `productName` suffix, handling all three states: `" Windows"`,
+      `" Linux"`, and no suffix meaning Linux. The leading space is load-bearing — that is
+      why the marker is matched with `HasSuffix`, not `Contains`
 - [ ] key `priceKey`, the catalogue rows and `verifyPrices` by (machine, region, **os**), so
       the "is priced twice" check at `catalog.go:383` still fires on a real duplicate
 - [ ] make the spec join at `catalog.go:104` carry OS through, and **report** a priced machine
@@ -636,6 +667,7 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
 ### Task 10: Add an anonymous live price path for Azure
 
 **Files:**
+
 - Create: `internal/providers/azure/liveprice.go`, `internal/providers/azure/liveprice_test.go`
 - Modify: `internal/providers/azure/provider.go`
 
@@ -653,41 +685,16 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
 
 ---
 
-## Phase 6 — Azure eviction rate
-
-### Task 11: Fetch the Azure eviction rate behind `--live-risk`
-
-**Files:**
-- Modify: `internal/cloud/observations.go`, `internal/cloud/schema.go`
-- Create: `internal/providers/azure/liverisk.go`, `internal/providers/azure/liverisk_test.go`
-- Modify: `cmd/spotinfo/liverisk.go`
-
-- [ ] add `RiskKindEvictionRate` with the reviewed wire name `eviction_rate`
-- [ ] **do not** add it to `interruptionCappableKinds` — see Invariant 1
-- [ ] query Azure Resource Graph for `microsoft.compute/skuspotevictionrate/location`, once
-      per recommendation, against the **ranked page only**
-- [ ] take the subscription from `--azure-subscription` or `AZURE_SUBSCRIPTION_ID`, never from
-      the ambient `az` CLI default, matching the `--gcp-project` rule
-- [ ] resolve credentials once per run through a lazy `sync.OnceValues`, caching the negative
-      result; do not pass a cancellable context into a token source
-- [ ] emit one stderr warning naming the first cause when every lookup failed
-- [ ] write tests against a stub transport: success, no credentials, no permission, and a
-      page where every lookup failed
-- [ ] write a test asserting `--workload web --cloud azure` still returns
-      `UNSUPPORTED_CAPABILITY` even when eviction rate is available
-- [ ] run `make test` — must pass before Task 12
-
----
-
 ## Phase 7 — Placement scores
 
-### Task 12: Extend the placement observation with a kind, and put the flags on both commands
+### Task 11: Extend the placement observation with a kind, and put the flags on both commands
 
 `PlacementObservation` already exists at `internal/cloud/observations.go:123` with a bare
 `Score int`, is populated at `internal/providers/aws/provider.go:370` and rendered at
 `internal/mcp/tools.go:404`. This task **extends** it. Do not create a parallel type.
 
 **Files:**
+
 - Modify: `internal/cloud/observations.go`, `internal/cloud/schema.go`
 - Modify: `internal/cloud/enrich.go`, `internal/cloud/recommend.go`
 - Modify: `internal/mcp/tools.go`
@@ -698,45 +705,31 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
   declaring the flags is not enough to make them act
 - Modify: `internal/cloud/schema_test.go`
 
-- [ ] add `Kind` plus optional `Label string` and `Obtainability *float64` to the existing
+- [ ] add `Kind` plus an optional `Obtainability *float64` to the existing
       `PlacementObservation`, keeping `Score int` for the AWS path
-- [ ] define three kinds: `placement_score` (integer 1-10), `placement_label`
-      (`High`/`Medium`/`Low`) and `obtainability` (0.0-1.0 with an optional uptime estimate)
-- [ ] do **not** normalise the three into a shared scale
-- [ ] decide and document how *absent* differs from *unavailable*: `Placements` is a slice
+- [ ] define **two** kinds, one per producer this plan builds: `placement_score` (AWS,
+      integer 1-10) and `obtainability` (GCP, 0.0-1.0 with an optional uptime estimate).
+      Azure's `High`/`Medium`/`Low` label is deferred with its fetcher — do not add a kind
+      with no producer
+- [ ] do **not** normalise the kinds into a shared scale; a common 1-10 would invent
+      precision no vendor published
+- [ ] decide and document how _absent_ differs from _unavailable_: `Placements` is a slice
       today, so both are the empty slice. Add an explicit status rather than overloading length
 - [ ] add `--with-score`, `--min-score`, `--az` and `--score-timeout` to `recommend` — they are
-      root-only today (`main.go:1138`) and `recommendCommand` declares none of them, so Tasks
-      14 and 15 would otherwise have no CLI entry point
-- [ ] make `--min-score` meaningful only against a numeric kind, and refuse it against a label
-      kind with a message naming the cloud
+      root-only today (`main.go:1138`) and `recommendCommand` declares none of them, so Task 12
+      would otherwise have no CLI entry point
+- [ ] make `--min-score` meaningful against both kinds, or refuse it against `obtainability`
+      with a message naming the cloud — an integer floor over a 0.0-1.0 probability needs a
+      stated mapping, not an implicit one
 - [ ] write tests for each kind's rendering in table, JSON and CSV
 - [ ] write a test asserting a placement kind is never accepted by `acceptsRisk`
 - [ ] write a test asserting the AWS path still produces the same score it does today
-- [ ] run `make test` — must pass before Task 13
+- [ ] run `make test` — must pass before Task 12
 
-### Task 13: Fetch Azure placement scores
-
-**Files:**
-- Create: `internal/providers/azure/placement.go`,
-  `internal/providers/azure/placement_test.go`
-- Modify: `internal/providers/azure/provider.go`
-
-- [ ] call `placementScores/spot/generate` with Entra credentials and the resolved
-      subscription, against the ranked page only
-- [ ] batch requests to the documented limit of 8 regions and 5 sizes; when a page exceeds it,
-      batch or refuse — never truncate silently
-- [ ] carry `isQuotaAvailable` through as a separate field, not folded into the score
-- [ ] never cache a score into a snapshot: Microsoft documents it as valid only at the moment
-      requested
-- [ ] set `CapabilityPlacementScore` true for Azure
-- [ ] write tests against a stub transport: success, over-limit batching, no credentials, and
-      a partial response
-- [ ] run `make test` — must pass before Task 14
-
-### Task 14: Fetch GCP obtainability
+### Task 12: Fetch GCP obtainability
 
 **Files:**
+
 - Create: `internal/providers/gcp/placement.go`, `internal/providers/gcp/placement_test.go`
 - Modify: `internal/providers/gcp/provider.go`
 
@@ -746,15 +739,16 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
 - [ ] carry `estimatedUptime` alongside `obtainability`
 - [ ] mark the capability as beta in `Capabilities()` and say so in the help text
 - [ ] write tests against a stub transport: success, over-limit batching, no credentials
-- [ ] run `make test` — must pass before Task 15
+- [ ] run `make test` — must pass before Task 13
 
 ---
 
 ## Phase 8 — GCP beyond us-central1
 
-### Task 15: Widen GCP regions and prices behind an API key
+### Task 13: Widen GCP regions and prices behind an API key
 
 **Files:**
+
 - Create: `internal/providers/gcp/liveprice.go`, `internal/providers/gcp/liveprice_test.go`
 - Modify: `internal/providers/gcp/provider.go`
 - Modify: `cmd/spotinfo/provider_flags.go`
@@ -770,15 +764,16 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
 - [ ] write tests against a stub transport: success, no key, a rejected key, and a region the
       API does not price
 - [ ] write a test asserting the snapshot is unchanged after a live call
-- [ ] run `make verify-data` and `make test` — must pass before Task 16
+- [ ] run `make verify-data` and `make test` — must pass before Task 14
 
 ---
 
 ## Phase 9 — Close out
 
-### Task 16: Record the three refusals as answered
+### Task 14: Record the three refusals as answered
 
 **Files:**
+
 - Modify: `internal/cloud/provider.go`
 - Modify: `docs/clouds.md`
 - Modify: `docs/reviews/multicloud-parity.md`
@@ -789,12 +784,12 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
       feature
 - [ ] write a test asserting `interruptionCappableKinds` holds exactly one kind, so a future
       change to it fails a test rather than a consumer
-- [ ] do not duplicate the per-cloud refusal tests already written in Tasks 9 and 11; assert
+- [ ] do not duplicate the per-cloud refusal tests already written in Task 9; assert
       only the message wording here
 - [ ] update the verdict table in `docs/reviews/multicloud-parity.md` with what shipped
-- [ ] run `make test` — must pass before Task 17
+- [ ] run `make test` — must pass before Task 15
 
-### Task 17: Verify acceptance criteria
+### Task 15: Verify acceptance criteria
 
 - [ ] verify every requirement in the Overview is implemented
 - [ ] verify every invariant still holds, especially Invariants 1, 4 and 7
@@ -806,7 +801,7 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
 - [ ] run `make verify-architecture`
 - [ ] measure an Azure recommendation payload and confirm provenance is under half of it
 
-### Task 18: [Final] Update documentation
+### Task 16: [Final] Update documentation
 
 - [ ] rewrite `docs/usage.md` against the new vocabulary and both commands
 - [ ] update `README.md`, `docs/quick-start.md`, `docs/clouds.md`, `docs/installation.md`,
@@ -832,8 +827,9 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
    `spotinfo --mcp` and `spotinfo --version` still work.
 6. Azure serves Linux and Windows. GCP still refuses Windows, with a message naming the reason.
 7. Azure prices can be fetched live and anonymously; `--offline` and `--refresh` act on Azure.
-8. Azure eviction rate and placement scores, and GCP obtainability, are available behind
-   explicit opt-in flags and never enter a snapshot.
+8. GCP obtainability is available behind an explicit opt-in flag and never enters a
+   snapshot. Azure eviction rate and Azure placement scores are **not** built, and the
+   binary links no Azure credential library.
 9. `interruptionCappableKinds` still holds exactly `[RiskKindInterruptionFrequencyRange]`.
 10. Provenance is less than half of an Azure recommendation payload, and every retained source
     is referenced by at least one candidate.
@@ -861,9 +857,10 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
 
 ## Post-Completion
 
-*Manual and external work. No checkboxes — these cannot run in this repository's test suite.*
+_Manual and external work. No checkboxes — these cannot run in this repository's test suite._
 
 **Manual verification against real credentials:**
+
 - `--live-risk` on Azure with a real subscription, including one lacking the Resource Graph
   permission
 - `--with-score` on Azure and GCP with real credentials, including the over-limit batching path
@@ -871,6 +868,7 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
 - Windows Azure prices spot-checked against the portal for three regions
 
 **Release mechanics:**
+
 - Tag a new major version; the CLI surface, both schemas and all three MCP tool names change
 - Publish the migration table from Task 18 in the release notes
 - Update any published MCP client configuration that names the old tool names
