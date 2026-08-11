@@ -196,6 +196,32 @@ func TestACloudThatPublishesNoPlacementScoreSaysSo(t *testing.T) {
 	assert.NotContains(t, err.Error(), "subscription")
 }
 
+// --with-score under --offline reached the network and then failed the whole
+// run. Measured on the built binary with HTTP_PROXY pointed at a closed port:
+// `list --cloud aws --offline --with-score` spent 5 s on the EC2 instance
+// metadata endpoint and exited 1 with zero rows, discarding prices the snapshot
+// had already answered. --offline documents that it makes no request at all.
+func TestScoresAreRefusedUnderOfflineRatherThanFetched(t *testing.T) {
+	for _, command := range []string{listCommandName, recommendCommandName} {
+		t.Run(command, func(t *testing.T) {
+			var err error
+			if command == listCommandName {
+				_, err = runListWith(t, refusalRegistry(cloud.ProviderAWS), stubSavingsClient{},
+					"--cloud", string(cloud.ProviderAWS), "--"+flagOffline, "--"+flagWithScore)
+			} else {
+				err = runRecommend(t, refusalRegistry(cloud.ProviderAWS), recommendCommandName,
+					"--cloud", string(cloud.ProviderAWS), "--"+flagArchitecture, "x86_64",
+					"--"+flagMinVCPU, "2", "--"+flagMinMemoryGiB, "4",
+					"--"+flagOffline, "--"+flagWithScore)
+			}
+
+			require.ErrorIs(t, err, cloud.ErrInvalidArgument)
+			assert.Contains(t, err.Error(), "--"+flagOffline)
+			assert.Contains(t, err.Error(), "--"+flagWithScore)
+		})
+	}
+}
+
 // `list --sort score` without --with-score ordered nothing and exited 0 on AWS,
 // the one cloud the capability check waves through: listCapabilityRequest asks
 // for CapabilityPlacementScore, which AWS has, and having it is not the same as

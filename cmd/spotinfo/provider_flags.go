@@ -115,6 +115,31 @@ func validateScoreFlags(ctx *cli.Context) error {
 	return validateScoreTimeout(ctx)
 }
 
+// refuseScoresUnderOffline rejects --with-score together with --offline.
+//
+// No snapshot carries a placement figure, so --with-score has only one source:
+// a live vendor API. --offline promises the opposite, and the two together did
+// not merely ignore one of them — measured on the built binary with the network
+// blackholed, `list --cloud aws --offline --with-score` spent 5 s reaching the
+// EC2 instance-metadata endpoint at 169.254.169.254 and then exited 1 with zero
+// rows, destroying an answer whose prices came entirely from the snapshot.
+//
+// That breaks three things at once: --offline's documented promise to make no
+// request, the rule that a live path degrades to the snapshot rather than
+// failing a run, and the flag's whole purpose on a locked-down network. It is
+// refused rather than downgraded to an unavailable status because the caller
+// asked two incompatible questions and only they can say which one they meant —
+// the same disposition --az, --min-score and --sort score already get.
+func refuseScoresUnderOffline(ctx *cli.Context) error {
+	if !lineageBool(ctx, flagWithScore) || !lineageBool(ctx, flagOffline) {
+		return nil
+	}
+
+	return fmt.Errorf("%w: --%s cannot be combined with --%s: no snapshot carries a placement figure, "+
+		"so --%s can only come from a live vendor API",
+		cloud.ErrInvalidArgument, flagWithScore, flagOffline, flagWithScore)
+}
+
 // validateScoreTimeout bounds the lookup budget the way internal/mcp bounds
 // score_timeout.
 //

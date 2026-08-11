@@ -71,6 +71,12 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, registry provid
 	if invalid := validateScoreFlags(ctx); invalid != nil {
 		return invalid
 	}
+	// After refuseUnsupportedFlags, so a cloud that cannot serve a placement
+	// figure at all names that rather than naming --offline. Every cloud that
+	// can serve one fetches it live, so the conflict holds on all of them.
+	if invalid := refuseScoresUnderOffline(ctx); invalid != nil {
+		return invalid
+	}
 	if invalid := requireScoresToSortByThem(ctx, sortKey); invalid != nil {
 		return invalid
 	}

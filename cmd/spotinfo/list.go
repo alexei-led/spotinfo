@@ -177,6 +177,12 @@ func execListCmd(ctx *cli.Context, execCtx context.Context,
 		if invalid := requireScoresToSortByThem(ctx, sortKey); invalid != nil {
 			return invalid
 		}
+		// Gated the same way, for the same reason: a cloud that refuses
+		// --with-score on a browse at all should say so in its own words rather
+		// than be told which other flag to drop.
+		if invalid := refuseScoresUnderOffline(ctx); invalid != nil {
+			return invalid
+		}
 	}
 
 	return answerList(ctx, execCtx, provider, sortKey, output)
