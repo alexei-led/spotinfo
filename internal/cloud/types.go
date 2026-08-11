@@ -43,7 +43,16 @@ func ParseProviderID(value string) (ProviderID, error) {
 		return provider, nil
 	}
 
-	return "", fmt.Errorf("%w: unknown cloud provider %q", ErrInvalidArgument, value)
+	// The accepted set is spelled out because a misspelled cloud is the one
+	// argument error where the reader may not know what the alternatives are:
+	// every other "unknown x" message here already names them.
+	names := make([]string, 0, len(ProviderIDs()))
+	for _, id := range ProviderIDs() {
+		names = append(names, string(id))
+	}
+
+	return "", fmt.Errorf("%w: unknown cloud provider %q, want one of %s",
+		ErrInvalidArgument, value, strings.Join(names, "|"))
 }
 
 // Region is a provider region identifier in that provider's own naming.

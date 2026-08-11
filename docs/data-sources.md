@@ -70,6 +70,35 @@ kept — the per-page read catches a flip inside one page's window, the bracket
 catches a flip between windows — and both report `ErrSourceUnstable`, so either
 exits 75.
 
+### Correction, 2026-08-12: both gates compare rendered text, not raw bytes
+
+As first written, both gates compared `sha256` of the raw response body. That
+could never pass. Every response from `cloud.google.com` carries a fresh CSP
+`nonce` attribute and a fresh `FdrFJe` request id inside a script body, so the
+raw hash differs on every read whatever the prices do:
+
+| read | raw sha256 (first 16) | rendered-text digest (first 20) | `n2-standard-4` |
+| ---- | --------------------- | ------------------------------- | --------------- |
+| 1    | `5c76db2c98cf4bf1`    | `68435cfcd3368e33d49e`          | $0.111472       |
+| 2    | `ab14b91bd6585000`    | `68435cfcd3368e33d49e`          | $0.111472       |
+| 3    | `4cdcc81bdf1ea56a`    | `68435cfcd3368e33d49e`          | $0.111472       |
+| 4    | `1af02822fd0dd927`    | `68435cfcd3368e33d49e`          | $0.111472       |
+
+Four reads over 3 minutes 46 seconds with the updater's own `User-Agent` and
+`Accept-Language`, plus five more in one window: nine raw hashes, one digest.
+
+The gate landed on 2026-08-10, one day after the last snapshot that was written,
+so no refresh has passed since — and the committed catalogue went on publishing
+`n2-standard-4` at $0.101336 while the page served $0.111472. Because exit 75 is
+reported as a notice, the weekly workflow stayed green throughout.
+
+`stabilityDigest` in `cmd/update-gcp-data/stability.go` is what the two copies
+are compared on now: script and style bodies, comments and every tag removed,
+whitespace collapsed, the remaining text hashed. It moves when a price moves and
+not when markup re-rolls. The manifest keeps recording the raw body hash, which
+is the provenance of the bytes that run read — for a nonce-bearing HTML page
+that is a record of what was read, not a checksum a re-fetch can reproduce.
+
 **Why the Azure updater does not do the same.** Azure's prices come from the
 Retail Prices API, a versioned endpoint whose rows carry `effectiveStartDate`
 and `effectiveEndDate`, and the parser already resolves all 55 regions against
@@ -594,6 +623,17 @@ Failures are deliberate, not transient noise. Expect to see:
 Apart from the last two, any of these means reviewing the pages and, if they really changed
 shape, bumping `parser_version` in both the parser and the source contract. Do not widen the
 parser to make a changed page fit.
+
+**Open as of 2026-08-12: `catalogue has no machine in approved series "n4d"`.** Every N4D
+machine is skipped with `spot price with no on-demand pair`, which trips the approved-series
+check. The rows are on the general-purpose page, but that one table's fourth header cell reads
+`Price (USD)` where `ParseOnDemandPage` requires the `Default* (USD)` prefix that every other
+table on the page still uses; the N4D table carries its own consumption-model id
+(`7754-699E-0EBF`), so it is a per-series layout rather than a page-wide rename. This is the
+reviewed-change path above, not a bug to patch around: confirm from the page that the column is
+the on-demand rate, accept both spellings, update `expected_fields` and bump `parser_version` in
+the parser and the contract together. Until then the GCP catalogue stays at its 2026-08-09
+prices — see `docs/reviews/manual-validation.md` findings 2 and 3.
 
 ### Runtime Data Flow
 

@@ -40,7 +40,7 @@ VERSION:
    v2.5.0-86-g2f2b80b
 
 COMMANDS:
-   list       list every matching machine with its price and risk
+   list       list every matching machine with its price and risk (no flag is required)
    recommend  rank the best Spot machines for a stated requirement (requires --architecture, --min-vcpu and --min-memory-gib)
    help, h    Shows a list of commands or help for one command
 
@@ -78,7 +78,7 @@ machine the cloud publishes with no price is still listed, with `-` in place of 
 ```console
 $ spotinfo list --help
 NAME:
-   spotinfo list - list every matching machine with its price and risk
+   spotinfo list - list every matching machine with its price and risk (no flag is required)
 
 USAGE:
    spotinfo list [command options]

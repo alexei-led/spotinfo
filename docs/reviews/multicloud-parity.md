@@ -1,7 +1,7 @@
 # Multi-cloud parity: what is missing, and what can be added
 
 Date: 2026-08-11. Verdict table updated 2026-08-11 with what
-[../plans/20260811-multicloud-parity.md](../plans/20260811-multicloud-parity.md) actually
+[../plans/completed/20260811-multicloud-parity.md](../plans/completed/20260811-multicloud-parity.md) actually
 shipped; the reasoning below each verdict is unchanged.
 
 [cli-and-mcp-surface-review.md](cli-and-mcp-surface-review.md) lists what is inconsistent
@@ -393,7 +393,7 @@ can be exercised or tested today, and reaching them costs `azidentity` at **+4.8
 +11.7% of the shipped binary. The ARM SDK on top of that is only +136 KB, so the credential
 chain is the whole price.
 
-`docs/plans/20260811-multicloud-parity.md` carries the rest and states as an invariant that
+`docs/plans/completed/20260811-multicloud-parity.md` carries the rest and states as an invariant that
 nothing in it authenticates to Azure. Revisit when a subscription exists.
 
 Everything else on this page stands, and all four shipped: Windows on Azure, live Azure

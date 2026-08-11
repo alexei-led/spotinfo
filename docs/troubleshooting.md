@@ -149,7 +149,7 @@ by the regional score, or ask for the zone breakdown and read it.
 
 ```console
 $ spotinfo list --cloud gcp --sort score
-spotinfo: failed to get spot savings: unsupported capability: gcp cannot order a catalogue by obtainability, which it fetches for a ranked page instead
+spotinfo: unsupported capability: gcp cannot order a catalogue by obtainability, which it fetches for a ranked page instead
 ```
 
 GCP's placement figure is **obtainability** — a 0.0-1.0 probability from a beta Google API,
@@ -158,7 +158,7 @@ catalogue. Two consequences:
 
 ```console
 $ spotinfo list --cloud gcp --with-score
-spotinfo: failed to get spot savings: unsupported capability: gcp obtainability is fetched for a ranked recommendation only, and needs a Google Cloud project
+spotinfo: unsupported capability: gcp obtainability is fetched for a ranked recommendation only, and needs a Google Cloud project
 
 $ spotinfo list --cloud gcp --with-score --min-score 5
 spotinfo: unsupported capability: --min-score is refused on gcp: gcp publishes obtainability, and an integer 1-10 floor states no reviewed mapping onto it
@@ -252,7 +252,7 @@ A value that is not an operating system at all fails later, in the provider:
 
 ```console
 $ spotinfo list --offline --os plan9
-spotinfo: failed to get spot savings: invalid argument: aws does not support os "plan9"
+spotinfo: invalid argument: aws does not support os "plan9"
 ```
 
 ## `--live-risk` and the GCP credential flags
@@ -331,7 +331,7 @@ the refusal at debug level only:
 ```console
 $ spotinfo --debug list --cloud gcp --gcp-billing-key bogus --region europe-west1 --machine '^n2-standard-4$' --output text
 time=... level=DEBUG msg="gcp billing catalogue unavailable; answering from the committed snapshot" error="billing catalogue request was refused: 400 Bad Request: ... \"API key not valid. Please pass a valid API key.\" ..."
-time=... level=WARN msg="no machines matched the query" filters="[machine=^n2-standard-4$ region=europe-west1]"
+time=... level=WARN msg="no machines matched the query; relax a filter, or check the region name is one this cloud publishes" filters="[machine=^n2-standard-4$ region=europe-west1]"
 ```
 
 If a key seems to be ignored, run with `--debug` before anything else: an invalid key, a
@@ -364,7 +364,7 @@ Every one of these is checked before any data is read.
 
 | Command fragment             | Message                                                                           |
 | ---------------------------- | --------------------------------------------------------------------------------- |
-| `--cloud oracle`             | `unknown cloud provider "oracle"`                                                 |
+| `--cloud oracle`             | `unknown cloud provider "oracle", want one of aws\|azure\|gcp`                                                 |
 | `--architecture s390x`       | `architecture must be x86_64 or arm64`                                            |
 | `--workload gpu`             | `workload must be cost, web, ci, or batch`                                        |
 | `--sort colour`              | `unknown sort "colour", want one of machine\|price\|region\|risk\|savings\|score` |
@@ -384,7 +384,7 @@ both a `<= 0` guard and the "is it set" branch and silently drop the filter.
 
 ```console
 $ spotinfo list --offline --machine '['
-spotinfo: failed to get spot savings: aws candidate acquisition: failed to match instance type: error parsing regexp: missing closing ]: `[`
+spotinfo: aws candidate acquisition: failed to match instance type: error parsing regexp: missing closing ]: `[`
 ```
 
 `--machine` is RE2. Escape the metacharacters you mean literally — an AWS machine name
@@ -405,7 +405,7 @@ $ spotinfo list --offline --region us-east-1 --machine '^zzzz$'
 └─────────┴──────┴────────────┴────────────────────────┴──────┴──────────┘
 ```
 
-with `level=WARN msg="no machines matched the query"` on stderr and exit 0 — an empty browse
+with `level=WARN msg="no machines matched the query; relax a filter, or check the region name is one this cloud publishes"` on stderr and exit 0 — an empty browse
 is an answer. A ranked page with nothing in it is not:
 
 ```console
@@ -421,7 +421,7 @@ Same split, with the cloud named:
 
 ```console
 $ spotinfo list --cloud gcp --region europe-west1 --output text
-time=... level=WARN msg="no machines matched the query" filters="[region=europe-west1]"
+time=... level=WARN msg="no machines matched the query; relax a filter, or check the region name is one this cloud publishes" filters="[region=europe-west1]"
 
 $ spotinfo recommend --cloud gcp --architecture x86_64 --min-vcpu 2 --min-memory-gib 4 --region europe-west1
 spotinfo: no candidates: gcp publishes no machines in europe-west1
@@ -437,14 +437,14 @@ AWS is stricter — it rejects an unknown region rather than returning nothing:
 
 ```console
 $ spotinfo list --offline --region atlantis
-spotinfo: failed to get spot savings: aws candidate acquisition: region not found: atlantis
+spotinfo: aws candidate acquisition: region not found: atlantis
 ```
 
 `all` is a keyword, not a region, so it cannot be mixed with a real one:
 
 ```console
 $ spotinfo list --offline --region all --region us-east-1
-spotinfo: failed to get spot savings: aws candidate acquisition: region not found: all
+spotinfo: aws candidate acquisition: region not found: all
 ```
 
 ### The price column reads `-`

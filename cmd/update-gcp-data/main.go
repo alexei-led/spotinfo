@@ -180,10 +180,15 @@ func loadContract(dataDir string) (*snapshot.SourceContract, error) {
 }
 
 // page is one downloaded source document with the provenance the manifest needs.
+//
+// sha256 is the raw body, which is what the manifest publishes. digest is the
+// page's rendered text, which is what two reads are compared on — see
+// stabilityDigest for why the two cannot be the same value.
 type page struct {
 	fetchedAt time.Time
 	url       string
 	sha256    string
+	digest    string
 	body      []byte
 	kinds     []snapshot.DataKind
 }
@@ -232,6 +237,7 @@ func fetchSources(ctx context.Context, contract *snapshot.SourceContract) ([]pag
 			url:       source.URL,
 			fetchedAt: time.Now().UTC(),
 			sha256:    snapshot.SHA256Hex(body),
+			digest:    stabilityDigest(body),
 			body:      body,
 			kinds:     source.DataKinds,
 		})
@@ -270,11 +276,11 @@ func confirmWindowStable(ctx context.Context, client *http.Client, pages []page)
 		return err
 	}
 
-	if after := snapshot.SHA256Hex(body); after != pages[first].sha256 {
-		return fmt.Errorf("%w: %s hashed %s before the other pages were read and %s after. "+
+	if after := stabilityDigest(body); after != pages[first].digest {
+		return fmt.Errorf("%w: %s digested %s before the other pages were read and %s after. "+
 			"The source rolled over mid-run; a snapshot taken now can pair prices from two "+
-			"generations. Retry when the hashes agree",
-			ErrSourceUnstable, pages[first].url, pages[first].sha256, after)
+			"generations. Retry when the digests agree",
+			ErrSourceUnstable, pages[first].url, pages[first].digest, after)
 	}
 
 	return nil
@@ -304,6 +310,10 @@ var ErrSourceUnstable = errors.New("gcp pricing page is not serving a stable doc
 // stable, but two different ones prove it is not, and that is the case worth
 // refusing. It costs one extra download per page on a weekly build-time job and
 // nothing at all at runtime.
+//
+// The comparison is on stabilityDigest, not on the raw body: these pages carry a
+// fresh CSP nonce and a fresh request id in every response, so a raw-body
+// comparison refused every run and no snapshot could be written at all.
 func fetch(ctx context.Context, client *http.Client, url string) ([]byte, error) {
 	first, err := fetchWithRetry(ctx, client, url)
 	if err != nil {
@@ -315,9 +325,9 @@ func fetch(ctx context.Context, client *http.Client, url string) ([]byte, error)
 		return nil, err
 	}
 
-	if firstSum, secondSum := snapshot.SHA256Hex(first), snapshot.SHA256Hex(second); firstSum != secondSum {
-		return nil, fmt.Errorf("%w: %s returned %s then %s. The source is mid-rollout; "+
-			"a snapshot taken now can mix price generations across pages. Retry when the hashes agree",
+	if firstSum, secondSum := stabilityDigest(first), stabilityDigest(second); firstSum != secondSum {
+		return nil, fmt.Errorf("%w: %s digested %s then %s. The source is mid-rollout; "+
+			"a snapshot taken now can mix price generations across pages. Retry when the digests agree",
 			ErrSourceUnstable, url, firstSum, secondSum)
 	}
 

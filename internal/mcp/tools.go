@@ -138,8 +138,9 @@ func NewListSpotMachinesTool(providers providerRegistry, logger *slog.Logger) *L
 func (s *Server) registerListTool() {
 	tool := mcp.NewTool(listToolName, append(readOnlyToolAnnotations(),
 		mcp.WithDescription("List every Spot machine matching a filter, with its price and its risk status. "+
-			"Returns a spotinfo.list/v1 payload; a cloud that publishes no interruption figure reports "+
-			"that absence rather than a zero."),
+			"Answers on AWS, GCP and Azure; AWS is the only one publishing an interruption figure, and "+
+			"GCP prices Linux only. Returns a spotinfo.list/v1 payload; a cloud that publishes no "+
+			"interruption figure reports that absence rather than a zero."),
 		mcp.WithString(argCloud,
 			mcp.Description("Cloud provider to query"),
 			mcp.Enum(providerEnum()...),
@@ -528,8 +529,9 @@ func NewListCloudRegionsTool(providers providerRegistry, logger *slog.Logger) *L
 func (s *Server) registerRegionsTool() {
 	tool := mcp.NewTool(regionsToolName, append(readOnlyToolAnnotations(),
 		mcp.WithDescription("List every region a cloud publishes Spot machines in, with the complete list of "+
-			"documents that cloud was read from. Returns a spotinfo.regions/v1 payload, which is where the "+
-			"sources_omitted count of a list or recommend answer is resolved."),
+			"documents that cloud was read from. Answers on AWS, GCP and Azure; GCP publishes one region. "+
+			"Returns a spotinfo.regions/v1 payload, which is where the sources_omitted count of a list or "+
+			"recommend answer is resolved."),
 		mcp.WithString(argCloud,
 			mcp.Description("Cloud provider to enumerate"),
 			mcp.Enum(providerEnum()...),

@@ -7,7 +7,7 @@ package main
 //
 // ---------------------------------------------------------------------------
 // THIS SUITE IS EXPECTED TO FAIL UNTIL TASK 7 OF
-// docs/plans/20260811-multicloud-parity.md.
+// docs/plans/completed/20260811-multicloud-parity.md.
 //
 // It was written in Task 2, before the surface it describes exists: two
 // cloud-neutral commands, one schema family (spotinfo.list/v1 and

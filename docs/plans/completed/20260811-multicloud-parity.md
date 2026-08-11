@@ -2611,41 +2611,84 @@ fixed in this task, not deferred.
 
 **Correctness — is the answer _right_, not merely well-formed:**
 
-- [ ] spot-check three AWS instance types in three regions against the AWS Spot pricing page,
+- [x] spot-check three AWS instance types in three regions against the AWS Spot pricing page,
       and confirm the savings percent and interruption range agree with the Spot Advisor
-- [ ] spot-check three Azure sizes in three regions against the Azure pricing calculator,
+- [x] spot-check three Azure sizes in three regions against the Azure pricing calculator,
       **including one Windows price**, and confirm a Windows price is never presented as a
       saving against a Linux price
-- [ ] spot-check three GCP machine types against Google's Spot pricing page
-- [ ] confirm a cloud with no interruption data never renders a number in the risk column
-- [ ] confirm `--workload web|ci|batch` still refuses GCP and Azure with a message naming the
+- [x] spot-check three GCP machine types against Google's Spot pricing page
+- [x] confirm a cloud with no interruption data never renders a number in the risk column
+- [x] confirm `--workload web|ci|batch` still refuses GCP and Azure with a message naming the
       vendor limit, and that `--live-risk` on GCP makes the preemption rate **visible but not
       filterable** — Invariant 1 observed from the outside
 
 **Usability — the part no test asserts:**
 
-- [ ] run `spotinfo`, `spotinfo --help`, `spotinfo list --help`, `spotinfo recommend --help`
+- [x] run `spotinfo`, `spotinfo --help`, `spotinfo list --help`, `spotinfo recommend --help`
       and judge whether a first-time reader can tell the two commands apart without the plan.
       The discriminator is that `recommend` requires `--architecture`, `--min-vcpu` and
       `--min-memory-gib`; if the help text does not make that obvious, fix the help text
-- [ ] confirm the `--region all` default is discoverable and its cost is stated, with the
+- [x] confirm the `--region all` default is discoverable and its cost is stated, with the
       pointer to `--offline` or an explicit `--region` the plan requires
-- [ ] trigger every error path by hand — unknown cloud, unknown region, unknown format, a
+- [x] trigger every error path by hand — unknown cloud, unknown region, unknown format, a
       removed flag, a refused capability, a filter matching nothing — and judge each message
       on whether it says **what to do next**. `NO_CANDIDATES` with no hint is a finding
-- [ ] time a cold `spotinfo list --cloud aws` and the same call with `--offline`; if the
+- [x] time a cold `spotinfo list --cloud aws` and the same call with `--offline`; if the
       default is slow enough to read as broken, that is a usability finding
-- [ ] check the rename hints name the replacement flag, not just the removal
-- [ ] drive the MCP surface from a real client (Claude Desktop or `mcp` CLI) and confirm the
+- [x] check the rename hints name the replacement flag, not just the removal
+- [x] drive the MCP surface from a real client (Claude Desktop or `mcp` CLI) and confirm the
       three tools are discoverable and their descriptions say which clouds each supports
 
 **Close out:**
 
-- [ ] record every finding in `docs/reviews/manual-validation.md` with a severity and a verdict
-- [ ] fix every correctness finding and every high-severity usability finding **in this task**
-- [ ] re-run `make test && make lint && make validate-clouds` after the fixes
-- [ ] list anything deliberately not fixed, with the reason
-- [ ] move this plan to `docs/plans/completed/` — this is the last step of the last task
+- [x] record every finding in `docs/reviews/manual-validation.md` with a severity and a verdict
+- [x] fix every correctness finding and every high-severity usability finding **in this task**
+- [x] re-run `make test && make lint && make validate-clouds` after the fixes
+- [x] list anything deliberately not fixed, with the reason
+- [x] move this plan to `docs/plans/completed/` — this is the last step of the last task
+
+➕ **The review found that `make update-gcp-data` could never write a snapshot, which is why
+the committed GCP prices are wrong.** Both stability gates compared `sha256` of the raw
+response body, and every response from `cloud.google.com` carries a fresh CSP nonce and a fresh
+`FdrFJe` request id — nine reads with the updater's own User-Agent gave nine different raw
+hashes, one rendered-text digest and one price. The gate landed on 2026-08-10, one day after
+the last snapshot that was written, so no refresh has passed since; because `ErrSourceUnstable`
+exits 75 and the weekly workflow reports that as a notice, nothing surfaced it.
+`cmd/update-gcp-data/stability.go` now compares the page's rendered text, and the manifest still
+records the raw hash. This is a fix to the updater, not to a parser: `internal/providers/gcp`
+extracts the same data as before, so no `parser_version` bump is due under Invariant 4.
+
+⚠️ **Two findings are left open, both recorded in `docs/reviews/manual-validation.md`.** With
+the gate fixed the refresh reaches the parser and fails on `catalogue has no machine in approved
+series "n4d"`: Google's general-purpose page now heads the N4D on-demand column `Price (USD)`
+where every other table on it still uses `Default* (USD)`. Accepting a second spelling is a
+source-contract change — the contract carries `review_status: approved`, `reviewer: alexei-led`
+and names that prefix in `expected_fields` — so it needs the reviewer, and the safety note
+"never widen a parser to make a changed source fit" governs. Until then the GCP catalogue keeps
+its 2026-08-09 prices, which are 9.1% low on `n2-standard-4` and 4.8% low on `c2-standard-8`.
+The failure is now loud (exit 1) rather than a notice.
+
+➕ **Two vendor pages could not be read as pages, and the substitutes are recorded rather than
+presented as independent.** <https://aws.amazon.com/ec2/spot/pricing/> and the Azure pricing
+calculator are client-rendered and publish no numbers in their HTML, so the checks used the
+feeds behind them — `website.spot.ec2.aws.a2z.com/spot.json` and
+`prices.azure.com/api/retail/prices`. Those are the same documents the binary reads, so they
+prove the region key, OS column and unit are read correctly and nothing more. The AWS savings
+percent _was_ checked independently, against AWS's published on-demand price index, which the
+binary never reads; the disagreement that surfaced is between AWS's own two feeds and is
+recorded as finding 11, not changed.
+
+➕ **The MCP checkbox was driven over the stdio protocol directly rather than from Claude
+Desktop.** `initialize`, `notifications/initialized`, `tools/list` piped into
+`spotinfo --mcp` with `HTTP_PROXY`/`HTTPS_PROXY` at a closed port. The substance of the
+checkbox is the three tool names and whether their descriptions name the clouds; a desktop
+client would render the same strings. They did not name the clouds, and now do.
+
+➕ **`--live-risk` making the GCP preemption rate _visible_ is unverified.** It needs Google
+Application Default Credentials and a billable project, which this repository does not hold.
+The half that needs no credential — that the figure stays unfilterable, so
+`--workload web --live-risk` is still refused before acquisition — was observed and is quoted
+in the review. The visible half stays on the Post-Completion list.
 
 ## Acceptance criteria
 

@@ -107,7 +107,7 @@ All three tools declare `readOnlyHint: true`, `idempotentHint: true`, `destructi
 
 ### `list_spot_machines`
 
-List every Spot machine matching a filter, with its price and its risk status. Returns a `spotinfo.list/v1` payload; a cloud that publishes no interruption figure reports that absence rather than a zero.
+List every Spot machine matching a filter, with its price and its risk status. Answers on AWS, GCP and Azure; AWS is the only one publishing an interruption figure, and GCP prices Linux only. Returns a `spotinfo.list/v1` payload; a cloud that publishes no interruption figure reports that absence rather than a zero.
 
 **Required:** none.
 
@@ -134,7 +134,7 @@ List every Spot machine matching a filter, with its price and its risk status. R
 
 ### `recommend_spot_machines`
 
-Recommend Spot machines from committed multi-cloud price data. Returns a `spotinfo.recommend/v3` payload with explicit risk availability per cloud.
+Recommend Spot machines from committed multi-cloud price data. Answers on AWS, GCP and Azure with workload `cost`; the interruption-capped workloads `web`, `ci` and `batch` are AWS-only, because no other cloud publishes an interruption frequency. Returns a `spotinfo.recommend/v3` payload with explicit risk availability per cloud.
 
 **Required:** `architecture`, `min_vcpu`, `min_memory_gib`.
 
@@ -159,7 +159,7 @@ Recommend Spot machines from committed multi-cloud price data. Returns a `spotin
 
 ### `list_cloud_regions`
 
-List every region a cloud publishes Spot machines in, with the complete list of documents that cloud was read from. This is where the `sources_omitted` count of a `list` or `recommend` answer is resolved.
+List every region a cloud publishes Spot machines in, with the complete list of documents that cloud was read from. Answers on AWS, GCP and Azure; GCP publishes one region. This is where the `sources_omitted` count of a `list` or `recommend` answer is resolved.
 
 **Required:** none.
 

@@ -2,8 +2,10 @@ package spot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -177,6 +179,8 @@ func enrichMissingPrices(ctx context.Context, advices []Advice, provider livePri
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
+	failures := make(map[string]error, len(regionMissing))
+
 	for region, indices := range regionMissing {
 		wg.Add(1)
 		go func(r string, idxs []int) {
@@ -200,9 +204,10 @@ func enrichMissingPrices(ctx context.Context, advices []Advice, provider livePri
 
 				prices, err := provider.fetchLivePrices(enrichCtx, r, batch, os)
 				if err != nil {
-					slog.Warn("failed to fetch live prices",
-						slog.String("region", r),
-						slog.Any("error", err))
+					mu.Lock()
+					failures[r] = err
+					mu.Unlock()
+
 					return
 				}
 
@@ -220,4 +225,40 @@ func enrichMissingPrices(ctx context.Context, advices []Advice, provider livePri
 	}
 
 	wg.Wait()
+	reportLivePriceFailures(failures)
+}
+
+// reportLivePriceFailures logs what the live-price pass could not read.
+//
+// Missing credentials are reported once, not once per region. Every region
+// resolves the same lazily cached credential chain, so a machine without AWS
+// credentials logged the identical error for every region it queried: a default
+// `spotinfo list` printed twelve copies of a 450-character IMDS failure to
+// stderr on a command that answered correctly from the static feed, which reads
+// as a broken tool. One line, naming what to do about it, is the whole
+// information those twelve carried.
+//
+// Anything else stays per region: a throttled or unreachable region is a fact
+// about that region, and collapsing those would hide which one failed.
+func reportLivePriceFailures(failures map[string]error) {
+	uncredentialed := make([]string, 0, len(failures))
+
+	for region, err := range failures {
+		if errors.Is(err, errNoAWSCredentials) {
+			uncredentialed = append(uncredentialed, region)
+
+			continue
+		}
+
+		slog.Warn("failed to fetch live prices", slog.String("region", region), slog.Any("error", err))
+	}
+
+	if len(uncredentialed) == 0 {
+		return
+	}
+
+	slices.Sort(uncredentialed)
+	slog.Warn("no AWS credentials, so machines missing from the static price feed keep no price; "+
+		"configure AWS credentials to price them, or pass --offline to skip the lookup",
+		slog.Any("regions", uncredentialed))
 }

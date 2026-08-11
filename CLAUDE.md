@@ -514,11 +514,25 @@ contracted URL. Two identical reads do not prove stability; two different ones d
 it, and that is the case worth refusing (`ErrSourceUnstable`). It costs one extra
 download per page on a weekly build-time job and nothing at runtime.
 
+**The two copies are compared on `stabilityDigest`, not on the raw body, and that is
+load-bearing.** Every response from `cloud.google.com` carries a fresh CSP `nonce`
+attribute and a fresh `FdrFJe` request id inside a script body, so the raw SHA-256 differs
+on every read whatever the prices do. Measured on 2026-08-12: nine reads with the
+updater's own User-Agent gave nine different raw hashes, one digest and one price. A
+raw-body comparison therefore refused **every** run — the gate landed on 2026-08-10, one
+day after the last successful snapshot, and no refresh has passed since, which is how the
+committed catalogue came to publish `n2-standard-4` at $0.101336 while the page served
+$0.111472. `stabilityDigest` strips script and style bodies, comments and every tag,
+collapses whitespace and hashes the remaining text: it moves when a price moves and not
+when markup re-rolls. The manifest still records the raw body hash — that is provenance of
+the bytes the run read, and for a nonce-bearing page it is a record, not a checksum a
+re-fetch can reproduce.
+
 **The per-page double read is not enough on its own, and `confirmWindowStable` is the
 other half.** Comparing a page against itself cannot, by construction, see a rollover
 that lands _between_ two pages — which is precisely the cross-page mixing described
 above. `fetchSources` therefore re-reads the first downloaded page after the last one and
-refuses when its hash moved, bracketing every interval between the pages for one extra
+refuses when its digest moved, bracketing every interval between the pages for one extra
 download per run. Both halves are load-bearing: the per-page read catches a flip inside
 one page's window, the bracket catches a flip between windows. Do not remove either
 because the other exists.

@@ -1,6 +1,6 @@
 # Surface validation — the built binary on three clouds
 
-Task 17 of [`docs/plans/20260811-multicloud-parity.md`](../plans/20260811-multicloud-parity.md).
+Task 17 of [`docs/plans/completed/20260811-multicloud-parity.md`](../plans/completed/20260811-multicloud-parity.md).
 
 Tasks 1 to 16 proved the packages against mocks, stubs and goldens. Nothing in them proved that
 the **binary a user downloads** answers on three clouds. This page records what was swept, what

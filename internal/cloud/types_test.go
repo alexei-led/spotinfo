@@ -29,6 +29,11 @@ func TestParseProviderID(t *testing.T) {
 			if !test.valid {
 				require.ErrorIs(t, err, ErrInvalidArgument)
 				assert.Empty(t, provider, "an unknown provider must not fall back to another cloud")
+				// A misspelled cloud is the one argument error whose reader may
+				// not know the alternatives, so the refusal has to list them.
+				for _, id := range ProviderIDs() {
+					assert.Contains(t, err.Error(), string(id))
+				}
 
 				return
 			}

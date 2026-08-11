@@ -38,7 +38,9 @@ var recommendArgs = map[string]struct{}{
 func (s *Server) registerRecommendTool() {
 	tool := mcp.NewTool(recommendToolName, append(readOnlyToolAnnotations(),
 		mcp.WithDescription("Recommend Spot machines from committed multi-cloud price data. "+
-			"Returns a spotinfo.recommend/v3 payload with explicit risk availability per cloud."),
+			"Answers on AWS, GCP and Azure with workload 'cost'; the interruption-capped workloads "+
+			"'web', 'ci' and 'batch' are AWS-only, because no other cloud publishes an interruption "+
+			"frequency. Returns a spotinfo.recommend/v3 payload with explicit risk availability per cloud."),
 		mcp.WithString(argCloud,
 			mcp.Description("Cloud provider to query"),
 			mcp.Enum(providerEnum()...),

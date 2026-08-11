@@ -52,8 +52,12 @@ func parseSortBy(value string) (cloud.SortKey, error) { return cloud.ParseSortKe
 //nolint:funlen // CLI flag declarations are intentionally kept together.
 func listCommand(action cli.ActionFunc) *cli.Command {
 	return &cli.Command{
-		Name:         listCommandName,
-		Usage:        "list every matching machine with its price and risk",
+		Name: listCommandName,
+		// The "no flag is required" half of the discriminator is stated here
+		// because `recommend` states the other half in its own one-liner. On the
+		// command list they sit one above the other, which is the only place a
+		// first-time reader compares them.
+		Usage:        "list every matching machine with its price and risk (no flag is required)",
 		Action:       action,
 		OnUsageError: renameHint,
 		Flags: append([]cli.Flag{
@@ -198,9 +202,13 @@ func answerList(ctx *cli.Context, execCtx context.Context, provider cloud.Provid
 		return err
 	}
 
+	// Returned unwrapped. Every provider error already names the cloud and the
+	// stage it failed at ("aws candidate acquisition: region not found: …");
+	// "failed to get spot savings" was the old query command's wording, and on a
+	// browse command it prefixed a savings claim onto an error about a region.
 	result, err := provider.Query(execCtx, query)
 	if err != nil {
-		return fmt.Errorf("failed to get spot savings: %w", err)
+		return err //nolint:wrapcheck // the provider's own error is the message.
 	}
 
 	// An empty match used to print a bare table frame and exit 0 with nothing
@@ -208,8 +216,14 @@ func answerList(ctx *cli.Context, execCtx context.Context, provider cloud.Provid
 	// "no such thing here". The formats keep rendering — an empty JSON array
 	// stays parseable — and the note goes to stderr so it never contaminates a
 	// piped result.
+	//
+	// The note names the next move as well as the filters. A region this cloud
+	// does not publish lands here rather than in a refusal — nothing validates a
+	// region name against a catalogue before the query — so "no machines
+	// matched" alone left a typo'd region indistinguishable from a real answer.
 	if len(result.Candidates) == 0 {
-		log.Warn("no machines matched the query", slog.Any("filters", describeListFilters(ctx)))
+		log.Warn("no machines matched the query; relax a filter, or check the region name is one this cloud publishes",
+			slog.Any("filters", describeListFilters(ctx)))
 	}
 
 	return renderList(ctx.String(flagOutput), query, &result, showRegion(ctx.StringSlice(flagRegion)), output)

@@ -277,7 +277,7 @@ func TestWindowBracketRefusesAPageThatMovedWhileTheOthersWereRead(t *testing.T) 
 	pages := []page{
 		// The architecture reference is provenance only; it must not be re-read.
 		{url: "https://cloud.google.com/compute/docs/cpu-platforms"},
-		{url: source.URL, sha256: snapshot.SHA256Hex(body), body: body},
+		{url: source.URL, sha256: snapshot.SHA256Hex(body), digest: stabilityDigest(body), body: body},
 	}
 
 	// The CDN flips after every page has been read once — invisible to fetch.
@@ -299,10 +299,88 @@ func TestWindowBracketAcceptsAStableWindow(t *testing.T) {
 	defer source.Close()
 
 	body := []byte("n2-standard-4 $0.111472")
-	pages := []page{{url: source.URL, sha256: snapshot.SHA256Hex(body), body: body}}
+	pages := []page{{url: source.URL, sha256: snapshot.SHA256Hex(body), digest: stabilityDigest(body), body: body}}
 
 	require.NoError(t, confirmWindowStable(t.Context(), contractedHostClient(), pages))
 	assert.Equal(t, int32(1), reads.Load(), "the bracket costs exactly one extra read per run")
+}
+
+// The gate compares rendered text, not raw bytes, and this is why. Every
+// response from the contracted pages carries a fresh CSP nonce and a fresh
+// request id, so a raw-body comparison reported ErrSourceUnstable on every run
+// and `make update-gcp-data` could not write a snapshot at all — measured on
+// 2026-08-12 as three different SHA-256 sums from three consecutive reads whose
+// prices were identical. A page that only re-rolls its nonce must be accepted.
+func TestFetchAcceptsAPageWhoseOnlyChangeIsPerResponseMarkup(t *testing.T) {
+	t.Parallel()
+
+	var reads atomic.Int32
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// A different nonce and request id on every response, same price.
+		_, _ = fmt.Fprintf(w, `<html><head><script nonce="nonce-%d">`+
+			`window.cfg={"FdrFJe":"%d"}</script></head>`+
+			`<body><table><tr><td>n2-standard-4</td><td>$0.111472 / 1 hour</td></tr></table></body></html>`,
+			reads.Add(1), reads.Load()*7919)
+	}))
+	defer source.Close()
+
+	body, err := fetch(t.Context(), contractedHostClient(), source.URL)
+	require.NoError(t, err, "a re-rolled nonce is not a price generation")
+	assert.Contains(t, string(body), "0.111472")
+	assert.Equal(t, int32(2), reads.Load(), "the page is still read twice")
+}
+
+// The other half: the digest must still see the change the gate exists for.
+// Without this the fix above would read as "the gate was switched off".
+func TestStabilityDigestSeesContentAndIgnoresPerResponseMarkup(t *testing.T) {
+	t.Parallel()
+
+	const page = `<html><head><script nonce="A">window.cfg={"FdrFJe":"-584"}</script></head>` +
+		`<body><!-- built A --><table><tr><td>n2-standard-4</td><td>$0.101336 / 1 hour</td></tr></table></body></html>`
+
+	tests := []struct {
+		name  string
+		other string
+		same  bool
+	}{
+		{
+			name: "a re-rolled nonce and request id digest the same",
+			other: `<html><head><script nonce="B">window.cfg={"FdrFJe":"4354"}</script></head>` +
+				`<body><!-- built B --><table><tr><td>n2-standard-4</td><td>$0.101336 / 1 hour</td></tr></table></body></html>`,
+			same: true,
+		},
+		{
+			name: "reformatted whitespace digests the same",
+			other: "<html><head></head>\n\n  <body>\t<table>\n<tr><td>n2-standard-4</td>\n" +
+				"<td>$0.101336 / 1 hour</td></tr>\n</table>  </body></html>",
+			same: true,
+		},
+		{
+			name: "a moved price digests differently",
+			other: `<html><head><script nonce="A">window.cfg={"FdrFJe":"-584"}</script></head>` +
+				`<body><!-- built A --><table><tr><td>n2-standard-4</td><td>$0.111472 / 1 hour</td></tr></table></body></html>`,
+			same: false,
+		},
+		{
+			name:  "a dropped row digests differently",
+			other: `<html><body><table></table></body></html>`,
+			same:  false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if tc.same {
+				assert.Equal(t, stabilityDigest([]byte(page)), stabilityDigest([]byte(tc.other)))
+
+				return
+			}
+
+			assert.NotEqual(t, stabilityDigest([]byte(page)), stabilityDigest([]byte(tc.other)))
+		})
+	}
 }
 
 // The bracket protects a refresh only if the acquisition path actually calls it,
