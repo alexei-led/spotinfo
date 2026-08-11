@@ -396,12 +396,50 @@ func listBounds(args map[string]any, query *cloud.Query) (*cloud.Query, error) {
 	return query, nil
 }
 
-// requestedPlacement reads the four score arguments.
+// scoreCompanion is an argument that only means something once with_score has
+// fetched the placement scores it describes.
+type scoreCompanion struct {
+	arg    string
+	acting string
+}
+
+// scoreCompanions is ordered rather than a map, so a caller who sends two of
+// them is told about the same one on every run. The order and the wording match
+// scoreCompanions in cmd/spotinfo, so the same malformed request is refused with
+// the same sentence on both surfaces.
+var scoreCompanions = []scoreCompanion{
+	{arg: argAZ, acting: "splits by zone"},
+	{arg: argMinScore, acting: "filters on"},
+	{arg: argScoreTimeout, acting: "waits for"},
+}
+
+// requireWithScore refuses a companion argument sent on its own.
 //
-// A minimum score without with_score is refused rather than answered: scores
-// are only fetched under with_score, so on its own the floor compares every
-// candidate against an absent score and drops all of them — an empty answer
-// with status ok, which a caller cannot tell from "nothing matched".
+// None of the three does anything without with_score: min_score compared every
+// candidate against an absent score and dropped all of them, while az described
+// a zone split and score_timeout a budget for a lookup that was never made. The
+// last two were accepted and answered ok — the CLI has refused all three since
+// task 8, so this is the same silent no-op on the other surface.
+//
+// Presence in the argument map is the discriminator rather than the parsed
+// value: score_timeout carries a default, so a value test cannot tell an
+// omitted argument from one the caller sent.
+func requireWithScore(args map[string]any, withScore bool) error {
+	if withScore {
+		return nil
+	}
+
+	for _, companion := range scoreCompanions {
+		if value, present := args[companion.arg]; present && value != nil {
+			return fmt.Errorf("%w: %s needs %s, which is what fetches the placement scores it %s",
+				cloud.ErrInvalidArgument, companion.arg, argWithScore, companion.acting)
+		}
+	}
+
+	return nil
+}
+
+// requestedPlacement reads the four score arguments.
 func requestedPlacement(args map[string]any) (cloud.PlacementRequest, error) {
 	withScore, err := boolArg(args, argWithScore)
 	if err != nil {
@@ -413,14 +451,13 @@ func requestedPlacement(args map[string]any) (cloud.PlacementRequest, error) {
 		return cloud.PlacementRequest{}, err
 	}
 
+	if companion := requireWithScore(args, withScore); companion != nil {
+		return cloud.PlacementRequest{}, companion
+	}
+
 	minScore, err := intArg(args, argMinScore, 0)
 	if err != nil {
 		return cloud.PlacementRequest{}, err
-	}
-	if minScore != 0 && !withScore {
-		return cloud.PlacementRequest{}, fmt.Errorf(
-			"%w: %s needs %s, which is what fetches the placement scores it filters on",
-			cloud.ErrInvalidArgument, argMinScore, argWithScore)
 	}
 	if minScore < 0 || minScore > cloud.MaxPlacementScore {
 		return cloud.PlacementRequest{}, fmt.Errorf("%w: %s must be between 1 and %d",

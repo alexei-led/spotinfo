@@ -326,8 +326,19 @@ func TestListErrorContract(t *testing.T) {
 			args: map[string]any{argCloud: "gcp", argMinScore: 7}, wantCloud: stringPtr("gcp"),
 		},
 		{
+			// az and score_timeout used to be accepted here and answered ok —
+			// az set SingleZone on a request that fetched nothing, and the
+			// budget was dropped. The CLI has refused both since task 8.
+			name: "zone detail without with_score", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", argAZ: true}, wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "score timeout without with_score", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", argScoreTimeout: 20}, wantCloud: stringPtr("gcp"),
+		},
+		{
 			name: "score timeout out of range", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
-			args: map[string]any{argCloud: "gcp", argScoreTimeout: 0}, wantCloud: stringPtr("gcp"),
+			args: map[string]any{argCloud: "gcp", argWithScore: true, argScoreTimeout: 0}, wantCloud: stringPtr("gcp"),
 		},
 		{
 			name: "with_score given as a string", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
@@ -656,6 +667,41 @@ func TestAnIntegerScoreFloorIsRefusedAgainstAnotherPlacementKind(t *testing.T) {
 	assert.Contains(t, payload.Message, string(cloud.PlacementKindObtainability),
 		"the refusal names the measurement the floor cannot be applied to")
 	assert.Zero(t, provider.callCount(), "a refusal costs no acquisition")
+}
+
+// A companion score argument sent without with_score is refused rather than
+// answered, on this surface as on the CLI. az and score_timeout used to be
+// accepted here and answered ok — az set SingleZone on a request that fetched
+// nothing, score_timeout was read, range-checked and dropped — so the same
+// question was refused on one surface and silently ignored on the other.
+//
+// The refusal runs while the arguments are read, so it costs no acquisition.
+func TestACompanionScoreArgumentIsRefusedRatherThanIgnored(t *testing.T) {
+	t.Parallel()
+
+	for _, companion := range scoreCompanions {
+		t.Run(companion.arg, func(t *testing.T) {
+			t.Parallel()
+
+			provider := stubFor(cloud.ProviderGCP, offlineLinuxCapabilities(), []cloud.Candidate{})
+			registry := newStubRegistry(provider)
+
+			var value any = true
+			if companion.arg != argAZ {
+				value = 5
+			}
+
+			payload := decodeError(t, callTool(t, listTool(registry).Handle, map[string]any{
+				argCloud: string(cloud.ProviderGCP), companion.arg: value,
+			}))
+
+			assert.Equal(t, cloud.CodeInvalidArgument, payload.Code)
+			assert.Contains(t, payload.Message, companion.arg)
+			assert.Contains(t, payload.Message, argWithScore,
+				"the refusal names the argument that would make this one act")
+			assert.Zero(t, provider.callCount(), "a refusal costs no acquisition")
+		})
+	}
 }
 
 // scopedSource builds a region-scoped provenance entry.

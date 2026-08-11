@@ -2057,15 +2057,184 @@ rather than shipped for that reason. No task between here and Task 17 owns it.
 
 ### Task 15: Verify acceptance criteria
 
-- [ ] verify every requirement in the Overview is implemented
-- [ ] verify every invariant still holds, especially Invariants 1, 4 and 7
-- [ ] confirm the Task 1 command-tree test is what proves criterion 3, and that it is running
-- [ ] run the full suite: `make test`
-- [ ] run the race detector: `make test-race`
-- [ ] run `make lint`
-- [ ] run `make verify-data` with `UPDATE_GOLDEN` and `REFRESH_MANIFESTS` unset
-- [ ] run `make verify-architecture`
-- [ ] measure an Azure recommendation payload and confirm provenance is under half of it
+- [x] verify every requirement in the Overview is implemented
+- [x] verify every invariant still holds, especially Invariants 1, 4 and 7
+- [x] confirm the Task 1 command-tree test is what proves criterion 3, and that it is running
+- [x] run the full suite: `make test`
+- [x] run the race detector: `make test-race`
+- [x] run `make lint`
+- [x] run `make verify-data` with `UPDATE_GOLDEN` and `REFRESH_MANIFESTS` unset
+- [x] run `make verify-architecture`
+- [x] measure an Azure recommendation payload and confirm provenance is under half of it
+
+**Every criterion was evidenced against the built binary at `.bin/spotinfo`, not against the
+packages.** `make build` at this commit, then each command below run and its output read. Two
+measurements deliberately reached real vendor endpoints — they are manual probes in a
+scratchpad, never tests, and nothing in `make test` gained a network call.
+
+| #   | Criterion                                                    | Verdict                                 |
+| --- | ------------------------------------------------------------ | --------------------------------------- |
+| 1   | one schema family                                            | **pass**                                |
+| 2   | CLI and MCP answer the same question identically             | **pass**                                |
+| 3   | one flag name per concept, MCP names derived                 | **pass**                                |
+| 4   | no flag accepted and ignored                                 | **pass after one fix**, one ⚠️ recorded |
+| 5   | both commands on three clouds, `--mcp` and `--version`       | **pass**                                |
+| 6   | Azure Linux and Windows, GCP refuses Windows                 | **pass**                                |
+| 7   | Azure prices live and anonymous, `--offline`/`--refresh` act | **pass**                                |
+| 8   | GCP obtainability opt-in, no Azure credential library        | **pass**                                |
+| 9   | `interruptionCappableKinds` holds exactly one kind           | **pass**                                |
+| 10  | provenance under half an Azure recommendation                | **⚠️ fails at the margin**, see below   |
+| 11  | all five gates                                               | **pass**                                |
+| 12  | built-binary matrix                                          | pending — Task 17                       |
+| 13  | human review                                                 | pending — Task 18                       |
+
+**1 — one schema family.** `strings .bin/spotinfo | grep -c 'spotinfo.recommend/v1'` is **0**, and
+the schema strings the binary carries are `spotinfo.list/v1`, `spotinfo.recommend/v3`,
+`spotinfo.error/v1`, `spotinfo.regions/v1` plus the three snapshot schemas. Four source comments
+still name the retired version as history; no code path emits it.
+
+**2 — same question, same answer.** Both surfaces driven for real: the CLI as a subprocess, MCP
+over a stdio session with `HTTP_PROXY`/`HTTPS_PROXY` pinned at a closed port, `offline` set on
+both so neither could answer from a different data mode. `recommend` on all three clouds returned
+an identical `request` echo, an identical `ranking_policy` and an identical first recommendation;
+`list` on all three returned identical `request` echoes and, aligned by `(region, machine)`,
+**identical full row sets** — 29 AWS rows, 1 GCP, 55 Azure. Re-run after the criterion-4 fix
+below, still identical.
+
+Three asymmetries stand, all recorded rather than defects: `recommend_spot_machines` declares no
+`sort`, `order`, `live_risk` or score arguments, so a ranked page's placement figures are
+CLI-only (Tasks 11 and 12 ⚠️); `mcpArgumentGaps` in `cmd/spotinfo/mcp_vocabulary_test.go` holds
+each with its reason, and the test asserts the difference **equals** that table. A question that
+cannot be asked on one surface is not the same question answered two ways.
+
+**3 — one name per concept.** `vocabularyGaps` in `cmd/spotinfo/vocabulary_test.go` is now
+`map[string]flagGap{}`, so `TestTheCommandTreeDeclaresExactlyTheVocabulary` is plain equality
+between the built tree and the vocabulary. It runs inside `make test` and it fails on drift —
+**proved, not assumed**: renaming `list`'s `--machine` declaration to `machine-name` while
+leaving the vocabulary alone turned the test red on both directions of the difference
+(`missing: [machine]`, `extra: [machine-name]`); the edit was reverted and the test re-run green.
+The MCP half is `TestEveryMCPArgumentIsDerivedFromItsFlag`, whose "a declared name must be
+`mcpArgName` of a vocabulary flag" assertion is **unconditional** — the gap table can only
+withhold an argument, never bless a name.
+
+**4 — no flag accepted and ignored.** Swept every vocabulary flag against `{list, recommend}` x
+`{aws, gcp, azure}` on the binary — 111 cells, each run with and without the flag and classified
+by exit code, message and output diff. Every cell is _acts_ or _refused naming the flag and the
+cloud_, with these readings:
+
+- The four AWS score flags exit 1 here with
+  `spot placement scores unavailable: requires AWS credentials and the ec2:GetSpotPlacementScores permission`.
+  That is **acts, gated on a credential this machine does not hold** — the lookup is attempted
+  and its shortfall named — not a refusal.
+- `--offline` and `--refresh` cannot be told apart from a no-op under a dead proxy, so they were
+  measured against the real feeds with a scratch `SPOTINFO_CACHE_DIR`. AWS and Azure both walk
+  `live` → `cached` → `live` (`--refresh`) → `embedded-snapshot` (`--offline`) in
+  `data_source.mode`. Both flags act on both clouds.
+- `--gcp-billing-key` acts: with a deliberately invalid key the binary made a real Cloud Billing
+  Catalog request and logged
+  `gcp billing catalogue unavailable; answering from the committed snapshot` with Google's
+  `API_KEY_INVALID` body, then answered from the snapshot — which also exercises the Safety note
+  that no live path may fail a run.
+- Task 11's two deferred `list` holes are **closed** (commit `4bb1080` and the fix beside it):
+  `list --sort score` without `--with-score` and `list --with-score --az --sort score` are both
+  refused, with the same sentences `recommend` uses.
+
+➕ **One defect found and fixed here: `internal/mcp` accepted `az` and `score_timeout` without
+`with_score` and ignored them.** Task 8's ⚠️ predicted it and assigned the check to this task.
+Measured before the fix: `list_spot_machines {"az":true}` and `{"score_timeout":20}` both returned
+`status: ok` with no zone split and no budget applied, while the CLI has refused both since Task 8
+— the same silent no-op on the other surface, and a criterion-2 divergence with it. `requestedPlacement`
+now carries an ordered `scoreCompanions` table mirroring `cmd/spotinfo`'s, refusing on **map
+presence** rather than on the parsed value, because `score_timeout` carries a default and a value
+test cannot tell an omitted argument from a sent one. The `min_score` branch it replaces emitted
+the same sentence, so that message is unchanged. Verified on the rebuilt binary: all three
+arguments now return `INVALID_ARGUMENT` with the CLI's wording modulo the `--` prefix, and
+`with_score` + `az` still reaches the lookup. `TestACompanionScoreArgumentIsRefusedRatherThanIgnored`
+drives the table and asserts the refusal costs no acquisition; two rows joined `TestListErrorContract`,
+and its "score timeout out of range" row gained `with_score: true` so the range check stays covered
+rather than being shadowed by the new companion rule.
+
+⚠️ **`--gcp-project` is accepted and ignored when nothing consumes it, and it is left alone
+deliberately.** Measured: `list --cloud gcp --gcp-project some-project` and
+`recommend --cloud gcp --gcp-project some-project` (no `--live-risk`, no `--with-score`) both exit
+0 with output **byte-identical** to the same command without the flag and an empty stderr. Its two
+consumers are `--live-risk` (recommend-only) and `--with-score` (refused on GCP `list` by Task 12),
+so on `list` it can never act. Not fixed: the vocabulary table marks the flag for **both** commands
+and the command-tree test enforces that; Task 4 raised this and Task 12 answered it the other way
+on purpose. Adding a companion rule now would reverse a decision two earlier tasks made, inside a
+task whose job is to verify. It belongs in a follow-up, not here.
+
+**5 — both commands, three clouds, both mode flags.** `spotinfo --version` prints
+`spotinfo v2.5.0-82-g575300d` and exits 0. Bare `spotinfo` writes help to stdout, exits **1**, and
+says `no command given; run "spotinfo list" to browse or "spotinfo recommend" to rank` on stderr.
+`spotinfo --mcp` completes the handshake and `tools/list` returns exactly
+`list_cloud_regions`, `list_spot_machines`, `recommend_spot_machines`. Both commands answered on
+all three clouds throughout the criterion-2 and criterion-4 sweeps.
+
+**6 — Azure both operating systems, GCP refuses Windows.** `list --cloud azure --os windows`
+returns **10,452** rows, all `os: windows`; `--os linux` returns **11,204**, all `os: linux`.
+`--cloud gcp --os windows` exits 1 with empty stdout and
+`gcp: unsupported capability: os windows: this cloud publishes spot prices for linux only`, and
+the MCP tool returns the same sentence as `UNSUPPORTED_CAPABILITY`.
+
+**7 — Azure live and anonymous.** The mode walk above was run with no Azure credential of any
+kind in the environment. `--refresh` returns to `live` from `cached`; `--offline` drops to
+`embedded-snapshot`.
+
+**8 — GCP obtainability opt-in, no Azure credential library.** `go version -m .bin/spotinfo` names
+**no** `azidentity`, `armresourcegraph` or `armrecommender` — zero Azure modules of any kind.
+Obtainability needs `--with-score` **and** an explicit project: without one,
+`recommend --cloud gcp --with-score` exits 1 with
+`--with-score needs a project; pass --gcp-project or set GOOGLE_CLOUD_PROJECT`, after the beta
+warning. Without `--with-score` a ranked GCP page publishes no placement field at all. The
+committed snapshot is clean: `catalog.json.gz` contains no `obtainability`, `estimatedUptime` or
+`advice` string, and `source-contract.json` names neither `advice.capacity` nor obtainability.
+
+**9 — `interruptionCappableKinds`.** `internal/cloud/recommend.go:57` is
+`var interruptionCappableKinds = []RiskKind{RiskKindInterruptionFrequencyRange}`, unchanged, with
+two tests on it: `TestInterruptionCappableKindsHoldsExactlyOneKind`
+(`internal/cloud/refusals_test.go:33`) asserts length 1, exact contents and that
+`RiskKindPreemptionRate` is absent, and `recommend_test.go:520` asserts the same equality as a
+premise of the placement-kind test.
+
+⚠️ **10 — provenance is under half for the pinned case and over it at the margin.** The second
+half of the criterion holds outright: on a three-row Azure answer the published sources are
+exactly the 3 region-scoped Retail URLs of the 3 answer regions and the 2 Learn pages of the 2
+answer series — **every retained source referenced by a candidate**, 76 omitted. The ratio does
+not hold universally. Measured across eight Azure `recommend` shapes: 0.3714 (`--top 10`), 0.4425,
+0.4427, 0.4430 and **0.5058** — a legitimate `--top 3` answer whose rows land in three different
+regions needs five sources against three rows, and provenance is 2,009 of 3,972 bytes. The
+in-repo gate `TestProvenanceIsNotTheBulkOfAnAzureAnswer` passes because its fixture
+(`MinVCPU: 2, MinMemoryGiB: 8`) lands on two regions and four sources at 0.4430 — **the test does
+not span the failing case**. Not fixed here: a source entry is 218 bytes of URL out of ~380, and
+shortening the URL is exactly what makes `content_sha256` unverifiable by re-fetching, which
+Invariant 7 forbids. The trim is correct; the bound is not universally true, and saying so is
+worth more than a fixture that hides it.
+
+**11 — gates.** All five run on the final tree with `UPDATE_GOLDEN` and `REFRESH_MANIFESTS`
+cleared from the environment: `make test` exit 0 (also run once as `go test ./... -count=1`, all
+14 packages ok, nothing cached), `make test-race` exit 0 — **first run of the race detector in
+this plan, and it found nothing** — `make lint` exit 0 with `0 issues`, `make verify-data` exit 0,
+`make verify-architecture` exit 0 with
+`archfitcheck: no open critical or high findings (32 findings reviewed)`.
+
+**Invariants.** 1 is criterion 9 above. 2 holds on the wire: an Azure candidate publishes
+`"risk": {"status": "unavailable", "kind": null, "label": null, "min_percent": null, "max_percent": null, ...}`
+— a status, never a zero or a bucket. 3 holds: every refusal measured above reports before
+acquisition, and the new MCP companion test asserts `callCount()` is zero. 4 is untouched by this
+task — no parser, contract or manifest changed, and `verify-data` re-proves their agreement.
+5 holds — no source was added. 6 holds — `build` still declares no data dependency and the binary
+was built with the feeds untouched. 7 is the referenced-source finding under criterion 10, plus
+the fail-closed retention `TestAnUnparseableSourceURLIsRetained` covers. 8 is criterion 8.
+
+➕ **Task 13's "one link is untested" ⚠️ is now answered, ahead of Task 17.** With a billing key
+present, `--debug list --cloud gcp --gcp-billing-key … --offline` logs **0** billing-catalogue
+lines and the same command without `--offline` logs **1**, with `--refresh` also 1. `--offline`
+does reach the GCP live path through the CLI.
+
+➕ **The two flag-sweep readings above that needed the real network are the only ones, and they
+are outside the suite.** They are shell probes over `.bin/spotinfo`, not tests; `make test` and
+`make test-race` were both re-run afterwards on the same tree and both stayed green and offline.
 
 ### Task 16: [Final] Update documentation
 
