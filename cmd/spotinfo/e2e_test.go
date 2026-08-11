@@ -917,6 +917,16 @@ func TestE2ERejectedInputExitsNonZeroWithAnEmptyStdout(t *testing.T) {
 			args:     []string{"list", "--cloud", "azure", "--with-score"},
 			contains: "subscription",
 		},
+		{
+			// The same companion rule on the other command, where the four
+			// score flags are newly declared. It is here rather than only in a
+			// unit test because this is where the process exit code and the
+			// empty stdout are observed: a flag declared without its check is
+			// accepted, ignored, and exits 0.
+			name:     "zone-level scores on a recommendation without the lookup",
+			args:     []string{"recommend", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8", "--az"},
+			contains: "--with-score",
+		},
 		// A recommend-only flag passed to `list` is deliberately absent from
 		// this table. --workload is undefined there, so urfave/cli rejects it
 		// while parsing and writes its usage banner to stdout — which the

@@ -1650,14 +1650,48 @@ asks that the same question return the same document on both surfaces; a questio
 asked over MCP is not asked, and the gap table records it. **Task 15 should check this** when it
 verifies criterion 2, alongside the Task 8 note about `az` and `score_timeout`.
 
+⚠️ **`list --sort score` without `--with-score` is still a silent no-op, and this task did
+not fix it.** On AWS it reaches `spot.SortByScore` over rows that carry no score and exits 0
+having ordered nothing — the same defect `requireScoresToSortByThem` now removes on `recommend`.
+It is left alone deliberately: Task 8 scoped its companion set to `--az`, `--min-score` and
+`--score-timeout`, and widening that set on `list` is not this task's to do. **Task 15 should
+check it** alongside the other companion-flag notes. The one-line fix is to add the sort key to
+`requireWithScore`.
+
+➕ **Nothing re-applies `Placement.MinScore` in `internal/cloud`.** `rank()` and `accepts()`
+never see it: the floor is honoured during acquisition by `spot.WithMinScore`, and every other
+kind refuses the flag before a provider is queried. That is safe only because those two facts
+hold together — **Task 12 must not assume a neutral re-filter covers it**. A provider that
+publishes `placement_score` and does not apply the floor itself would silently return rows below
+it.
+
+⚠️ **`docs/api-reference.md` does not describe the three new response fields**
+(`region_obtainability`, `zone_obtainability`, `placement_status`), and was not patched here.
+The candidate schema it documents is the retired v1 shape — `instance_type`,
+`spot_price_per_hour`, `reliability_score`, `interruption_rate`, none of which the binary
+publishes since Task 5 — so adding three fields to a document describing a deleted schema would
+make it more misleading, not less. Task 16 owns the rewrite. The same is true of the
+`spotinfo --type …` examples in `README.md`, `docs/usage.md`, `docs/examples.md`,
+`docs/quick-start.md` and `docs/aws-spot-placement-scores.md`, which Task 8 already recorded as
+Task 4/5/7 debt; this task adds one item to that debt, which is that the four score flags are
+documented as root-command flags and are now declared on `list` **and** `recommend`.
+`docs/clouds.md:65` is unaffected — it says `--with-score` reads `GetSpotPlacementScores`, which
+is still true and is now true on both commands.
+
+➕ **`make verify-architecture` passes: verdict `pass`, `archfitcheck: no open critical or high
+findings (31 findings reviewed)`, all 44 severities `medium`.** Run because this task adds about
+a thousand lines across ten production files, which is the shape a size or complexity rule
+notices.
+
 ➕ **Files this task's list omits.** `internal/cloud/provider.go` (`Candidate.PlacementStatus`,
 `Capabilities.PlacementKind`, `SupportsScoreFloor`), `cmd/spotinfo/list.go` and
 `cmd/spotinfo/provider_flags.go` (the shared `scoreFlags`, `placementRequest` and
 `validateScoreFlags`), `docs/plans/contracts/{list-v1,recommend-v3-success}.schema.json`, the
 new `cmd/spotinfo/placement_test.go`, and
 `cmd/spotinfo/{contract,format,provider_flags,mcp_vocabulary}_test.go`,
-`internal/cloud/recommend_test.go`, `internal/mcp/{helpers,jsonschema,tools}_test.go` and
-`internal/providers/aws/provider_test.go`. `internal/cloud/enrich.go` and
+`internal/cloud/recommend_test.go`, `internal/mcp/{helpers,jsonschema,tools}_test.go`,
+`internal/providers/aws/provider_test.go` and one refusal row in `cmd/spotinfo/e2e_test.go`,
+which is where a process exit code and an empty stdout are actually observed. `internal/cloud/enrich.go` and
 `internal/cloud/schema_test.go` are in the list and were **not** touched: no checkbox asks for a
 placement enricher — Task 12 owns the GCP fetcher — and the schema is covered by the contract
 validation in `internal/mcp/jsonschema_test.go`, which is where the list payload is checked

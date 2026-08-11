@@ -273,10 +273,10 @@ func comparePrices(left, right *cloud.RecommendationDTO) int {
 
 // comparePlacements orders the ranked page by its regional placement figure.
 //
-// Both kinds are compared, each on its own scale and never against the other:
-// one answer comes from one cloud, so a page carries one kind, and a mixed pair
-// is left unordered rather than converted onto a shared number no vendor
-// published.
+// The branch is chosen by the kind the page carries, and each is compared on
+// its own scale. A page cannot mix kinds — one answer comes from one cloud —
+// which is what makes comparing within a branch safe; there is deliberately no
+// conversion between them, because a shared number is one no vendor published.
 //
 // Only the regional figure orders a page. Under --az a candidate carries one
 // observation per zone and no regional one, and picking a maximum or a mean
