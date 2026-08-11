@@ -1639,8 +1639,11 @@ first pass — `spotinfo recommend --with-score --az --sort score` was accepted,
 the page in ranking-policy order with a zone-score column contradicting it — and landed in the fix
 commit below, keyed off `--az` rather than off the kind because neither kind publishes a regional
 figure once zone detail was asked for. `TestRecommendRefusesASortKeyItDoesNotPublish` still passes
-unchanged; only its comment moved. **`list --sort score` is deliberately untouched** — Task 8
-scoped its companion set to the three flags, and re-opening it there is not this task's to do.
+unchanged; only its comment moved. `recommend`'s own `--sort` usage string now names both rules,
+so `--help` states them rather than leaving them to be found by running it; `list` declares a
+separate `--sort` whose rules differ, and it is not touched. **`list --sort score` is deliberately
+untouched** — Task 8 scoped its companion set to the three flags, and re-opening it there is not
+this task's to do.
 
 ➕ **A figure nobody published sorts last under either order, and the direction is now an argument
 to the comparator rather than a flip of it.** `sortRecommendations` built a descending page with

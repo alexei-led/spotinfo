@@ -1178,8 +1178,13 @@ func recommendCommand(action cli.ActionFunc) *cli.Command {
 			},
 			&cli.IntFlag{Name: flagTop, Usage: "maximum recommendations to return", Value: defaultTop},
 			&cli.StringFlag{
-				Name:        flagSort,
-				Usage:       "print the ranked page ordered by " + strings.Join(sortKeyNames(), "|"),
+				Name: flagSort,
+				// The two companion rules requireScoresToSortByThem enforces are
+				// named here rather than left to be discovered by running it:
+				// only a regional placement figure orders a page, and --az asks
+				// for one figure per zone instead.
+				Usage: "print the ranked page ordered by " + strings.Join(sortKeyNames(), "|") +
+					" (" + sortScore + " needs --" + flagWithScore + ", and not --" + flagAZ + ")",
 				DefaultText: "the ranking policy's own order",
 			},
 			&cli.StringFlag{
