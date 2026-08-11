@@ -2,276 +2,180 @@
 
 # spotinfo
 
-**Command-line tool for Spot instance exploration across AWS, GCP and Azure, with AWS placement score analysis**
+**Pick a Spot machine on AWS, GCP or Azure from one command line. No credentials, no network, about a tenth of a second.**
 
-`spotinfo` is a powerful CLI tool and [Model Context Protocol (MCP) server](#mcp-integration) that provides comprehensive AWS EC2 Spot Instance information, including real-time placement scores, pricing data, and interruption rates. Perfect for DevOps engineers optimizing cloud infrastructure costs.
+## The problem
 
-AWS is the full surface. GCP and Azure are served offline from committed price snapshots and are reachable through `spotinfo recommend --cloud <id>`; neither publishes interruption risk in a redistributable form, so both answer only the risk-free `cost` workload. GCP can additionally fetch its preemption rate from an authenticated per-project API with [`--live-risk`](#-live-preemption-risk-gcp-opt-in).
+Spot capacity is far cheaper than On-Demand — between 40% and 85% off in the snapshots that
+ship with this tool. Finding the right machine does not scale by hand:
 
-## Key Features
+- Each cloud publishes prices in a different place, in a different shape, on a different
+  schedule. AWS has a JSON feed and an interruption Advisor. GCP has server-rendered HTML
+  pages. Azure has a REST API and a separate documentation site for vCPU and memory.
+- The consoles rank by price. They do not rank by "cheapest machine with at least 4 vCPU and
+  16 GiB that my workload can survive losing".
+- A price page has no memory of yesterday, so a script that reads one is a scraper you now
+  own.
 
-### 🎯 **AWS Spot Placement Scores**
-- **Real-time placement scores** (1-10 scale) for launch success probability
-- **Regional and AZ-level analysis** with visual indicators (🟢🟡🔴)
-- **Smart contextual scoring** - scores reflect entire request success likelihood
-- **Freshness tracking** with cache optimization
+The result is that most teams pick one instance family, hard-code it, and stop looking.
 
-### 🔍 **Advanced Filtering & Analysis**
-- **Regex-powered** instance type matching (`t3.*`, `^(m5|c5)\.(large|xlarge)$`)
-- **Multi-dimensional filtering** by vCPU, memory, price, regions, and placement scores
-- **Cross-region comparison** with `--region all` support
-- **Flexible sorting** by price, reliability, savings, or placement scores
+## What spotinfo does
 
-### 💡 **Single-Instance Recommendations**
-- `recommend` requires an `x86_64` or `arm64` architecture plus positive vCPU and memory minima
-- Workload caps apply to a risk bucket's maximum: web ≤5%, CI ≤16%, batch ≤22%. On AWS the reachable Advisor buckets make those effective ceilings `<5%`, `<=15%` and `<=20%`; `cost` applies no interruption constraint and works on every cloud
-- The default concise table includes deterministic rationale codes; `--output json` emits a versioned request-and-results wrapper
-- AWS v1 ranks by price, interruption, and right-sizing excess. v2 ranks by price and right-sizing excess, then region and machine; unavailable risk is never compared. Savings is displayed but never used to rank
-- Repeated recommendation regions are deduplicated; `all` cannot be mixed with explicit regions
-- **GCP support** (offline, no credentials): `spotinfo recommend --cloud gcp` serves `us-central1`, Linux, x86\_64 and arm64; risk is `unavailable` unless `--live-risk` fetches it, and only `--workload cost` applies either way. The root query command is AWS-only.
-- **Azure support** (offline, no credentials): `spotinfo recommend --cloud azure` serves 55 regions,
-  Linux, x86\_64 and arm64; risk is always `unavailable`, so only `--workload cost` applies. The root
-  query command is AWS-only.
+One command ranks real machines against a real requirement, and says where the number came
+from.
 
-### 📊 **Multiple Output Formats**
-- **Visual formats**: Table with emoji indicators, plain text
-- **Data formats**: JSON, CSV for automation and scripting
-- **Clean separation**: Visual indicators only in human-readable formats
-
-### 💰 **Live Price Fallback**
-- **Automatic enrichment** for newer instance types missing from the static pricing feed
-- **EC2 DescribeSpotPriceHistory API** fetches current prices when static data shows $0
-- **Price source indicators** in every format: a `*` suffix in `text` and `table`, a
-  `Price Source` column in `csv`, and a `live_price` boolean in `json` (always present)
-- **Graceful degradation** — works without AWS credentials, just shows $0 for missing types.
-  The credential chain is probed once per run, so a machine without credentials skips the
-  live-price and placement-score calls instead of waiting for each to time out
-
-### 🔬 **Live Preemption Risk (GCP, opt-in)**
-
-GCP publishes its Spot preemption rate only through the authenticated, per-project
-`compute.advice.capacityHistory` API, so it cannot ship in the committed snapshot —
-the answer differs per caller and is not redistributable. `--live-risk` fetches it
-for one invocation:
-
-```bash
-spotinfo recommend --cloud gcp --architecture x86_64 --cpu 4 --memory 16 \
-  --live-risk --gcp-project my-project
+```console
+$ spotinfo recommend --architecture arm64 --cpu 4 --memory 16 --cloud azure
+RANK  CLOUD  REGION        MACHINE            ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR    SAVINGS  RISK          WHY
+   1  azure  centralindia  Standard_D4ps_v6   arm64            4        16.0  0.017076        81%  unavailable   ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
+   2  azure  centralindia  Standard_D4ps_v5   arm64            4        16.0  0.018665        81%  unavailable   ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
+   3  azure  centralindia  Standard_D4pds_v5  arm64            4        16.0  0.022361        81%  unavailable   ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
 ```
 
+Four properties make that output worth trusting:
+
+**It works with no credentials and no network.** Price snapshots ship inside the binary. A
+weekly job refreshes them through a reviewed pull request. AWS additionally uses live feeds
+when it can reach them, and falls back to the snapshot when it cannot.
+
+**It says what it does not know.** GCP and Azure publish no redistributable interruption
+data, so every candidate reports `RISK: unavailable`. It is never a zero and never a low
+bucket. A cloud that measures nothing must not outrank a cloud that measures honestly.
+
+**It refuses questions it cannot answer.** `--workload web` needs interruption data. Ask for
+it on a cloud that has none and the command stops before it reads a price:
+
+```console
+$ spotinfo recommend --cloud gcp --workload web --architecture x86_64 --cpu 4 --memory 16
+spotinfo: gcp: unsupported capability: risk
 ```
-RANK  CLOUD  REGION       MACHINE         ... USD/HOUR  SAVINGS  RISK
-   1  gcp    us-central1  c3d-standard-4  ... 0.042496      76%  6.3% avg
-   2  gcp    us-central1  n2d-standard-4  ... 0.053824      68%  17.5% avg
-```
 
-- **Opt-in.** The default path stays offline and answers in about a tenth of a second.
-- **Project is never guessed.** Pass `--gcp-project` or set `GOOGLE_CLOUD_PROJECT`;
-  the call is billed to whichever project it names, so gcloud's ambient
-  `core/project` is deliberately not used.
-- **Credentials** come from Application Default Credentials (`gcloud auth
-  application-default login`, a service account, or the GCE metadata server).
-  Without them the command still answers, reporting `unavailable`.
-- **One call per recommendation**, on the ranked page only — never the catalogue.
-- **A page that fetched nothing says so.** If every lookup fails — no credentials, the
-  Compute API disabled, no `compute.advice` permission — one warning goes to stderr
-  naming the first cause, because `unavailable` alone cannot be told apart from "Google
-  has no history for these machines". `docs/troubleshooting.md` tables the cases.
-- **`kind` is `preemption_rate`, not `interruption_bucket`.** Google defines it as
-  (preempted Spots) / (Spots that stopped running); AWS publishes the fraction of
-  *running* instances interrupted. The numbers are not comparable, so
-  `--workload web|ci|batch` **still refuses on GCP** — the ceilings are AWS Advisor
-  bucket boundaries. Live risk makes the figure visible, not filterable.
+**Every answer carries its source.** The JSON report names each source URL and the SHA-256 of
+the document that was read, so a reader can fetch it again and compare.
 
-### 🌐 **Network Resilience**
-- **Embedded data** for offline functionality
-- **Graceful fallbacks** when AWS APIs are unavailable
-- **Real-time API integration** with intelligent caching
-
-### ⚡ **Feed Cache and Offline Mode**
-
-The two AWS feeds dominate an invocation, so fetched copies are cached on disk. A warm
-cache answers in about a tenth of a second against roughly a second and a half cold.
-
-| flag / variable | effect |
-|---|---|
-| `--offline` | answer from the committed snapshot; makes no request at all, including no `DescribeSpotPriceHistory` |
-| `--refresh` | ignore any cached copy and fetch both feeds again |
-| `SPOTINFO_CACHE_DIR` | override the cache location (default: `os.UserCacheDir()/spotinfo`) |
-| `SPOTINFO_CACHE=off` | disable the cache entirely |
-
-Cached entries expire on a per-feed schedule, because the feeds differ: the Spot Advisor
-document is rewritten rarely and takes over a second to transfer, so it is held for **24
-hours**; prices change through the day and transfer in a tenth of a second, so they are
-held for **1 hour**. An expired entry is revalidated with `If-None-Match` /
-`If-Modified-Since` rather than re-downloaded — both feeds serve ETags, so a `304` costs
-one round trip and no payload.
-
-Resolution order is: fresh cache → origin → *expired* cache → committed snapshot. An
-expired entry outranks the snapshot because it is AWS data that is merely old, while the
-snapshot is AWS data that is old *and* frozen at build time. Every cache failure is
-non-fatal: a read-only filesystem costs time, not answers.
-
-Because a cached answer is neither live nor embedded, it is reported as its own state —
-`data_source.mode` is `cached` in `spotinfo.recommend/v2`, and `data_freshness` is
-`cached` in the v1 MCP response (its `data_source` stays `aws`; provenance is unchanged,
-only established recency differs). A copy the origin confirmed with a `304` is `live`: it
-matches AWS right now.
-
-## Quick Start
-
-### Installation
+## Install
 
 ```bash
 # macOS with Homebrew
-brew tap alexei-led/tap
 brew install alexei-led/tap/spotinfo
 
-# Linux/Windows: Download from releases
+# Linux and Windows
 curl -L https://github.com/alexei-led/spotinfo/releases/latest/download/spotinfo_linux_amd64.tar.gz | tar xz
 
 # Docker
 docker pull ghcr.io/alexei-led/spotinfo:latest
 ```
 
-**Supported platforms**: macOS, Linux, Windows on AMD64/ARM64
+macOS, Linux and Windows, on AMD64 and ARM64. Full instructions:
+[Installation](docs/installation.md).
 
-### Basic Usage
+## Use it
 
 ```bash
-# Get placement scores for instances
-spotinfo --type "m5.large" --with-score
+# Cheapest Arm machine with 4 vCPU and 16 GiB, on each cloud
+spotinfo recommend --cloud aws   --architecture arm64 --cpu 4 --memory 16
+spotinfo recommend --cloud gcp   --architecture arm64 --cpu 4 --memory 16
+spotinfo recommend --cloud azure --architecture arm64 --cpu 4 --memory 16
 
-# Find high-reliability instances with budget constraints
-spotinfo --cpu 4 --memory 16 --with-score --min-score 8 --price 0.30
+# A web tier that must survive interruption: AWS only, interruption capped at 5%
+spotinfo recommend --architecture x86_64 --cpu 2 --memory 8 --workload web
 
-# Compare across regions with AZ-level details
-spotinfo --type "t3.*" --with-score --az --region "us-east-1" --region "eu-west-1"
+# The cheapest AWS region for a machine, across every region
+spotinfo recommend --architecture x86_64 --cpu 4 --memory 16 --region all --top 5
 
-# Export data for automation
-spotinfo --type "c5.*" --with-score --min-score 7 --output json
+# A versioned JSON report for a pipeline
+spotinfo recommend --cloud azure --architecture arm64 --cpu 4 --memory 16 --output json
 
-# Get low-interruption Arm single-instance candidates (default table output)
-spotinfo recommend --architecture arm64 --workload web --vcpu 2 --memory-gib 8 --region us-east-1
+# Explore AWS interruption rates and prices directly
+spotinfo --type "m5.*" --region us-east-1
 
-# Emit the versioned JSON report, using Windows Spot prices
-spotinfo recommend --architecture x86_64 --cpu 2 --memory 8 --os windows --output json
-
-# GCP Spot VMs (offline, no credentials, us-central1, cost workload)
-spotinfo recommend --cloud gcp --architecture x86_64 --cpu 2 --memory 8 --top 3
-
-# Azure Spot VMs (offline, no credentials, 55 regions, cost workload)
-spotinfo recommend --cloud azure --architecture arm64 --cpu 2 --memory 8 --top 3
+# Add placement scores. This one needs AWS credentials
+spotinfo --type "m5.*" --region us-east-1 --with-score
 ```
 
-### New Placement Score Flags
+Two commands, on purpose. `spotinfo recommend` ranks machines on any cloud. Bare `spotinfo`
+explores the AWS Spot Advisor, renders an interruption column, and reads placement scores.
+That second command is AWS-only. See [Quick start](docs/quick-start.md) and the
+[Usage guide](docs/usage.md).
 
-| Flag | Description |
-|------|-------------|
-| `--with-score` | Enable real-time placement score fetching |
-| `--az` | Get AZ-level scores instead of regional |
-| `--min-score N` | Filter instances with score ≥ N (1-10) |
-| `--sort score` | Sort by placement score |
+## Cloud coverage
 
-📖 **Complete reference**: [Usage Guide](docs/usage.md) | [Examples](docs/examples.md)
+|                          | AWS                  | GCP                           | Azure         |
+| ------------------------ | -------------------- | ----------------------------- | ------------- |
+| `spotinfo recommend`     | yes                  | yes                           | yes           |
+| `spotinfo` query command | yes                  | no                            | no            |
+| Interruption risk        | published            | `unavailable`, or opt-in live | `unavailable` |
+| Workloads                | cost, web, ci, batch | cost                          | cost          |
+| Operating systems        | linux, windows       | linux                         | linux         |
+| Architectures            | x86_64, arm64        | x86_64, arm64                 | x86_64, arm64 |
+| Credentials              | optional             | only for `--live-risk`        | never used    |
 
-## MCP Integration
+Region lists, machine counts and the reasoning behind each limit:
+[Cloud coverage](docs/clouds.md).
 
-`spotinfo` functions as a **[Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server**, enabling AI assistants to directly query Spot instance data through natural language.
+## MCP server
 
-Three tools are served: `find_spot_instances` and `list_spot_regions` are AWS-only and byte-compatible with previous releases, while `recommend_spot_instances` answers for AWS, GCP and Azure and emits the `spotinfo.recommend/v2` payload.
-
-### Quick Setup with Claude Desktop
+spotinfo is a [Model Context Protocol](https://modelcontextprotocol.io/) server, so an
+assistant can ask these questions directly.
 
 ```json
 {
   "mcpServers": {
-    "spotinfo": {
-      "command": "spotinfo",
-      "args": ["--mcp"]
-    }
+    "spotinfo": { "command": "spotinfo", "args": ["--mcp"] }
   }
 }
 ```
 
-**Ask Claude**: *"Find cheapest t3 instances with placement score >7"*, *"Compare m5.large prices across US regions"*, or *"Cheapest arm64 Azure Spot VMs with 4 vCPUs and 16 GiB"*
+Ask: _"Cheapest arm64 Azure Spot VM with 4 vCPUs and 16 GiB"_, or _"Compare m5.large spot
+prices across US regions"_.
 
-🤖 **Full setup guide**: [MCP Server Documentation](docs/mcp-server.md)
-
-## Understanding AWS Spot Placement Scores
-
-**🚨 Key Insight**: Placement scores are **contextual** - they evaluate success probability for your entire request, not individual instance types.
-
-```bash
-# Lower score (limited flexibility)
-spotinfo --type "t3.micro" --with-score
-# Score: 🔴 3
-
-# Higher score (flexible options)
-spotinfo --type "t3.*" --with-score  
-# Score: 🟢 9
-```
-
-This is **expected AWS behavior** - providing multiple instance types gives AWS more fulfillment options.
-
-📚 **Learn more**: [AWS Spot Placement Scores](docs/aws-spot-placement-scores.md)
+Setup: [MCP server](docs/mcp-server.md) and [Claude Desktop](docs/claude-desktop-setup.md).
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| **[Usage Guide](docs/usage.md)** | Complete CLI reference with all flags and examples |
-| **[AWS Spot Placement Scores](docs/aws-spot-placement-scores.md)** | Deep dive into placement scores with visual guides |
-| **[Examples & Use Cases](docs/examples.md)** | Real-world DevOps scenarios and automation patterns |
-| **[MCP Server Setup](docs/mcp-server.md)** | Model Context Protocol integration guide |
-| **[Data Sources](docs/data-sources.md)** | AWS, GCP, and Azure feeds, snapshots, caching, and troubleshooting |
+| Document                                                  | What is in it                                |
+| --------------------------------------------------------- | -------------------------------------------- |
+| [Quick start](docs/quick-start.md)                        | The first five minutes                       |
+| [Installation](docs/installation.md)                      | Every install method, and how to check one   |
+| [Usage guide](docs/usage.md)                              | Every flag, every output format              |
+| [Cloud coverage](docs/clouds.md)                          | What each cloud serves, and what it refuses  |
+| [Examples](docs/examples.md)                              | Pipelines, Terraform, CI, cost monitors      |
+| [MCP server](docs/mcp-server.md)                          | Tools, arguments, assistant setup            |
+| [API reference](docs/api-reference.md)                    | The `spotinfo.recommend/v2` contract         |
+| [AWS placement scores](docs/aws-spot-placement-scores.md) | What a score means, and does not             |
+| [Data sources](docs/data-sources.md)                      | Every feed, snapshot, cache and refresh rule |
+| [Troubleshooting](docs/troubleshooting.md)                | Errors, causes, fixes                        |
+| [Multi-cloud parity](docs/reviews/multicloud-parity.md)   | What GCP and Azure cannot do yet, and why    |
 
-## AWS Credentials
+## AWS credentials
 
-AWS credentials are **optional** but recommended for complete functionality:
+Credentials are optional. Without them, spotinfo answers from the AWS feeds and the embedded
+snapshot. With them, two more features work:
 
-| Feature | Without Credentials | With Credentials |
-|---------|-------------------|------------------|
-| Spot advisor data | Full access | Full access |
-| Static pricing | Full access | Full access |
-| Live price fallback | Unavailable (shows $0 for missing types) | Fetches current prices via EC2 API |
-| Placement scores | Unavailable | Real-time scores (1-10) |
+| Feature                                              | Permission                     |
+| ---------------------------------------------------- | ------------------------------ |
+| Live price for machines the static feed prices at $0 | `ec2:DescribeSpotPriceHistory` |
+| Placement scores (`--with-score`)                    | `ec2:GetSpotPlacementScores`   |
 
-Required IAM permissions for full functionality:
-- `ec2:DescribeSpotPriceHistory` — live price fallback for newer instance types
-- `ec2:GetSpotPlacementScores` — placement score analysis
+Credentials load through the standard AWS SDK chain. The chain is probed once per run, so a
+machine without credentials skips both calls instead of waiting for each to time out.
 
-Credentials are loaded via the [AWS SDK default credential chain](https://docs.aws.amazon.com/sdk-for-go/v2/developer-guide/configure-gosdk.html) (environment variables, shared config, IAM roles, etc.).
+GCP credentials are needed only for `--live-risk`. See [Cloud coverage](docs/clouds.md#gcp).
 
 ## Development
 
-**Requirements**: Go 1.26+, make, golangci-lint
+Go 1.26+, make, golangci-lint.
 
 ```bash
-# Build (alias for `make build`; run tests separately)
-make build
-
-# Update embedded data (usually unnecessary — a weekly workflow opens a PR for this)
-# verify-data also checks reviewed architecture snapshot metadata and Advisor-family coverage.
-make update-data update-price verify-data
-
-# Update embedded GCP data (weekly update-gcp-data workflow normally handles this)
-make update-gcp-data verify-data
-
-# Update embedded Azure data (weekly update-azure-data workflow normally handles this)
-make update-azure-data verify-data
-
-# Docker build
-docker buildx build --platform=linux/arm64,linux/amd64 -t spotinfo .
+make build            # hermetic: embeds the committed data, downloads nothing
+make test             # unit and end-to-end tests, no credentials, no network
+make lint
+make verify-data      # manifests, source contracts, parser contracts, coverage floors
 ```
 
-**CI/CD**: Automated testing, linting, releases, and multi-arch Docker builds via GitHub Actions
-
-## Contributing
-
-Contributions welcome! Please read the development commands in [CLAUDE.md](CLAUDE.md) and ensure all tests pass.
+Contributions are welcome. Read [CLAUDE.md](CLAUDE.md) for the repository rules. Make sure
+that every test passes before you open a pull request.
 
 ## License
 
-Apache 2.0 License - see [LICENSE](LICENSE) for details.
-
+Apache 2.0. See [LICENSE](LICENSE).

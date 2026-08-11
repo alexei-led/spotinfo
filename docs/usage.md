@@ -2,7 +2,9 @@
 
 ## Command Overview
 
-`spotinfo` is a command-line tool for exploring AWS EC2 Spot instances with advanced filtering, sorting, and placement score analysis capabilities. The `recommend` subcommand supports multiple cloud providers; see [Cloud Capability Matrix](#cloud-capability-matrix) below.
+`spotinfo` is a command-line tool for exploring AWS EC2 Spot instances with advanced filtering, sorting, and placement score analysis capabilities. The `recommend` subcommand supports multiple cloud providers; see [Cloud coverage](clouds.md) for what each cloud serves and refuses.
+
+New to the tool? Start with the [Quick start](quick-start.md). This page is the complete reference.
 
 ## Basic Syntax
 
@@ -153,34 +155,21 @@ The v2 `table` output is a different shape from the v1 table above: `RANK CLOUD 
 
 ## Cloud Capability Matrix
 
-| Cloud   | Entry point        | Regions             | OS             | Architectures | Risk data            | Workloads            |
-| ------- | ------------------ | ------------------- | -------------- | ------------- | -------------------- | -------------------- |
-| `aws`   | root + `recommend` | all Advisor regions | linux, windows | x86_64, arm64 | interruption buckets | cost, web, ci, batch |
-| `gcp`   | `recommend` only   | `us-central1`       | linux          | x86_64, arm64 | unavailable          | cost                 |
-| `azure` | `recommend` only   | 55 regions          | linux          | x86_64, arm64 | unavailable          | cost                 |
+Moved. [clouds.md](clouds.md) is the single source for region counts, machine counts, machine
+series, accepted workloads, and the reason behind each limit. It also documents GCP
+`--live-risk` and how to refresh a snapshot.
 
-**GCP notes:**
+Summary, so you do not have to leave this page:
 
-- The root query command (`spotinfo --cloud gcp ...`) is not supported; it requires interruption data and returns `UNSUPPORTED_CAPABILITY`.
-- Only `us-central1` is served. Naming any other region in `--region` returns `NO_CANDIDATES`. An unset `--region` expands to all GCP-published regions, which is currently only `us-central1`.
-- `--os windows` returns `UNSUPPORTED_CAPABILITY`.
-- Arm series: `c4a`, `n4a`, `t2a`. x86_64 series: `c2`, `c3`, `c3d`, `c4`, `c4d`, `e2`, `m1`, `m2`, `m3`, `n1`, `n2`, `n2d`, `n4`, `n4d`, `t2d`.
-- Every machine carries a Spot price, a paired On-Demand price, and a derived savings percent. Risk is always `status: "unavailable"`.
-- The embedded catalogue is refreshed by `make update-gcp-data` and the weekly `update-gcp-data` workflow.
+| Cloud   | Entry point        | Regions       | OS             | Architectures | Risk data            | Workloads            |
+| ------- | ------------------ | ------------- | -------------- | ------------- | -------------------- | -------------------- |
+| `aws`   | root + `recommend` | Advisor list  | linux, windows | x86_64, arm64 | interruption buckets | cost, web, ci, batch |
+| `gcp`   | `recommend` only   | `us-central1` | linux          | x86_64, arm64 | unavailable          | cost                 |
+| `azure` | `recommend` only   | see clouds.md | linux          | x86_64, arm64 | unavailable          | cost                 |
 
-**Azure notes:**
-
-- The root query command (`spotinfo --cloud azure ...`) is not supported; it requires interruption data
-  and returns `UNSUPPORTED_CAPABILITY`.
-- 55 regions are served, enumerated in [data-sources.md](data-sources.md#7-azure-retail-prices-api-and-microsoft-learn-vm-size-pages) and in
-  `support.regions` of `internal/providers/azure/data/source-contract.json`. Naming any other
-  region returns `NO_CANDIDATES`. An unset `--region` expands to all 55.
-- 224 VM sizes across 26 machine series (37 arm64 sizes in `bpsv2`, `dpsv5`, `dpdsv5`, `dpsv6`,
-  `epsv5`). `--machine` accepts the full Azure size name, for example `Standard_D2s_v5`.
-- Azure publishes eviction rates only through Resource Graph and Resource SKUs, both of which need a
-  subscription, so every Azure candidate reports `risk.status = "unavailable"`.
-- The embedded catalogue is refreshed by `make update-azure-data` and the weekly `update-azure-data`
-  workflow.
+On GCP and Azure the root query command returns `UNSUPPORTED_CAPABILITY`, `--os windows`
+returns `UNSUPPORTED_CAPABILITY`, an unserved `--region` returns `NO_CANDIDATES`, and
+`--workload web|ci|batch` returns `UNSUPPORTED_CAPABILITY`.
 
 ## Output Formats
 
@@ -261,7 +250,8 @@ type=t3.micro, vCPU=2, memory=1GiB, saving=68%, interruption='<5%', price=0.0043
 
 ### Number Format
 
-Single value for automation:
+One bare number for automation: the savings percent of the first match. It is not a price.
+To read a price, use `--output json` and select the `price` field.
 
 ```bash
 spotinfo --type "t3.micro" --output number
@@ -339,11 +329,23 @@ echo "Recommended instance: $BEST_INSTANCE"
 ### CI/CD Integration
 
 ```bash
-# Cost validation in deployment pipeline
+# Cost validation in deployment pipeline.
+# --output number prints the savings percent, not a price. Read the price from JSON.
 MAX_COST="0.50"
-INSTANCE_COST=$(spotinfo --type "m5.xlarge" --region "us-east-1" --output number)
+INSTANCE_COST=$(spotinfo --type "^m5\.xlarge$" --region "us-east-1" --output json \
+  | jq -r '.[0].price')
 if (( $(echo "$INSTANCE_COST > $MAX_COST" | bc -l) )); then
   echo "Instance cost exceeds budget: $INSTANCE_COST > $MAX_COST"
+  exit 1
+fi
+```
+
+```bash
+# Gate on savings instead. This is what --output number reports.
+MIN_SAVINGS=60
+SAVINGS=$(spotinfo --type "^m5\.xlarge$" --region "us-east-1" --output number)
+if [ "$SAVINGS" -lt "$MIN_SAVINGS" ]; then
+  echo "Savings $SAVINGS% is below the $MIN_SAVINGS% floor"
   exit 1
 fi
 ```

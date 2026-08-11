@@ -1,13 +1,21 @@
 # spotinfo
 
-> CLI tool and MCP server for AWS EC2 Spot Instance pricing, savings, and interruption frequency data.
+> CLI tool and MCP server that ranks Spot machines on AWS, GCP and Azure from committed price snapshots.
 
-`spotinfo` provides comprehensive access to AWS Spot Instance data — real-time pricing, savings percentages, interruption rates, and placement scores. It embeds AWS data feeds for offline capability and supports multiple output formats (table, JSON, CSV, text, number). Also works as an MCP server for AI assistant integration.
+`spotinfo` answers one question: which Spot machine meets a vCPU and memory floor at the
+lowest price, on a given cloud, at an interruption risk the workload can survive. AWS is the
+full surface — live feeds, interruption buckets, placement scores, live price fallback. GCP
+and Azure are served offline from reviewed snapshots and answer the risk-free `cost` workload
+only, because neither publishes redistributable interruption data. Every answer names its
+source URLs and their SHA-256.
 
 ## Docs
 
 - [README](README.md)
+- [Quick start](docs/quick-start.md)
+- [Installation](docs/installation.md)
 - [Usage Guide](docs/usage.md)
+- [Cloud coverage](docs/clouds.md) - what each cloud serves and refuses
 - [MCP Server Integration](docs/mcp-server.md)
 - [Data Sources](docs/data-sources.md)
 - [API Reference](docs/api-reference.md)
@@ -15,25 +23,46 @@
 - [Troubleshooting](docs/troubleshooting.md)
 - [Placement Scores](docs/aws-spot-placement-scores.md)
 - [Claude Desktop Setup](docs/claude-desktop-setup.md)
+- [CLI and MCP surface review](docs/reviews/cli-and-mcp-surface-review.md)
 - [CLAUDE.md](CLAUDE.md) - AI coding guidelines for this project
+
+## Commands
+
+- `spotinfo recommend --cloud <aws|gcp|azure> --architecture <x86_64|arm64> --cpu N --memory N`
+  ranks machines on any cloud. `--architecture`, `--cpu` and `--memory` are required.
+- `spotinfo [flags]` queries the AWS Spot Advisor and renders an interruption column. AWS only.
+- `spotinfo --mcp` starts the MCP server.
 
 ## Key Features
 
-- **Spot pricing**: current spot prices per instance type, region, and OS
+- **Multi-cloud recommendations**: one ranking across AWS, GCP and Azure
+- **Spot pricing**: current spot prices per machine type, region, and OS
 - **Interruption rates**: AWS Spot Advisor interruption frequency ranges (<5%, 5-10%, etc.)
+- **Explicit unknowns**: a cloud with no risk data reports `unavailable`, never a zero
+- **Capability refusal**: an unanswerable request is rejected before any price is read
 - **Savings**: percentage savings vs on-demand pricing
 - **Placement scores**: real-time AWS EC2 placement scores (1-10) for launch success probability
 - **Live price fallback**: EC2 DescribeSpotPriceHistory API for newer instances missing from static feed
-- **Embedded data**: works offline using embedded AWS data files
-- **MCP server**: expose spot data to Claude, Cursor, and other MCP-compatible AI tools
-- **Flexible filtering**: by region, instance type (regex), vCPU, memory, price, placement score
-- **Multi-region**: compare across regions with `--region all`
-- **Output formats**: table, JSON, CSV, plain text, number
+- **Embedded data**: works offline; GCP and Azure never make a request
+- **Live GCP preemption risk**: opt-in with `--live-risk`, visible but never filterable
+- **Provenance**: every v2 answer carries source URLs and content hashes
+- **MCP server**: expose Spot data to Claude, Cursor, and other MCP-compatible AI tools
+- **Output formats**: table, JSON, CSV, plain text, number (query command); table, JSON (recommend)
+
+## MCP tools
+
+- `find_spot_instances` — AWS only, v1 response shape
+- `list_spot_regions` — AWS only, no arguments
+- `recommend_spot_instances` — AWS, GCP and Azure; emits `spotinfo.recommend/v2`
 
 ## Architecture
 
 - `cmd/spotinfo/` — CLI entry point and flag definitions
-- `internal/spot/` — core business logic
+- `internal/cloud/` — provider-neutral domain: Query, Result, Capabilities, Money, the
+  recommender, and the `spotinfo.recommend/v2` DTOs. Imports no provider SDK.
+- `internal/providers/` — one adapter per cloud (`aws/`, `gcp/`, `azure/`) plus the registry
+- `internal/snapshot/` — manifest and source-contract validators shared by every snapshot
+- `internal/spot/` — legacy AWS business logic, still the AWS acquisition path
   - `client.go` — `Client` struct with functional options pattern
   - `data.go` — embedded data fetching and parsing
   - `liveprice.go` — `livePriceProvider` interface, EC2 API live price enrichment
@@ -43,14 +72,21 @@
 
 ## Data Sources
 
+AWS:
+
 - Spot Advisor data: `https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json`
 - Static pricing: `https://website.spot.ec2.aws.a2z.com/spot.json` (feed behind the AWS spot
   pricing page; plain JSON, hourly. Replaces the legacy `spot-price.s3.amazonaws.com/spot.js`,
   frozen since 2024-05-13)
 - Live prices: EC2 `DescribeSpotPriceHistory` API (fallback for zero-price instances)
 
-Both static feeds are embedded at build time via `//go:embed` for offline use. Refresh them
-with `make update-data update-price`; builds never fetch.
+GCP: Google's public server-rendered Spot and Compute pricing pages, `us-central1` only.
+Azure: the anonymous Azure Retail Prices API joined to Microsoft Learn VM size pages.
+
+Every non-AWS snapshot is governed by an approved
+`internal/providers/<cloud>/data/source-contract.json` that enumerates its exact source URLs
+and thresholds. All snapshots are embedded at build time; builds never fetch. Refresh with
+`make update-data update-price update-gcp-data update-azure-data`, then `make verify-data`.
 
 ## Install
 
