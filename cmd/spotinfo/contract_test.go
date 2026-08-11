@@ -110,7 +110,11 @@ func liveCandidate(candidate cloud.Candidate, placements ...cloud.PlacementObser
 }
 
 func regionalScore(region string, score int) cloud.PlacementObservation {
-	return cloud.PlacementObservation{Location: cloud.Location{Region: cloud.Region(region)}, Score: score}
+	return cloud.PlacementObservation{
+		Location: cloud.Location{Region: cloud.Region(region)},
+		Kind:     cloud.PlacementKindPlacementScore,
+		Score:    score,
+	}
 }
 
 // zonalCandidate carries one score and one price per zone, which is the shape
@@ -120,6 +124,7 @@ func zonalCandidate(candidate cloud.Candidate, scores map[string]int, prices map
 		candidate.Placements = append(candidate.Placements, cloud.PlacementObservation{
 			FetchedAt: &contractScoreFetchedAt,
 			Location:  cloud.Location{Region: candidate.Location.Region, Zone: zone},
+			Kind:      cloud.PlacementKindPlacementScore,
 			Score:     scores[zone],
 		})
 	}

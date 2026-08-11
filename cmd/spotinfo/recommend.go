@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/urfave/cli/v2"
@@ -61,6 +63,15 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, registry provid
 	// accepted and ignored — and before acquisition, so a refusal costs no I/O.
 	if refusal := refuseUnsupportedFlags(ctx, provider); refusal != nil {
 		return refusal
+	}
+
+	// The same score rules `list` applies. Declaring the four flags without
+	// this is what would land three of them accepted and silently ignored.
+	if invalid := validateScoreFlags(ctx); invalid != nil {
+		return invalid
+	}
+	if invalid := requireScoresToSortByThem(ctx, sortKey); invalid != nil {
+		return invalid
 	}
 
 	workload, err := recommendWorkload(ctx)
@@ -190,9 +201,27 @@ func sortRecommendations(recommendations []cloud.RecommendationDTO, order cloud.
 	return nil
 }
 
+// requireScoresToSortByThem refuses `--sort score` on a page that fetched none.
+//
+// The ranked page publishes a placement figure now, so the key is no longer
+// meaningless — but only under --with-score. Without it every row's figure is
+// absent, compareOptionalFloat sorts them all equal, and the flag exits 0
+// having done nothing. It is stated as a companion rule rather than as an
+// unsupported key so the message says what to add.
+//
+// It is a recommend-only rule: `list` reaches its placement capability through
+// listCapabilityRequest, which already treats a score sort as a score request.
+func requireScoresToSortByThem(ctx *cli.Context, key cloud.SortKey) error {
+	if key != cloud.SortByPlacementScore || lineageBool(ctx, flagWithScore) {
+		return nil
+	}
+
+	return fmt.Errorf("%w: --%s %s needs --%s, which is what fetches the placement figures it orders by",
+		cloud.ErrInvalidArgument, flagSort, sortScore, flagWithScore)
+}
+
 // recommendationComparator resolves a neutral sort key against the fields a
-// recommendation publishes. A placement score is not one of them yet, so that
-// key is refused rather than silently ignored.
+// recommendation publishes.
 func recommendationComparator(key cloud.SortKey) (func(left, right *cloud.RecommendationDTO) int, error) {
 	switch key {
 	case cloud.SortByMachine:
@@ -214,8 +243,7 @@ func recommendationComparator(key cloud.SortKey) (func(left, right *cloud.Recomm
 			return compareOptionalFloat(left.Risk.MaxPercent, right.Risk.MaxPercent)
 		}, nil
 	case cloud.SortByPlacementScore:
-		return nil, fmt.Errorf("%w: --%s %s needs a placement score, which %s does not publish",
-			cloud.ErrInvalidArgument, flagSort, sortScore, recommendCommandName)
+		return comparePlacements, nil
 	default:
 		return nil, fmt.Errorf("%w: unknown sort %q", cloud.ErrInvalidArgument, key)
 	}
@@ -241,6 +269,40 @@ func comparePrices(left, right *cloud.RecommendationDTO) int {
 	}
 
 	return cmp.Compare(leftAmount.Nanos(), rightAmount.Nanos())
+}
+
+// comparePlacements orders the ranked page by its regional placement figure.
+//
+// Both kinds are compared, each on its own scale and never against the other:
+// one answer comes from one cloud, so a page carries one kind, and a mixed pair
+// is left unordered rather than converted onto a shared number no vendor
+// published.
+//
+// Only the regional figure orders a page. Under --az a candidate carries one
+// observation per zone and no regional one, and picking a maximum or a mean
+// across zones would be this tool inventing a regional figure the provider
+// declined to give — so those rows keep the ranking policy's own order.
+func comparePlacements(left, right *cloud.RecommendationDTO) int {
+	if left.RegionScore != nil || right.RegionScore != nil {
+		return compareOptionalInt(left.RegionScore, right.RegionScore)
+	}
+
+	return compareOptionalFloat(left.RegionObtainability, right.RegionObtainability)
+}
+
+// compareOptionalInt orders an integer figure a provider may not publish,
+// putting an absent one last under either order — see compareOptionalFloat.
+func compareOptionalInt(left, right *int) int {
+	switch {
+	case left == nil && right == nil:
+		return 0
+	case left == nil:
+		return 1
+	case right == nil:
+		return -1
+	default:
+		return cmp.Compare(*left, *right)
+	}
 }
 
 // compareOptionalFloat orders a figure a provider may not publish. An absent
@@ -328,6 +390,11 @@ func neutralRecommendRequest(ctx *cli.Context, id cloud.ProviderID, workload clo
 		MinMemoryGiB: float64(lineageInt(ctx, flagMinMemoryGiB)),
 		MinVCPU:      lineageInt(ctx, flagMinVCPU),
 		Top:          top,
+		// Carried on the request, not applied afterwards: RecommendRequest
+		// derives its capability needs from the Query this becomes, so a cloud
+		// that publishes no placement figure is refused before acquisition
+		// rather than answering with an empty column.
+		Placement: placementRequest(ctx),
 	}
 	if budget > 0 {
 		// A ceiling, not a measured price: --max-price is routinely a monthly figure
@@ -386,26 +453,129 @@ func writeNeutralRecommendationTable(recommendations []cloud.RecommendationDTO, 
 		machineWidth = max(machineWidth, len(recommendations[i].Machine))
 	}
 
-	header := fmt.Sprintf("RANK  CLOUD  %-*s  %-*s  ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR    SAVINGS  RISK          WHY",
-		regionWidth, "REGION", machineWidth, "MACHINE")
+	placement := placementColumn(recommendations)
+
+	header := fmt.Sprintf("RANK  CLOUD  %-*s  %-*s  ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR    SAVINGS  RISK          %sWHY",
+		regionWidth, "REGION", machineWidth, "MACHINE", placement.cell(placement.title))
 	if _, err := fmt.Fprintln(output, header); err != nil {
 		return fmt.Errorf("write recommendation output: %w", err)
 	}
 
 	decimals := priceDecimals(recommendations)
-	for _, recommendation := range recommendations {
-		if _, err := fmt.Fprintf(output, "%4d  %-5s  %-*s  %-*s  %-12s  %4d  %10.1f  %-10s  %7s  %-12s  %s\n",
+	for i, recommendation := range recommendations {
+		if _, err := fmt.Fprintf(output, "%4d  %-5s  %-*s  %-*s  %-12s  %4d  %10.1f  %-10s  %7s  %-12s  %s%s\n",
 			recommendation.Rank, recommendation.Cloud,
 			regionWidth, recommendation.Region, machineWidth, recommendation.Machine,
 			recommendation.Architecture, recommendation.VCPU, recommendation.MemoryGiB,
 			humanPrice(recommendation.SpotUSDPerHour, decimals), savingsDisplay(recommendation.SavingsPercent),
 			riskDisplay(&recommendation.Risk),
+			placement.cell(placement.cells[i]),
 			strings.Join(recommendation.RationaleCodes, ",")); err != nil {
 			return fmt.Errorf("write recommendation output: %w", err)
 		}
 	}
 
 	return nil
+}
+
+// rankedPlacements is the ranked page's placement column, or nothing at all.
+//
+// A page that asked for no placement figure has no column, which is what keeps
+// a recommendation that asked for none rendering exactly as it always has. The
+// values are the undecorated ones: this table is hand-padded, and an emoji is
+// two columns wide in some terminals and one in others.
+type rankedPlacements struct {
+	title string
+	cells []string
+	width int
+}
+
+// cell renders one value at the column's width, or nothing when the page has no
+// placement column at all.
+func (p rankedPlacements) cell(value string) string {
+	if p.width == 0 {
+		return ""
+	}
+
+	return fmt.Sprintf("%-*s  ", p.width, value)
+}
+
+func placementColumn(recommendations []cloud.RecommendationDTO) rankedPlacements {
+	column := rankedPlacements{cells: make([]string, len(recommendations))}
+
+	var kind cloud.PlacementKind
+
+	present := false
+
+	for i := range recommendations {
+		published := &recommendations[i].PlacementDTO
+		column.cells[i] = rankedPlacementCell(published)
+
+		if column.cells[i] != absentValue {
+			present = true
+		}
+		if kind == "" {
+			kind = rankedPlacementKind(published)
+		}
+	}
+
+	if !present {
+		return rankedPlacements{cells: column.cells}
+	}
+
+	column.title = strings.ToUpper(determineScoreHeader(scoreTypeInfo{kind: kind, hasScores: true}))
+	column.width = len(column.title)
+
+	for _, cell := range column.cells {
+		column.width = max(column.width, len(cell))
+	}
+
+	return column
+}
+
+// rankedPlacementKind names the measurement a published row carries, so the
+// column can be titled after it rather than after whichever kind came first.
+func rankedPlacementKind(published *cloud.PlacementDTO) cloud.PlacementKind {
+	switch {
+	case published.RegionScore != nil || len(published.ZoneScores) > 0:
+		return cloud.PlacementKindPlacementScore
+	case published.RegionObtainability != nil || len(published.ZoneObtainability) > 0:
+		return cloud.PlacementKindObtainability
+	default:
+		return ""
+	}
+}
+
+// rankedPlacementCell renders one row's placement figure, on its own kind's
+// scale and never converted onto another's.
+func rankedPlacementCell(published *cloud.PlacementDTO) string {
+	switch {
+	case published.RegionScore != nil:
+		return strconv.Itoa(*published.RegionScore)
+	case published.RegionObtainability != nil:
+		return strconv.FormatFloat(*published.RegionObtainability, 'f', obtainabilityDecimals, 64)
+	case len(published.ZoneScores) > 0:
+		return zonedCells(published.ZoneScores, strconv.Itoa)
+	case len(published.ZoneObtainability) > 0:
+		return zonedCells(published.ZoneObtainability, func(value float64) string {
+			return strconv.FormatFloat(value, 'f', obtainabilityDecimals, 64)
+		})
+	case published.PlacementStatus == cloud.PlacementStatusUnavailable:
+		return string(cloud.PlacementStatusUnavailable)
+	default:
+		return absentValue
+	}
+}
+
+// zonedCells renders a zone-keyed figure in zone order, matching what `list`
+// prints for the same observation.
+func zonedCells[V any](values map[string]V, render func(V) string) string {
+	cells := make([]string, 0, len(values))
+	for _, zone := range slices.Sorted(maps.Keys(values)) {
+		cells = append(cells, zone+":"+render(values[zone]))
+	}
+
+	return strings.Join(cells, ",")
 }
 
 // savingsDisplay renders the discount against on-demand.

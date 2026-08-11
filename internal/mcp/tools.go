@@ -249,8 +249,19 @@ func (t *ListSpotMachinesTool) list(ctx context.Context,
 		return nil, err
 	}
 
-	if capErr := provider.Capabilities().Require(query.CapabilityNeeds()); capErr != nil {
+	capabilities := provider.Capabilities()
+	if capErr := capabilities.Require(query.CapabilityNeeds()); capErr != nil {
 		return nil, fmt.Errorf("%s: %w", id, capErr)
+	}
+
+	// min_score is an integer floor and only one placement kind is an integer
+	// scale. The same refusal the CLI makes, in this surface's wording: reading
+	// the floor against a 0.0-1.0 probability would need a mapping no vendor
+	// states.
+	if query.Placement.MinScore > 0 && !capabilities.SupportsScoreFloor() {
+		return nil, fmt.Errorf("%w: %s: %s is an integer 1-%d floor and %s publishes %s",
+			cloud.ErrUnsupportedCapability, id, argMinScore, cloud.MaxPlacementScore,
+			id, capabilities.PlacementKind)
 	}
 
 	result, err := provider.Query(ctx, query)

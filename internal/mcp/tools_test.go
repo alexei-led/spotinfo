@@ -631,6 +631,33 @@ func TestListPublishesPlacementScores(t *testing.T) {
 	assert.Equal(t, "2026-08-06T08:58:27Z", *candidate.ScoreFetchedAt)
 }
 
+// min_score is an integer floor and only the AWS placement score is an integer
+// scale. The MCP surface refuses it against another measurement for the same
+// reason the CLI does: reading 8 as a 0.8 probability would be this server
+// inventing a correspondence between two vendors' figures.
+//
+// The refusal runs before acquisition, beside the capability gate.
+func TestAnIntegerScoreFloorIsRefusedAgainstAnotherPlacementKind(t *testing.T) {
+	t.Parallel()
+
+	capabilities := offlineLinuxCapabilities()
+	capabilities.PlacementScore = true
+	capabilities.PlacementKind = cloud.PlacementKindObtainability
+
+	provider := stubFor(cloud.ProviderGCP, capabilities, []cloud.Candidate{})
+	registry := newStubRegistry(provider)
+
+	result := callTool(t, listTool(registry).Handle, map[string]any{
+		argCloud: string(cloud.ProviderGCP), argWithScore: true, argMinScore: 5,
+	})
+
+	payload := decodeError(t, result)
+	assert.Equal(t, cloud.CodeUnsupportedCapability, payload.Code)
+	assert.Contains(t, payload.Message, string(cloud.PlacementKindObtainability),
+		"the refusal names the measurement the floor cannot be applied to")
+	assert.Zero(t, provider.callCount(), "a refusal costs no acquisition")
+}
+
 // scopedSource builds a region-scoped provenance entry.
 func scopedSource(url string, region cloud.Region) cloud.SourceRef {
 	return cloud.SourceRef{

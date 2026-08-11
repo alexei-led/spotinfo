@@ -1564,35 +1564,104 @@ must be corrected, and a future e2e test that names an explicit Azure region nee
   declaring the flags is not enough to make them act
 - Modify: `internal/cloud/schema_test.go`
 
-- [ ] add `Kind` plus an optional `Obtainability *float64` to the existing
+- [x] add `Kind` plus an optional `Obtainability *float64` to the existing
       `PlacementObservation`, keeping `Score int` for the AWS path
-- [ ] define **two** kinds, one per producer this plan builds: `placement_score` (AWS,
+- [x] define **two** kinds, one per producer this plan builds: `placement_score` (AWS,
       integer 1-10) and `obtainability` (GCP, 0.0-1.0 with an optional uptime estimate).
       Azure's `High`/`Medium`/`Low` label is deferred with its fetcher — do not add a kind
       with no producer
-- [ ] do **not** normalise the kinds into a shared scale; a common 1-10 would invent
+- [x] do **not** normalise the kinds into a shared scale; a common 1-10 would invent
       precision no vendor published
-- [ ] decide and document how _absent_ differs from _unavailable_: `Placements` is a slice
+- [x] decide and document how _absent_ differs from _unavailable_: `Placements` is a slice
       today, so both are the empty slice. Add an explicit status rather than overloading length
-- [ ] add `--with-score`, `--min-score`, `--az` and `--score-timeout` to `recommend` — they are
+- [x] add `--with-score`, `--min-score`, `--az` and `--score-timeout` to `recommend` — they are
       root-only today (`main.go:1138`) and `recommendCommand` declares none of them, so Task 12
       would otherwise have no CLI entry point
-- [ ] make `--min-score` meaningful against both kinds, or refuse it against `obtainability`
+- [x] make `--min-score` meaningful against both kinds, or refuse it against `obtainability`
       with a message naming the cloud — an integer floor over a 0.0-1.0 probability needs a
       stated mapping, not an implicit one
-- [ ] write tests for each kind's rendering in table, JSON and CSV
-- [ ] write a test asserting a placement kind is never accepted by `acceptsRisk`
-- [ ] write a test asserting the AWS path still produces the same score it does today
+- [x] write tests for each kind's rendering in table, JSON and CSV
+- [x] write a test asserting a placement kind is never accepted by `acceptsRisk`
+- [x] write a test asserting the AWS path still produces the same score it does today
 - ➕ delete the four `vocabularyGaps` rows marked "task 11" in
-  `cmd/spotinfo/vocabulary_test.go`
+  `cmd/spotinfo/vocabulary_test.go` — **done**; only the two task 13 rows remain
 - ➕ call `requireWithScore` (`cmd/spotinfo/provider_flags.go`, Task 8) from
   `execRecommendCmd` when the four flags land. Task 8 refuses `--az`, `--min-score` and
   `--score-timeout` without `--with-score` on `list` only, because `recommend` declares none
-  of them today; declaring them without the check lands three silently ignored flags
+  of them today; declaring them without the check lands three silently ignored flags —
+  **done**, through the shared `validateScoreFlags`
 - ➕ bound `--score-timeout` on the CLI the way `internal/mcp` bounds `score_timeout`
   (1..`cloud.MaxScoreTimeoutSeconds`). `listQuery` drops anything outside `timeout > 0` with
-  no error, so a negative or absurd value is accepted and ignored
-- [ ] run `make test` — must pass before Task 12
+  no error, so a negative or absurd value is accepted and ignored — **done**, on both commands
+- [x] run `make test` — must pass before Task 12
+
+➕ **`--min-score` is refused against `obtainability`, not mapped onto it.** The two options
+the plan offers are not equally honest: an AWS 8 is a decile bucket whose boundaries AWS does
+not publish, so reading `--min-score 8` as "obtainability ≥ 0.8" would be this tool inventing a
+correspondence between two vendors' measurements — the exact thing the kind vocabulary exists to
+prevent. `Capabilities` therefore gained `PlacementKind`, a provider that declares
+`PlacementScore` must name its measurement, and `SupportsScoreFloor()` is the single rule both
+surfaces read. `--with-score` still answers on such a cloud; only the integer filter is refused,
+naming the cloud and the kind. The refusal is unreachable until Task 12 gives GCP the
+capability, and is tested against a stub that declares it.
+
+➕ **Three wire states, one per domain status, and `placement_status` is published only for
+the one the values cannot already state.** A figure present means available; `"placement_status":
+"unavailable"` means the lookup ran and produced nothing; neither means nobody asked. Emitting
+`"available"` beside a score would say the same thing twice — and would have rewritten
+`cmd/spotinfo/testdata/list-v1.json`, a golden this task must not touch. `list-v1.schema.json`
+declares the field as a single-valued enum, which is honest about what can appear there today.
+Reachable on AWS because `scoreOutcome` makes a per-region score failure non-fatal, so one
+failed region among many really does yield rows with a requested-but-absent figure.
+
+➕ **`region_score`, `zone_scores` and `score_fetched_at` keep their names, their order and
+their meaning.** They moved into an embedded `cloud.PlacementDTO` — which `RecommendationDTO`
+now embeds too, so a ranked page publishes the same block — and `encoding/json` flattens an
+embedded struct at its declaration position, so the emitted key order is unchanged and both
+recorded goldens stayed byte-identical with no `UPDATE_GOLDEN` run. The obtainability fields
+and the status are appended after them.
+
+➕ **`stubProvider.Query` now drops placements when the query asked for none**, which is what
+kept `recommend-v3.table.txt` and `recommend-v3.json` unchanged. The fixture publishes scores
+unconditionally and the recorded recommend invocation passes no `--with-score`, so once
+`recommend` started publishing the block, a stub that ignored the request would have recorded a
+column the shipped binary never draws.
+
+➕ **`--sort score` works on `recommend` now, and needs `--with-score`.** Task 4 refused the key
+with "which recommend does not publish"; that sentence is false as of this task, so the
+comparator was implemented — each kind ordered on its own scale, a mixed pair left unordered,
+and only the *regional* figure ordering a page, because inventing a maximum or a mean across
+zones would be publishing a regional figure the provider declined to give. Without
+`--with-score` every figure is absent and the sort would exit 0 having done nothing, so it is
+refused as a companion rule. `TestRecommendRefusesASortKeyItDoesNotPublish` still passes
+unchanged; only its comment moved. **`list --sort score` is deliberately untouched** — Task 8
+scoped its companion set to the three flags, and re-opening it there is not this task's to do.
+
+➕ **The four score arguments are not added to the MCP `recommend_spot_machines` tool.** Its
+argument set is pinned by `docs/plans/contracts/recommend-v3-input.schema.json` and recorded in
+`internal/mcp/testdata/recommend-v3-input-schema.json`, both Task 6/7 artifacts; widening them
+is a contract change no checkbox here owns, and it would rewrite a golden. The four
+`mcpArgumentGaps` rows stay, with their reason corrected from "task 11 puts the score flags on
+recommend" to the real one. The `list_spot_machines` tool *did* gain the `min_score`-versus-kind
+refusal, so the two surfaces agree wherever both declare the argument.
+
+⚠️ **A ranked page's placement figures are reachable only from the CLI.** Acceptance criterion 2
+asks that the same question return the same document on both surfaces; a question that cannot be
+asked over MCP is not asked, and the gap table records it. **Task 15 should check this** when it
+verifies criterion 2, alongside the Task 8 note about `az` and `score_timeout`.
+
+➕ **Files this task's list omits.** `internal/cloud/provider.go` (`Candidate.PlacementStatus`,
+`Capabilities.PlacementKind`, `SupportsScoreFloor`), `cmd/spotinfo/list.go` and
+`cmd/spotinfo/provider_flags.go` (the shared `scoreFlags`, `placementRequest` and
+`validateScoreFlags`), `docs/plans/contracts/{list-v1,recommend-v3-success}.schema.json`, the
+new `cmd/spotinfo/placement_test.go`, and
+`cmd/spotinfo/{contract,format,provider_flags,mcp_vocabulary}_test.go`,
+`internal/cloud/recommend_test.go`, `internal/mcp/{helpers,jsonschema,tools}_test.go` and
+`internal/providers/aws/provider_test.go`. `internal/cloud/enrich.go` and
+`internal/cloud/schema_test.go` are in the list and were **not** touched: no checkbox asks for a
+placement enricher — Task 12 owns the GCP fetcher — and the schema is covered by the contract
+validation in `internal/mcp/jsonschema_test.go`, which is where the list payload is checked
+against its schema file.
 
 ### Task 12: Fetch GCP obtainability
 

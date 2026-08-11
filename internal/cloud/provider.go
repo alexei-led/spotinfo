@@ -35,6 +35,11 @@ const (
 // acquisition so an unsupported request fails immediately instead of returning
 // silently empty or partially populated candidates.
 type Capabilities struct {
+	// PlacementKind names the measurement PlacementScore refers to. A provider
+	// that declares PlacementScore must name it: the kinds are on different
+	// scales, so a consumer cannot read a figure it cannot name. It is empty
+	// when PlacementScore is false.
+	PlacementKind    PlacementKind
 	OperatingSystems []OperatingSystem
 	Architectures    []Architecture
 	SpotPrice        bool
@@ -78,6 +83,17 @@ func (c Capabilities) Has(capability Capability) bool {
 	default:
 		return false
 	}
+}
+
+// SupportsScoreFloor reports whether an integer placement-score floor is
+// meaningful against the measurement this provider publishes.
+//
+// Only PlacementKindPlacementScore is an integer 1-MaxPlacementScore scale.
+// Applying that floor to a 0.0-1.0 obtainability needs a mapping no vendor
+// states — an AWS 8 is a bucket whose boundaries AWS does not publish, not the
+// probability 0.8 — so a surface refuses the floor rather than inventing one.
+func (c Capabilities) SupportsScoreFloor() bool {
+	return c.PlacementKind == PlacementKindPlacementScore
 }
 
 // CapabilityRequest is what a consumer needs before it acquires candidates.
@@ -285,7 +301,11 @@ type Candidate struct {
 	Location       Location
 	ZonePrices     []PriceObservation
 	Placements     []PlacementObservation
-	Machine        MachineSpec
+	// PlacementStatus separates "no placement lookup was asked for" from "one
+	// was, and produced nothing for this candidate". Placements is a slice, so
+	// without it both states are the empty slice.
+	PlacementStatus PlacementStatus
+	Machine         MachineSpec
 }
 
 // Result is one provider's answer to a Query, with the provenance a consumer

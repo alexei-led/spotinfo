@@ -68,13 +68,18 @@ var mcpArgumentGaps = map[string]map[string]string{
 			"sorts the array it was handed; on the CLI the flag reorders a rendered page",
 		flagOrder:    "the sort direction goes with the sort key",
 		flagLiveRisk: "no task in this plan puts the opt-in GCP preemption lookup on the MCP surface",
-		// The same four rows vocabularyGaps carries for the recommend command:
-		// a recommendation publishes no placement score yet, so there is nothing
-		// for these to ask for on either surface.
-		flagWithScore:    "task 11 puts the score flags on recommend",
-		flagMinScore:     "task 11 puts the score flags on recommend",
-		flagAZ:           "task 11 puts the score flags on recommend",
-		flagScoreTimeout: "task 11 puts the score flags on recommend",
+		// Task 11 landed the four score flags on the CLI recommend command, and
+		// the ranked page publishes a placement figure on both surfaces' schema.
+		// The tool's argument set is a different artifact: it is pinned by
+		// docs/plans/contracts/recommend-v3-input.schema.json and recorded in
+		// internal/mcp/testdata/recommend-v3-input-schema.json, both of which
+		// task 6 reviewed and task 7 recorded. Widening them is a contract
+		// change no task in this plan owns, so a client asks for a ranked page's
+		// placement figures through the CLI until one does.
+		flagWithScore:    "the v3 input contract does not declare it; widening it is not task 11's to do",
+		flagMinScore:     "the v3 input contract does not declare it; widening it is not task 11's to do",
+		flagAZ:           "the v3 input contract does not declare it; widening it is not task 11's to do",
+		flagScoreTimeout: "the v3 input contract does not declare it; widening it is not task 11's to do",
 	},
 }
 

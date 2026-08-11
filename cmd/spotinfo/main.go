@@ -69,6 +69,20 @@ const (
 	scoreHeaderAZ       = "Placement Score (AZ)"
 	scoreHeaderRegional = "Placement Score (Regional)"
 	scoreHeaderGeneric  = "Placement Score"
+	// The obtainability column names GCP's own measurement. It is a separate
+	// set of headers rather than a reuse of the three above because the two
+	// figures are on different scales — an integer 1-10 against a 0.0-1.0
+	// probability — and one column name for both would tell a reader they are
+	// the same number.
+	obtainabilityHeaderAZ       = "Obtainability (AZ)"
+	obtainabilityHeaderRegional = "Obtainability (Regional)"
+	obtainabilityHeaderGeneric  = "Obtainability"
+
+	// obtainabilityDecimals is how many fractional digits a probability is
+	// printed to. Google publishes obtainability as a fraction; two digits is
+	// the precision a person compares regions on, and the JSON form carries the
+	// unrounded value for anything that needs more.
+	obtainabilityDecimals = 2
 
 	// absentValue is what every rendered format prints for an observation the
 	// cloud did not publish. It is the same "-" the ranked page already prints
@@ -624,8 +638,8 @@ func printAdvicesText(candidates []cloud.Candidate, region bool, output io.Write
 		candidate := &candidates[i]
 
 		scoreStr := ""
-		if len(candidate.Placements) > 0 {
-			scoreStr = fmt.Sprintf(", score=%s", getScoreDisplayValue(candidate))
+		if len(candidate.Placements) > 0 || candidate.PlacementStatus == cloud.PlacementStatusUnavailable {
+			scoreStr = fmt.Sprintf(", %s=%s", placementKeyOf(candidate), getScoreDisplayValue(candidate))
 		}
 
 		priceStr := candidatePriceCell(candidate)
@@ -716,36 +730,95 @@ func zonalPlacements(candidate *cloud.Candidate) []cloud.PlacementObservation {
 	return zonal
 }
 
-// scoreValue renders the placement scores of one candidate, formatting each with
-// the given renderer. The regional score wins when both are present, matching
-// what the score column has always shown.
-func scoreValue(candidate *cloud.Candidate, render func(int) string) string {
+// placementKeyOf names the measurement in the text format, which prints
+// key=value per row and has no header to carry the name.
+//
+// "score" is the fallback rather than a guess. It is the word every score flag
+// already spells — --with-score, --min-score, --sort score — and the only value
+// it labels without observations is "unavailable", which is on no scale at all.
+func placementKeyOf(candidate *cloud.Candidate) string {
+	if len(candidate.Placements) > 0 && candidate.Placements[0].Kind == cloud.PlacementKindObtainability {
+		return string(cloud.PlacementKindObtainability)
+	}
+
+	return sortScore
+}
+
+// placementCell renders one observation on its own kind's scale.
+//
+// There is deliberately no shared number and no shared indicator. The emoji
+// band exists for the AWS score, whose ten values a reader cannot rank at a
+// glance; a probability already reads as one, and inventing green/amber/red
+// boundaries for a figure Google publishes without them would be this tool
+// stating a judgement no vendor made.
+//
+// A kind this build does not know renders as absent for the same reason the
+// JSON form publishes nothing for it: the number is on a scale nothing here
+// can name.
+func placementCell(placement *cloud.PlacementObservation, decorate bool) string {
+	switch placement.Kind {
+	case cloud.PlacementKindPlacementScore:
+		if decorate {
+			return formatScoreWithIndicator(placement.Score)
+		}
+
+		return strconv.Itoa(placement.Score)
+	case cloud.PlacementKindObtainability:
+		if placement.Obtainability == nil {
+			return absentValue
+		}
+
+		return strconv.FormatFloat(*placement.Obtainability, 'f', obtainabilityDecimals, 64)
+	default:
+		return absentValue
+	}
+}
+
+// scoreValue renders the placement figures of one candidate. The regional
+// figure wins when both are present, matching what the score column has always
+// shown; decorate adds the visual indicator the table uses and CSV does not.
+func scoreValue(candidate *cloud.Candidate, decorate bool) string {
 	if regional := regionalPlacement(candidate); regional != nil {
-		return addFreshnessInfo(render(regional.Score), regional.FetchedAt)
+		return addFreshnessInfo(placementCell(regional, decorate), regional.FetchedAt)
 	}
 
 	zonal := zonalPlacements(candidate)
 	if len(zonal) == 0 {
-		return "-"
+		return placementAbsence(candidate)
 	}
 
 	scores := make([]string, 0, len(zonal))
-	for _, placement := range zonal {
+	for i := range zonal {
 		scores = append(scores, fmt.Sprintf("%s:%s",
-			placement.Location.Zone, addFreshnessInfo(render(placement.Score), placement.FetchedAt)))
+			zonal[i].Location.Zone, addFreshnessInfo(placementCell(&zonal[i], decorate), zonal[i].FetchedAt)))
 	}
 
 	return strings.Join(scores, ",")
 }
 
+// placementAbsence says which kind of nothing this is.
+//
+// "-" is what every format prints for an observation the cloud did not publish,
+// and it is the right answer when no placement lookup was asked for. It is the
+// wrong answer when one was made and came back empty: that is a result about
+// this run — no credentials, a timed-out call, a region AWS scored none of —
+// and printing the same dash as an unasked question hides it.
+func placementAbsence(candidate *cloud.Candidate) string {
+	if candidate.PlacementStatus == cloud.PlacementStatusUnavailable {
+		return string(cloud.PlacementStatusUnavailable)
+	}
+
+	return absentValue
+}
+
 // getScoreDataValue returns raw score data without visual formatting.
 func getScoreDataValue(candidate *cloud.Candidate) string {
-	return scoreValue(candidate, strconv.Itoa)
+	return scoreValue(candidate, false)
 }
 
 // getScoreDisplayValue returns formatted score with visual indicators for table display.
 func getScoreDisplayValue(candidate *cloud.Candidate) string {
-	return scoreValue(candidate, formatScoreWithIndicator)
+	return scoreValue(candidate, true)
 }
 
 // addFreshnessInfo adds subtle freshness indicator to score display.
@@ -764,12 +837,19 @@ func addFreshnessInfo(scoreStr string, fetchedAt *time.Time) string {
 
 // scoreTypeInfo holds information about score types present in advices.
 type scoreTypeInfo struct {
+	// kind is the measurement this page carries. One query is answered by one
+	// cloud, so one page carries at most one kind.
+	kind              cloud.PlacementKind
 	hasScores         bool
 	hasRegionalScores bool
 	hasAZScores       bool
 }
 
 // analyzeScoreTypes checks what types of scores are present in the candidates.
+//
+// A candidate whose lookup came back empty also opens the column: "unavailable"
+// is an answer about this run, and dropping the column entirely would report it
+// as though no lookup had been asked for.
 func analyzeScoreTypes(candidates []cloud.Candidate) scoreTypeInfo {
 	info := scoreTypeInfo{}
 	for i := range candidates {
@@ -781,22 +861,42 @@ func analyzeScoreTypes(candidates []cloud.Candidate) scoreTypeInfo {
 			info.hasScores = true
 			info.hasAZScores = true
 		}
+		if candidates[i].PlacementStatus == cloud.PlacementStatusUnavailable {
+			info.hasScores = true
+		}
+		if info.kind == "" && len(candidates[i].Placements) > 0 {
+			info.kind = candidates[i].Placements[0].Kind
+		}
 	}
 	return info
 }
 
+// placementHeaders names the column after the measurement it carries. The two
+// kinds have separate names rather than a shared one because they are on
+// separate scales: a reader who saw "Placement Score" over a 0.0-1.0
+// probability would read it as an AWS score of zero.
+type placementHeaderSet struct{ generic, regional, az string }
+
+var placementHeaders = map[cloud.PlacementKind]placementHeaderSet{
+	cloud.PlacementKindPlacementScore: {scoreHeaderGeneric, scoreHeaderRegional, scoreHeaderAZ},
+	cloud.PlacementKindObtainability:  {obtainabilityHeaderGeneric, obtainabilityHeaderRegional, obtainabilityHeaderAZ},
+}
+
 // determineScoreHeader returns the appropriate score column header based on score types.
 func determineScoreHeader(info scoreTypeInfo) string {
-	if !info.hasScores {
+	headers, named := placementHeaders[info.kind]
+	if !info.hasScores || !named {
+		// Nothing was measured, so there is no measurement to name: a page whose
+		// every lookup came back empty keeps the neutral word.
 		return scoreColumn
 	}
 	if info.hasAZScores && !info.hasRegionalScores {
-		return scoreHeaderAZ
+		return headers.az
 	}
 	if info.hasRegionalScores && !info.hasAZScores {
-		return scoreHeaderRegional
+		return headers.regional
 	}
-	return scoreHeaderGeneric
+	return headers.generic
 }
 
 // buildTableHeader creates the table header row.
@@ -1096,7 +1196,7 @@ func recommendCommand(action cli.ActionFunc) *cli.Command {
 				Usage: refreshFlagUsage,
 			},
 			&cli.StringFlag{Name: flagOutput, Usage: "format output: table|json", Value: defaultOutput},
-		}, liveRiskFlags()...),
+		}, append(liveRiskFlags(), scoreFlags()...)...),
 	}
 }
 

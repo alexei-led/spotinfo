@@ -25,23 +25,48 @@ func TestDetermineScoreHeader(t *testing.T) {
 		},
 		{
 			name: "az scores only",
-			info: scoreTypeInfo{hasScores: true, hasAZScores: true},
+			info: scoreTypeInfo{kind: cloud.PlacementKindPlacementScore, hasScores: true, hasAZScores: true},
 			want: scoreHeaderAZ,
 		},
 		{
 			name: "regional scores only",
-			info: scoreTypeInfo{hasScores: true, hasRegionalScores: true},
+			info: scoreTypeInfo{kind: cloud.PlacementKindPlacementScore, hasScores: true, hasRegionalScores: true},
 			want: scoreHeaderRegional,
 		},
 		{
 			name: "mixed az and regional falls back to the generic header",
-			info: scoreTypeInfo{hasScores: true, hasAZScores: true, hasRegionalScores: true},
+			info: scoreTypeInfo{
+				kind: cloud.PlacementKindPlacementScore, hasScores: true, hasAZScores: true, hasRegionalScores: true,
+			},
 			want: scoreHeaderGeneric,
 		},
+		// The obtainability column is named after its own measurement. Sharing
+		// the AWS header would tell a reader a 0.0-1.0 probability is a score
+		// out of ten, which is the normalisation the kind exists to prevent.
 		{
-			name: "hasScores with neither kind set is still generic",
+			name: "obtainability az only",
+			info: scoreTypeInfo{kind: cloud.PlacementKindObtainability, hasScores: true, hasAZScores: true},
+			want: obtainabilityHeaderAZ,
+		},
+		{
+			name: "obtainability regional only",
+			info: scoreTypeInfo{kind: cloud.PlacementKindObtainability, hasScores: true, hasRegionalScores: true},
+			want: obtainabilityHeaderRegional,
+		},
+		{
+			name: "obtainability mixed az and regional",
+			info: scoreTypeInfo{
+				kind: cloud.PlacementKindObtainability, hasScores: true, hasAZScores: true, hasRegionalScores: true,
+			},
+			want: obtainabilityHeaderGeneric,
+		},
+		{
+			// The column a lookup that came back empty opens: there is a column,
+			// because "unavailable" is an answer, but nothing was measured, so
+			// there is no measurement to name it after.
+			name: "a column with no observation keeps the neutral word",
 			info: scoreTypeInfo{hasScores: true},
-			want: scoreHeaderGeneric,
+			want: scoreColumn,
 		},
 	}
 
@@ -64,6 +89,7 @@ func TestScoreValueReadsPlacementObservations(t *testing.T) {
 	placement := func(zone string, score int) cloud.PlacementObservation {
 		return cloud.PlacementObservation{
 			Location: cloud.Location{Region: "us-east-1", Zone: zone},
+			Kind:     cloud.PlacementKindPlacementScore,
 			Score:    score,
 		}
 	}
@@ -130,9 +156,15 @@ func TestExpandAZSplitsZonalScoresAndPrices(t *testing.T) {
 			zonePrice("us-east-1b", "0.110000000"),
 		},
 		Placements: []cloud.PlacementObservation{
-			{Location: cloud.Location{Region: "us-east-1"}, Score: 7},
-			{Location: cloud.Location{Region: "us-east-1", Zone: "us-east-1a"}, Score: 6},
-			{Location: cloud.Location{Region: "us-east-1", Zone: "us-east-1b"}, Score: 4},
+			{Location: cloud.Location{Region: "us-east-1"}, Kind: cloud.PlacementKindPlacementScore, Score: 7},
+			{
+				Location: cloud.Location{Region: "us-east-1", Zone: "us-east-1a"},
+				Kind:     cloud.PlacementKindPlacementScore, Score: 6,
+			},
+			{
+				Location: cloud.Location{Region: "us-east-1", Zone: "us-east-1b"},
+				Kind:     cloud.PlacementKindPlacementScore, Score: 4,
+			},
 		},
 	}
 

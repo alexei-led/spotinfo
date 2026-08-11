@@ -498,6 +498,43 @@ func TestAcceptsRiskRequiresAComparableKind(t *testing.T) {
 		"the cost policy caps nothing, so no kind is compared")
 }
 
+// A placement figure measures provisioning success, not interruption at all, so
+// no risk-capped workload may ever accept one.
+//
+// The two vocabularies are separate Go types, which is a compile-time guard and
+// not a test. What this pins is the runtime one: the wire name of each
+// placement kind, fed in as a RiskKind, is still refused — so adding either to
+// interruptionCappableKinds fails here rather than shipping a page filtered
+// against a scale it is not on.
+func TestNoPlacementKindIsEverAcceptedAsInterruptionRisk(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, []RiskKind{RiskKindInterruptionFrequencyRange}, interruptionCappableKinds,
+		"the web, ci and batch ceilings are AWS Spot Advisor bucket boundaries; "+
+			"only a measurement expressed in them may be compared against them")
+
+	for _, kind := range []PlacementKind{PlacementKindPlacementScore, PlacementKindObtainability} {
+		for _, workload := range []Workload{WorkloadWeb, WorkloadCI, WorkloadBatch} {
+			t.Run(string(kind)+"/"+string(workload), func(t *testing.T) {
+				t.Parallel()
+
+				// Everything else about this candidate clears the ceiling — the
+				// figure is available, labelled and at zero percent — so the
+				// kind is the only thing that can refuse it.
+				zero := 0.0
+				candidate := fixture{Region: "us-east-1", Machine: "m", Price: "0.010", VCPU: 2, MemoryGiB: 4}.build()
+				candidate.Risk = RiskObservation{
+					MinPercent: &zero, MaxPercent: &zero, Status: RiskStatusAvailable,
+					Kind: RiskKind(kind), Label: "0%", Window: &HistoryWindow{Days: 30},
+				}
+
+				assert.False(t, acceptsRisk(&candidate, workload, workload.maxInterruptionPercent()),
+					"%s measures provisioning success, not the fraction of running machines interrupted", kind)
+			})
+		}
+	}
+}
+
 // A risk-capped request over a provider whose only risk figure is of an
 // incomparable kind has no answer, and must say so rather than rank it.
 func TestRiskCappedWorkloadDropsAnIncomparableRiskKind(t *testing.T) {

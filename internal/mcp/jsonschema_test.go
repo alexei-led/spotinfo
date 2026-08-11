@@ -323,6 +323,10 @@ func TestListPayloadValidatesAgainstTheContract(t *testing.T) {
 		// what shipped before this pair existed.
 		wantNull    []string
 		wantNonNull []string
+		// wantAbsent are the keys this case must not publish at all. A
+		// placement kind's fields are absent on a row of the other kind, and an
+		// absent figure is never a zero.
+		wantAbsent []string
 	}{
 		{
 			name:         "aws with published risk, zone prices and placement scores",
@@ -366,6 +370,40 @@ func TestListPayloadValidatesAgainstTheContract(t *testing.T) {
 			wantNonNull:  []string{"spot_usd_per_hour"},
 		},
 		{
+			// The other placement kind, published under its own fields. The
+			// document must carry the probability and none of the integer-score
+			// fields: a consumer that read one as the other would be reading a
+			// 0.87 as an AWS score of zero.
+			name:         "a cloud whose placement figure is an obtainability",
+			provider:     cloud.ProviderGCP,
+			capabilities: obtainabilityMCPCapabilities(),
+			candidates: buildCandidates(testCandidate{
+				Region: "us-central1", Machine: "n2-standard-4", Price: 0.0416, Savings: 60,
+				VCPU: 4, MemoryGiB: 16,
+				RegionObtainability: obtainabilityPtr(0.87), ScoreFetchedAt: &fetchedAt,
+			}),
+			args:        map[string]any{argWithScore: true},
+			wantKeys:    []string{"live_price", "region_obtainability", "score_fetched_at"},
+			wantAbsent:  []string{"region_score", "zone_scores", "placement_status"},
+			wantNonNull: []string{"region_obtainability"},
+		},
+		{
+			// A lookup that came back empty. The status is the only thing that
+			// separates it from a row nobody asked about, and both are the empty
+			// slice in the domain.
+			name:         "a placement lookup that produced nothing",
+			provider:     cloud.ProviderAWS,
+			capabilities: awsCapabilities(),
+			candidates: buildCandidates(testCandidate{
+				Region: "us-east-1", Machine: "m6i.large", Price: 0.0416, Savings: 72,
+				RiskLabel: "<5%", RiskMin: 0, RiskMax: 5, VCPU: 2, MemoryGiB: 8,
+				PlacementStatus: cloud.PlacementStatusUnavailable,
+			}),
+			args:       map[string]any{argWithScore: true},
+			wantKeys:   []string{"live_price", "placement_status"},
+			wantAbsent: []string{"region_score", "region_obtainability"},
+		},
+		{
 			name:         "an answer with no candidates",
 			provider:     cloud.ProviderAzure,
 			capabilities: offlineLinuxCapabilities(),
@@ -401,9 +439,26 @@ func TestListPayloadValidatesAgainstTheContract(t *testing.T) {
 			for _, key := range test.wantNonNull {
 				require.NotNil(t, document.Candidates[0][key], "%s must carry a value", key)
 			}
+			for _, key := range test.wantAbsent {
+				require.NotContains(t, document.Candidates[0], key,
+					"%s belongs to another measurement and must be absent, not zero", key)
+			}
 		})
 	}
 }
+
+// obtainabilityMCPCapabilities is a cloud whose placement figure is not an
+// integer score. GCP becomes one in task 12; the declaration is here so the
+// document shape it produces is under contract before the fetcher exists.
+func obtainabilityMCPCapabilities() cloud.Capabilities {
+	capabilities := offlineLinuxCapabilities()
+	capabilities.PlacementScore = true
+	capabilities.PlacementKind = cloud.PlacementKindObtainability
+
+	return capabilities
+}
+
+func obtainabilityPtr(value float64) *float64 { return &value }
 
 // withZonePrice attaches a per-zone price to the first candidate. testCandidate
 // models none, and the zone-price block is one of the list-only fields the

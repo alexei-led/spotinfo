@@ -159,10 +159,70 @@ func UnavailableRisk() RiskObservation {
 	return RiskObservation{Status: RiskStatusUnavailable}
 }
 
-// PlacementObservation is a provider capacity-placement score for one location,
-// fetched from a live API rather than read from a snapshot.
+// PlacementKind names the measurement a placement figure represents.
+//
+// Kinds from different providers are not comparable and are never normalised
+// into a shared scale. A common 1-10 would invent precision no vendor
+// published: AWS ranks capacity into ten buckets whose boundaries it does not
+// state, and Google publishes a probability. Three incomparable vendor
+// measurements stay distinguishable, which is the whole point of naming the
+// kind.
+//
+// One kind per producer. Azure's High/Medium/Low placement label is deferred
+// with its fetcher — reading it needs an Azure subscription this build does not
+// authenticate to — and it deliberately has no kind here, because a kind with
+// no producer is a value nothing can ever set.
+type PlacementKind string
+
+const (
+	// PlacementKindPlacementScore is the AWS Spot placement score: an integer
+	// 1-10 rating how likely a request for that capacity is to be fulfilled.
+	PlacementKindPlacementScore PlacementKind = "placement_score"
+	// PlacementKindObtainability is the GCP obtainability figure from compute
+	// advice.capacity: a probability in 0.0-1.0. It is not a decile of the AWS
+	// score and must never be filtered or ranked as if it were.
+	PlacementKindObtainability PlacementKind = "obtainability"
+)
+
+// PlacementStatus reports whether placement figures were asked for and whether
+// the provider produced any. It exists because Placements is a slice, so
+// "nobody asked" and "asked, and this cloud produced nothing" would otherwise
+// both be the empty slice — and a caller has to be able to tell them apart.
+//
+// It does not restate Capabilities.PlacementScore. A cloud that publishes no
+// placement figure at all is refused before acquisition, so the reachable
+// meaning of PlacementStatusUnavailable is that the lookup ran and produced
+// nothing for this candidate — one region of many failed, or the provider
+// scored none of that machine.
+type PlacementStatus string
+
+const (
+	// PlacementStatusNotRequested is the zero value: no placement lookup was
+	// asked for, so the absence of observations says nothing about capacity.
+	PlacementStatusNotRequested PlacementStatus = ""
+	// PlacementStatusAvailable means the candidate carries at least one
+	// observation.
+	PlacementStatusAvailable PlacementStatus = "available"
+	// PlacementStatusUnavailable means a lookup was asked for and produced no
+	// figure for this candidate. It is never rendered as a zero or a low score.
+	PlacementStatusUnavailable PlacementStatus = "unavailable"
+)
+
+// PlacementObservation is a provider capacity-placement figure for one
+// location, fetched from a live API rather than read from a snapshot.
+//
+// Kind says which of the value fields carries the measurement: Score for
+// PlacementKindPlacementScore, Obtainability for PlacementKindObtainability. A
+// consumer switches on the kind rather than reading whichever field is
+// non-zero, so an observation whose kind nothing recognises is published by
+// nobody instead of being read on a scale it does not use.
 type PlacementObservation struct {
 	FetchedAt *time.Time
-	Location  Location
-	Score     int
+	// Obtainability is the PlacementKindObtainability value, 0.0-1.0. It is a
+	// pointer because 0.0 is a real obtainability, not an absent one.
+	Obtainability *float64
+	Location      Location
+	Kind          PlacementKind
+	// Score is the PlacementKindPlacementScore value, an integer 1-10.
+	Score int
 }

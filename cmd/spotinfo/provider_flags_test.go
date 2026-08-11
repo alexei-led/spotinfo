@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -37,9 +38,23 @@ type stubProvider struct {
 
 func (p stubProvider) ID() cloud.ProviderID             { return p.id }
 func (p stubProvider) Capabilities() cloud.Capabilities { return p.capabilities }
-func (p stubProvider) Query(context.Context, *cloud.Query) (cloud.Result, error) {
+
+// Query answers with the fixed result, minus the placement figures a query
+// that asked for none must not carry.
+//
+// A real provider fetches placement figures only under --with-score, and both
+// commands now declare that flag: a stub that published them unconditionally
+// would let a test assert a column the shipped binary never draws.
+func (p stubProvider) Query(_ context.Context, query *cloud.Query) (cloud.Result, error) {
 	result := p.result
 	result.Provider = p.id
+
+	if query != nil && !query.Placement.Enabled {
+		result.Candidates = slices.Clone(result.Candidates)
+		for i := range result.Candidates {
+			result.Candidates[i].Placements = nil
+		}
+	}
 
 	return result, nil
 }
@@ -51,6 +66,7 @@ func awsCapabilities() cloud.Capabilities {
 	return cloud.Capabilities{
 		OperatingSystems: []cloud.OperatingSystem{cloud.OSLinux, cloud.OSWindows},
 		Architectures:    []cloud.Architecture{cloud.ArchitectureX8664, cloud.ArchitectureARM64},
+		PlacementKind:    cloud.PlacementKindPlacementScore,
 		SpotPrice:        true,
 		OnDemandPrice:    false,
 		MachineSpec:      true,

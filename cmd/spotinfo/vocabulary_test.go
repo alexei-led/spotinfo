@@ -63,10 +63,6 @@ var vocabularyGaps = map[string]flagGap{
 	},
 	recommendCommandName: {
 		missing: map[string]string{
-			flagWithScore:     "task 11 puts the score flags on recommend",
-			flagMinScore:      "task 11 puts the score flags on recommend",
-			flagAZ:            "task 11 puts the score flags on recommend",
-			flagScoreTimeout:  "task 11 puts the score flags on recommend",
 			flagGCPBillingKey: "task 13 declares the flag",
 		},
 	},

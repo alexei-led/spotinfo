@@ -129,6 +129,11 @@ type RecommendRequest struct {
 	OS           OperatingSystem
 	Workload     Workload
 	Regions      []Region
+	// Placement asks the provider for capacity-placement figures for the
+	// candidates it acquires. The zero value asks for none. It is carried on the
+	// request rather than derived at the query, so capabilityNeeds sees it and
+	// a cloud that publishes no placement figure is refused before acquisition.
+	Placement    PlacementRequest
 	MinMemoryGiB float64
 	MinVCPU      int
 	Top          int
@@ -280,6 +285,7 @@ func (r *RecommendRequest) Query() *Query {
 		Architecture:   r.Architecture,
 		OS:             r.OS,
 		Regions:        slices.Clone(r.Regions),
+		Placement:      r.Placement,
 		MinMemoryGiB:   r.MinMemoryGiB,
 		MinVCPU:        r.MinVCPU,
 	}

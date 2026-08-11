@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/urfave/cli/v2"
 
@@ -43,6 +44,96 @@ func providerID(ctx *cli.Context) (cloud.ProviderID, error) {
 	}
 
 	return cloud.ParseProviderID(value)
+}
+
+// scoreFlags declares the four placement flags, once, for both commands.
+//
+// They used to be root-only and `recommend` declared none of them, so a ranked
+// page could not ask for a placement figure at all — the one question a caller
+// choosing between machines most wants answered. One declaration keeps the two
+// commands from drifting into accepting different spellings or bounds.
+func scoreFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.BoolFlag{
+			Name:  flagWithScore,
+			Usage: "include provider placement figures (experimental)",
+		},
+		&cli.IntFlag{
+			Name: flagMinScore,
+			Usage: fmt.Sprintf("filter: minimum spot placement score (1-%d, needs --%s; refused on a cloud "+
+				"whose placement figure is not an integer score)", cloud.MaxPlacementScore, flagWithScore),
+			DefaultText: unfilteredDefaultText,
+		},
+		&cli.BoolFlag{
+			Name:  flagAZ,
+			Usage: "request zone-level figures instead of region-level (use with --" + flagWithScore + ")",
+		},
+		&cli.IntFlag{
+			Name:  flagScoreTimeout,
+			Usage: fmt.Sprintf("timeout for placement enrichment, 1-%d seconds", cloud.MaxScoreTimeoutSeconds),
+			Value: cloud.DefaultScoreTimeoutSeconds,
+		},
+	}
+}
+
+// placementRequest maps the four score flags onto the neutral request. One
+// mapping for both commands: the same flags on either must ask the provider for
+// the same thing, or --az means one thing on `list` and another on `recommend`.
+//
+// Figures are fetched under --with-score; --min-score filters whatever is
+// present. validateScoreFlags has already rejected the second without the first.
+func placementRequest(ctx *cli.Context) cloud.PlacementRequest {
+	request := cloud.PlacementRequest{}
+
+	if lineageBool(ctx, flagWithScore) {
+		request.Enabled = true
+		request.SingleZone = lineageBool(ctx, flagAZ)
+		if timeout := lineageInt(ctx, flagScoreTimeout); timeout > 0 {
+			request.Timeout = time.Duration(timeout) * time.Second
+		}
+	}
+	if minScore := lineageInt(ctx, flagMinScore); minScore > 0 {
+		request.MinScore = minScore
+	}
+
+	return request
+}
+
+// validateScoreFlags applies every rule the four flags share, in the order that
+// reports the most useful shortfall: the companion rule first, because a range
+// check on a filter that cannot run is the wrong thing to say.
+func validateScoreFlags(ctx *cli.Context) error {
+	if err := requireWithScore(ctx); err != nil {
+		return err
+	}
+	if err := validateScoreFloor(lineageInt(ctx, flagMinScore)); err != nil {
+		return err
+	}
+
+	return validateScoreTimeout(ctx)
+}
+
+// validateScoreTimeout bounds the lookup budget the way internal/mcp bounds
+// score_timeout.
+//
+// The CLI applied `if timeout > 0` and dropped anything else without a word, so
+// `--score-timeout -5` and `--score-timeout 99999` were both accepted and
+// silently replaced by the provider's own default — the same silent no-op the
+// refusals above exist to remove, on the surface that did not have it.
+//
+// Only a value the caller actually passed is checked. An unset flag carries its
+// declared default, and a context that never declared it reads as zero.
+func validateScoreTimeout(ctx *cli.Context) error {
+	if !lineageIsSet(ctx, flagScoreTimeout) {
+		return nil
+	}
+
+	if seconds := lineageInt(ctx, flagScoreTimeout); seconds < 1 || seconds > cloud.MaxScoreTimeoutSeconds {
+		return fmt.Errorf("%w: --%s must be between 1 and %d seconds",
+			cloud.ErrInvalidArgument, flagScoreTimeout, cloud.MaxScoreTimeoutSeconds)
+	}
+
+	return nil
 }
 
 // requestedOS reports the operating system as a capability question. A value
@@ -112,6 +203,19 @@ func refuseUnsupportedFlags(ctx *cli.Context, provider cloud.Provider) error {
 
 	if lineageBool(ctx, flagWithScore) && !capabilities.Has(cloud.CapabilityPlacementScore) {
 		return refusedFlag(flagWithScore, id, placementScoreReason(id))
+	}
+
+	// --min-score is an integer floor, and only one of the placement kinds is
+	// an integer scale. Refused rather than mapped: reading 8 as an
+	// obtainability of 0.8 would be this tool inventing a correspondence
+	// between two vendors' measurements, which is the whole thing the kind
+	// vocabulary exists to prevent. --with-score still answers there; only the
+	// filter has no meaning.
+	if lineageIsSet(ctx, flagMinScore) &&
+		capabilities.Has(cloud.CapabilityPlacementScore) && !capabilities.SupportsScoreFloor() {
+		return refusedFlag(flagMinScore, id, fmt.Sprintf(
+			"%s publishes %s, and an integer 1-%d floor states no reviewed mapping onto it",
+			id, capabilities.PlacementKind, cloud.MaxPlacementScore))
 	}
 
 	// --offline and --refresh describe what to do with a live feed. A cloud

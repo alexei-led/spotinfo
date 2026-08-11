@@ -78,6 +78,7 @@ func awsCapabilities() cloud.Capabilities {
 	return cloud.Capabilities{
 		OperatingSystems: []cloud.OperatingSystem{cloud.OSLinux, cloud.OSWindows},
 		Architectures:    []cloud.Architecture{cloud.ArchitectureX8664, cloud.ArchitectureARM64},
+		PlacementKind:    cloud.PlacementKindPlacementScore,
 		SpotPrice:        true,
 		MachineSpec:      true,
 		Risk:             true,
@@ -228,6 +229,14 @@ type testCandidate struct { //nolint:govet // fixture readability beats field pa
 	RegionScore    *int
 	ZoneScores     map[string]int
 	ScoreFetchedAt *time.Time
+	// RegionObtainability is the other placement kind: a probability in
+	// 0.0-1.0, published under its own field so a consumer can tell which
+	// measurement it was handed.
+	RegionObtainability *float64
+	// PlacementStatus is set only for the case a lookup came back empty. A row
+	// carrying a figure is available by construction, and one nobody asked
+	// about carries the zero value.
+	PlacementStatus cloud.PlacementStatus
 }
 
 func (c testCandidate) build() cloud.Candidate {
@@ -250,8 +259,9 @@ func (c testCandidate) build() cloud.Candidate {
 			MemoryGiB:    c.MemoryGiB,
 			VCPU:         c.VCPU,
 		},
-		Risk:       c.risk(),
-		Placements: c.placements(),
+		Risk:            c.risk(),
+		Placements:      c.placements(),
+		PlacementStatus: c.PlacementStatus,
 	}
 	if c.Price > 0 {
 		amount, err := cloud.MoneyFromFloat(c.Price)
@@ -294,11 +304,15 @@ func (c testCandidate) risk() cloud.RiskObservation {
 }
 
 func (c testCandidate) placements() []cloud.PlacementObservation {
+	// Every score a stub publishes names its kind: the neutral DTO publishes
+	// nothing for an observation whose kind it cannot read, because the number
+	// would be on a scale nothing can name.
 	placements := make([]cloud.PlacementObservation, 0, len(c.ZoneScores)+1)
 	if c.RegionScore != nil {
 		placements = append(placements, cloud.PlacementObservation{
 			FetchedAt: c.ScoreFetchedAt,
 			Location:  cloud.Location{Region: cloud.Region(c.Region)},
+			Kind:      cloud.PlacementKindPlacementScore,
 			Score:     *c.RegionScore,
 		})
 	}
@@ -306,7 +320,16 @@ func (c testCandidate) placements() []cloud.PlacementObservation {
 		placements = append(placements, cloud.PlacementObservation{
 			FetchedAt: c.ScoreFetchedAt,
 			Location:  cloud.Location{Region: cloud.Region(c.Region), Zone: zone},
+			Kind:      cloud.PlacementKindPlacementScore,
 			Score:     c.ZoneScores[zone],
+		})
+	}
+	if c.RegionObtainability != nil {
+		placements = append(placements, cloud.PlacementObservation{
+			FetchedAt:     c.ScoreFetchedAt,
+			Obtainability: c.RegionObtainability,
+			Location:      cloud.Location{Region: cloud.Region(c.Region)},
+			Kind:          cloud.PlacementKindObtainability,
 		})
 	}
 	if len(placements) == 0 {

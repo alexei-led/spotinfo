@@ -9,7 +9,6 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/urfave/cli/v2"
 
@@ -57,7 +56,7 @@ func listCommand(action cli.ActionFunc) *cli.Command {
 		Usage:        "list every matching machine with its price and risk",
 		Action:       action,
 		OnUsageError: renameHint,
-		Flags: []cli.Flag{
+		Flags: append([]cli.Flag{
 			cloudFlag(),
 			&cli.StringFlag{
 				Name:  flagMachine,
@@ -111,24 +110,6 @@ func listCommand(action cli.ActionFunc) *cli.Command {
 				DefaultText: orderAsc,
 			},
 			&cli.BoolFlag{
-				Name:  flagWithScore,
-				Usage: "include spot placement scores (experimental)",
-			},
-			&cli.IntFlag{
-				Name:        flagMinScore,
-				Usage:       "filter: minimum spot placement score (1-10, needs --" + flagWithScore + ")",
-				DefaultText: unfilteredDefaultText,
-			},
-			&cli.BoolFlag{
-				Name:  flagAZ,
-				Usage: "request zone-level scores instead of region-level (use with --" + flagWithScore + ")",
-			},
-			&cli.IntFlag{
-				Name:  flagScoreTimeout,
-				Usage: "timeout for score enrichment in seconds",
-				Value: cloud.DefaultScoreTimeoutSeconds,
-			},
-			&cli.BoolFlag{
 				Name:  flagOffline,
 				Usage: offlineFlagUsage,
 			},
@@ -137,7 +118,7 @@ func listCommand(action cli.ActionFunc) *cli.Command {
 				Usage: refreshFlagUsage,
 			},
 			gcpProjectFlag(),
-		},
+		}, scoreFlags()...),
 	}
 }
 
@@ -391,18 +372,7 @@ func listQuery(ctx *cli.Context, sortKey cloud.SortKey) (*cloud.Query, error) {
 		query.MaxPrice = &ceiling
 	}
 
-	// Scores are fetched under --with-score; --min-score filters whatever scores
-	// are present. validateListFlags already rejects the second without the first.
-	if ctx.Bool(flagWithScore) {
-		query.Placement.Enabled = true
-		query.Placement.SingleZone = ctx.Bool(flagAZ)
-		if timeout := ctx.Int(flagScoreTimeout); timeout > 0 {
-			query.Placement.Timeout = time.Duration(timeout) * time.Second
-		}
-	}
-	if minScore := ctx.Int(flagMinScore); minScore > 0 {
-		query.Placement.MinScore = minScore
-	}
+	query.Placement = placementRequest(ctx)
 
 	return query, nil
 }
@@ -444,14 +414,9 @@ func validateListFlags(ctx *cli.Context) error {
 			cloud.ErrInvalidArgument, flagMinMemoryGiB)
 	}
 
-	// The companion check first: --min-score, --az and --score-timeout all
-	// describe a lookup only --with-score makes, and a range check on a filter
-	// that cannot run is the wrong thing to report.
-	if err := requireWithScore(ctx); err != nil {
-		return err
-	}
-
-	return validateScoreFloor(ctx.Int(flagMinScore))
+	// The score rules are shared with `recommend`: one set of flags, one set of
+	// bounds, whichever command they were given on.
+	return validateScoreFlags(ctx)
 }
 
 // validateOrder accepts an unset order as ascending: --sort leaves the order to

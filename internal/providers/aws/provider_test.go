@@ -175,7 +175,8 @@ func TestQueryMapsAdviceToNeutralCandidate(t *testing.T) {
 
 	require.Len(t, candidate.Placements, 3)
 	assert.Equal(t, cloud.PlacementObservation{
-		FetchedAt: &fetchedAt, Location: cloud.Location{Region: "us-east-1"}, Score: 7,
+		FetchedAt: &fetchedAt, Location: cloud.Location{Region: "us-east-1"},
+		Kind: cloud.PlacementKindPlacementScore, Score: 7,
 	}, candidate.Placements[0])
 	assert.Equal(t, "us-east-1a", candidate.Placements[1].Location.Zone)
 	assert.Equal(t, 4, candidate.Placements[1].Score)
@@ -610,4 +611,79 @@ func TestResourceFiltersReachTheLegacyClientOnlyWhenRequested(t *testing.T) {
 	assert.Equal(t, int64(0), unfiltered["cpu"])
 	assert.Equal(t, int64(0), unfiltered["memory"])
 	assert.InDelta(t, 0.0, unfiltered["maxPrice"], 1e-9)
+}
+
+// The AWS placement scores are unchanged by the kind vocabulary: the same
+// integers reach the same locations, and each observation now names the
+// measurement it is. This is the "still produces the same score" guard — a
+// mapping that started publishing a probability, or that dropped the kind and
+// so became unpublishable, fails here.
+func TestPlacementScoresKeepTheirValuesAndNameTheirKind(t *testing.T) {
+	t.Parallel()
+
+	fetchedAt := time.Date(2026, time.August, 7, 12, 0, 0, 0, time.UTC)
+	regionScore := 7
+	client := &stubClient{advices: []spot.Advice{{
+		Region: "us-east-1", Instance: "m6i.large", Price: 0.0416,
+		Info:           spot.TypeInfo{Cores: 2, RAM: 8},
+		RegionScore:    &regionScore,
+		ZoneScores:     map[string]int{"us-east-1b": 9, "us-east-1a": 4},
+		ScoreFetchedAt: &fetchedAt,
+	}}}
+
+	query := linuxQuery()
+	query.Placement = cloud.PlacementRequest{Enabled: true}
+
+	result, err := testProvider(t, client).Query(t.Context(), query)
+	require.NoError(t, err)
+	require.Len(t, result.Candidates, 1)
+
+	assert.Equal(t, []cloud.PlacementObservation{
+		{
+			FetchedAt: &fetchedAt, Location: cloud.Location{Region: "us-east-1"},
+			Kind: cloud.PlacementKindPlacementScore, Score: 7,
+		},
+		{
+			FetchedAt: &fetchedAt, Location: cloud.Location{Region: "us-east-1", Zone: "us-east-1a"},
+			Kind: cloud.PlacementKindPlacementScore, Score: 4,
+		},
+		{
+			FetchedAt: &fetchedAt, Location: cloud.Location{Region: "us-east-1", Zone: "us-east-1b"},
+			Kind: cloud.PlacementKindPlacementScore, Score: 9,
+		},
+	}, result.Candidates[0].Placements)
+	assert.Equal(t, cloud.PlacementStatusAvailable, result.Candidates[0].PlacementStatus)
+
+	// And the declaration a surface reads before acquisition to decide whether
+	// an integer --min-score floor means anything here.
+	assert.Equal(t, cloud.PlacementKindPlacementScore, Capabilities().PlacementKind)
+	assert.True(t, Capabilities().SupportsScoreFloor())
+}
+
+// A lookup that came back empty is a different answer from one nobody asked
+// for, and the status is what carries the difference: Placements is a slice, so
+// both would otherwise be the empty slice. Scores are fetched through an EC2
+// API that fails soft, so the empty case is the one a caller without
+// credentials actually sees.
+func TestAnEmptyScoreLookupIsReportedAsUnavailable(t *testing.T) {
+	t.Parallel()
+
+	client := &stubClient{advices: []spot.Advice{{
+		Region: "us-east-1", Instance: "m6i.large", Price: 0.0416,
+		Info: spot.TypeInfo{Cores: 2, RAM: 8},
+	}}}
+
+	asked := linuxQuery()
+	asked.Placement = cloud.PlacementRequest{Enabled: true}
+
+	scored, err := testProvider(t, client).Query(t.Context(), asked)
+	require.NoError(t, err)
+	require.Len(t, scored.Candidates, 1)
+	assert.Empty(t, scored.Candidates[0].Placements)
+	assert.Equal(t, cloud.PlacementStatusUnavailable, scored.Candidates[0].PlacementStatus)
+
+	unscored, err := testProvider(t, client).Query(t.Context(), linuxQuery())
+	require.NoError(t, err)
+	require.Len(t, unscored.Candidates, 1)
+	assert.Equal(t, cloud.PlacementStatusNotRequested, unscored.Candidates[0].PlacementStatus)
 }

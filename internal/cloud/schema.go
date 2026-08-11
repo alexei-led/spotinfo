@@ -154,6 +154,43 @@ type RecommendationDTO struct { //nolint:govet // field order follows the publis
 	Rank int `json:"rank"`
 	CandidateDTO
 	RationaleCodes []string `json:"rationale_codes"`
+	PlacementDTO
+}
+
+// PlacementDTO publishes the capacity-placement figures a request asked for.
+// Both schemas carry it, so a placement answer reads the same whether `list`
+// or `recommend` produced it.
+//
+// The kinds are published under their own names and are never normalised onto
+// one scale. An AWS placement score is an integer 1-10 whose bucket boundaries
+// AWS does not state; a GCP obtainability is a probability in 0.0-1.0. One
+// shared number would invent precision no vendor published, so a consumer reads
+// whichever pair of fields is present and knows which measurement it has.
+//
+// PlacementStatus is published only when it is not already evident from the
+// values, which leaves three wire states, one per domain status:
+//
+//   - a figure is present ....................... PlacementStatusAvailable
+//   - "placement_status": "unavailable" ......... asked for, and none produced
+//   - neither ................................... PlacementStatusNotRequested
+//
+// It does not restate Capabilities.PlacementScore. A cloud that publishes no
+// placement figure at all is refused before acquisition, so the reachable
+// meaning of "unavailable" is a lookup that produced nothing for this
+// candidate: no credentials, a failed or timed-out call, or a region the
+// provider scored none of.
+//
+// The first three fields are the AWS shape, and their names and order are the
+// published spotinfo.list/v1 contract. A new kind is added after them.
+// ScoreFetchedAt is shared: it is when the placement lookup ran, whichever kind
+// it returned.
+type PlacementDTO struct { //nolint:govet // field order follows the published schema
+	RegionScore         *int               `json:"region_score,omitempty"`
+	ZoneScores          map[string]int     `json:"zone_scores,omitempty"`
+	ScoreFetchedAt      *string            `json:"score_fetched_at,omitempty"`
+	RegionObtainability *float64           `json:"region_obtainability,omitempty"`
+	ZoneObtainability   map[string]float64 `json:"zone_obtainability,omitempty"`
+	PlacementStatus     PlacementStatus    `json:"placement_status,omitempty"`
 }
 
 // ListCandidateDTO is one browsable machine: the shared candidate block plus
@@ -168,11 +205,9 @@ type RecommendationDTO struct { //nolint:govet // field order follows the publis
 // matching flag asked for them.
 type ListCandidateDTO struct { //nolint:govet // field order follows the published schema
 	CandidateDTO
-	LivePrice      bool              `json:"live_price"`
-	ZonePrices     map[string]string `json:"zone_prices,omitempty"`
-	RegionScore    *int              `json:"region_score,omitempty"`
-	ZoneScores     map[string]int    `json:"zone_scores,omitempty"`
-	ScoreFetchedAt *string           `json:"score_fetched_at,omitempty"`
+	LivePrice  bool              `json:"live_price"`
+	ZonePrices map[string]string `json:"zone_prices,omitempty"`
+	PlacementDTO
 }
 
 // ListRequestDTO echoes the browse request an answer was built from. Every
@@ -370,18 +405,40 @@ func listCandidateDTO(shared *CandidateDTO, candidate *Candidate) ListCandidateD
 		}
 	}
 
+	published.PlacementDTO = placementDTO(candidate)
+
+	return published
+}
+
+// placementDTO publishes the placement figures a candidate carries, each under
+// the name of its own kind.
+//
+// An observation whose kind this package does not recognise publishes nothing.
+// Reading it as a score would put a figure from an unknown scale in the field a
+// consumer reads as an AWS 1-10, which is the one mistake the kind exists to
+// prevent — so a provider that adds a measurement has to name it here before it
+// can be published at all.
+func placementDTO(candidate *Candidate) PlacementDTO {
+	published := PlacementDTO{PlacementStatus: candidate.PlacementStatus}
+
+	// Available is evident from the values themselves; publishing it as well
+	// would say the same thing twice. See the type comment for the mapping.
+	if published.PlacementStatus == PlacementStatusAvailable {
+		published.PlacementStatus = PlacementStatusNotRequested
+	}
+
 	for i := range candidate.Placements {
 		placement := &candidate.Placements[i]
-		if placement.Location.Zone == "" {
-			score := placement.Score
-			published.RegionScore = &score
+		zone := placement.Location.Zone
 
-			continue
+		switch placement.Kind {
+		case PlacementKindPlacementScore:
+			publishScore(&published, zone, placement.Score, len(candidate.Placements))
+		case PlacementKindObtainability:
+			if placement.Obtainability != nil {
+				publishObtainability(&published, zone, *placement.Obtainability, len(candidate.Placements))
+			}
 		}
-		if published.ZoneScores == nil {
-			published.ZoneScores = make(map[string]int, len(candidate.Placements))
-		}
-		published.ZoneScores[placement.Location.Zone] = placement.Score
 	}
 
 	// Every observation on one candidate comes from the same call, so the first
@@ -395,6 +452,30 @@ func listCandidateDTO(shared *CandidateDTO, candidate *Candidate) ListCandidateD
 	}
 
 	return published
+}
+
+func publishScore(published *PlacementDTO, zone string, score, capacity int) {
+	if zone == "" {
+		published.RegionScore = &score
+
+		return
+	}
+	if published.ZoneScores == nil {
+		published.ZoneScores = make(map[string]int, capacity)
+	}
+	published.ZoneScores[zone] = score
+}
+
+func publishObtainability(published *PlacementDTO, zone string, value float64, capacity int) {
+	if zone == "" {
+		published.RegionObtainability = &value
+
+		return
+	}
+	if published.ZoneObtainability == nil {
+		published.ZoneObtainability = make(map[string]float64, capacity)
+	}
+	published.ZoneObtainability[zone] = value
 }
 
 // newRecommendReport assembles the published payload from a validated request,
@@ -477,6 +558,7 @@ func recommendationDTO(candidate *scored, workload Workload, rank int) (Recommen
 		Rank:           rank,
 		CandidateDTO:   shared,
 		RationaleCodes: candidate.rationaleCodes(workload),
+		PlacementDTO:   placementDTO(candidate.candidate),
 	}, nil
 }
 

@@ -117,13 +117,16 @@ func Capabilities() cloud.Capabilities {
 	return cloud.Capabilities{
 		OperatingSystems: []cloud.OperatingSystem{cloud.OSLinux, cloud.OSWindows},
 		Architectures:    []cloud.Architecture{cloud.ArchitectureX8664, cloud.ArchitectureARM64},
-		SpotPrice:        true,
-		OnDemandPrice:    false,
-		MachineSpec:      true,
-		Risk:             true,
-		PlacementScore:   true,
-		ZoneDetail:       true,
-		LiveEnrichment:   true,
+		// GetSpotPlacementScores returns an integer 1-10, which is what makes an
+		// integer --min-score floor meaningful on this cloud and nowhere else.
+		PlacementKind:  cloud.PlacementKindPlacementScore,
+		SpotPrice:      true,
+		OnDemandPrice:  false,
+		MachineSpec:    true,
+		Risk:           true,
+		PlacementScore: true,
+		ZoneDetail:     true,
+		LiveEnrichment: true,
 	}
 }
 
@@ -171,6 +174,7 @@ func (p *Provider) Query(ctx context.Context, query *cloud.Query) (cloud.Result,
 		if !accepts(&candidate, query) {
 			continue
 		}
+		candidate.PlacementStatus = placementStatus(query.Placement.Enabled, candidate.Placements)
 		candidates = append(candidates, candidate)
 	}
 
@@ -365,6 +369,26 @@ func zonePriceObservations(advice *spot.Advice) ([]cloud.PriceObservation, error
 	return observations, nil
 }
 
+// placementStatus records whether the answer's silence about capacity means
+// "nobody asked" or "asked, and nothing came back for this candidate".
+//
+// Scores are fetched per region through an EC2 API, and scoreOutcome makes a
+// partial failure non-fatal: with --region all, one region that scores nothing
+// must not discard the other thirty-three. So a candidate really can come back
+// from a requested lookup with no figure — its region failed, or AWS scored
+// none of that instance type — and that is a different answer from a candidate
+// nobody asked about. An empty slice alone cannot express both.
+func placementStatus(requested bool, observations []cloud.PlacementObservation) cloud.PlacementStatus {
+	switch {
+	case len(observations) > 0:
+		return cloud.PlacementStatusAvailable
+	case requested:
+		return cloud.PlacementStatusUnavailable
+	default:
+		return cloud.PlacementStatusNotRequested
+	}
+}
+
 // placements maps regional and zonal placement scores, keeping the location
 // each score was measured for. Zones are ordered so results are deterministic.
 func placements(advice *spot.Advice) []cloud.PlacementObservation {
@@ -373,6 +397,7 @@ func placements(advice *spot.Advice) []cloud.PlacementObservation {
 		observations = append(observations, cloud.PlacementObservation{
 			FetchedAt: advice.ScoreFetchedAt,
 			Location:  cloud.Location{Region: cloud.Region(advice.Region)},
+			Kind:      cloud.PlacementKindPlacementScore,
 			Score:     *advice.RegionScore,
 		})
 	}
@@ -380,6 +405,7 @@ func placements(advice *spot.Advice) []cloud.PlacementObservation {
 		observations = append(observations, cloud.PlacementObservation{
 			FetchedAt: advice.ScoreFetchedAt,
 			Location:  cloud.Location{Region: cloud.Region(advice.Region), Zone: zone},
+			Kind:      cloud.PlacementKindPlacementScore,
 			Score:     advice.ZoneScores[zone],
 		})
 	}

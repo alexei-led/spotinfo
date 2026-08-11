@@ -94,7 +94,13 @@
             "type": "object",
             "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 10}
           },
-          "score_fetched_at": {"type": "string", "format": "date-time"}
+          "score_fetched_at": {"type": "string", "format": "date-time"},
+          "region_obtainability": {"type": "number", "minimum": 0, "maximum": 1},
+          "zone_obtainability": {
+            "type": "object",
+            "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}
+          },
+          "placement_status": {"type": "string", "enum": ["unavailable"]}
         }
       }
     },
