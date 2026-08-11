@@ -65,14 +65,13 @@ func diagnoseNoCandidates(ctx context.Context, provider Provider, request *Recom
 	// The mode is a proxy for cost, and on every provider it is an imperfect
 	// one. The gap is accepted deliberately, and stated here rather than denied.
 	//
-	// On GCP and Azure the proxy is inverted. Both cache the live document the
-	// moment they have read it, so a fetch that *succeeded* makes the widened
-	// query a cache hit — and that is exactly the state this guard declines to
-	// diagnose. A fetch that failed in transport cached nothing, so the widened
-	// query sweeps again: a GCP recommendation against an unreachable catalogue
-	// spends a second livePriceBudget, and Azure re-reads the one region that
-	// failed. A failure *after* the read — an undecodable document, a region the
-	// catalogue does not price — was cached and is free.
+	// On GCP and Azure the cost turns on *where* the live path gave up, which
+	// the mode cannot see. Both cache the document before reading it, so a
+	// failure after the read — a region the catalogue does not price — leaves a
+	// cache hit and the widened query is free. A failure in transport cached
+	// nothing, so the widened query sweeps again: a GCP recommendation against
+	// an unreachable catalogue spends a second livePriceBudget, and Azure
+	// re-reads the one region that failed.
 	//
 	// On AWS `embedded-snapshot` means the *feeds* fell back, which is what
 	// --offline guarantees (it also clears the live-price provider) but is

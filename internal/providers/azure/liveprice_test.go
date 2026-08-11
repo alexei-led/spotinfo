@@ -272,7 +272,6 @@ func TestTheDiagnosisRereadsOnlyTheRegionThatFailed(t *testing.T) {
 	stub.status = http.StatusInternalServerError
 
 	live := liveProvider(t, stub, cloud.FetchPolicy{})
-	failed := stub.requests.Load()
 
 	const impossibleVCPU = 1 << 20
 
@@ -289,7 +288,7 @@ func TestTheDiagnosisRereadsOnlyTheRegionThatFailed(t *testing.T) {
 	require.ErrorIs(t, err, cloud.ErrNoCandidates)
 	assert.Contains(t, err.Error(), "no machine has at least",
 		"the second query is what turns the plain message into a named cause")
-	assert.Equal(t, int32(2), stub.requests.Load()-failed,
+	assert.Equal(t, int32(2), stub.requests.Load(),
 		"the failed answer and the diagnosis, and nothing beyond either")
 }
 

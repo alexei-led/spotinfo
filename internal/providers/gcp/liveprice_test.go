@@ -362,32 +362,54 @@ func TestARejectedKeyFallsBackToTheCommittedSnapshot(t *testing.T) {
 }
 
 // An empty answer is diagnosed by re-querying the provider without the filters,
-// and a fetch that failed in transport cached nothing — so that second query
-// sweeps the catalogue again. This is the ceiling the guard in
-// internal/cloud/diagnose.go accepts and documents: one extra sweep, never
-// more, and only on a run that has already failed.
-//
-// It is asserted rather than reasoned about because the comment it pins is a
-// claim about cost, and the previous wording of that claim was wrong.
+// and what that second query costs turns on *where* the live path gave up. The
+// document is cached before it is read, so a failure after the read is free and
+// only a failure in transport sweeps again. That is the ceiling the guard in
+// internal/cloud/diagnose.go accepts, and it is measured here rather than
+// reasoned about: the claim it replaces was a cost claim nothing verified.
 func TestTheDiagnosisCostsOneExtraSweepAtMost(t *testing.T) {
-	stub := newBillingStub(t, nil)
-	live := livePriceProvider(t, stub, "not-a-valid-key", cloud.FetchPolicy{})
+	reference, err := New()
+	require.NoError(t, err)
 
-	_, err := cloud.Recommend(t.Context(), live, &cloud.RecommendRequest{
-		Cloud:        cloud.ProviderGCP,
-		Architecture: cloud.ArchitectureX8664,
-		OS:           cloud.OSLinux,
-		Workload:     cloud.WorkloadCost,
-		Regions:      []cloud.Region{widenedRegion},
-		MinVCPU:      1,
-		MinMemoryGiB: 1,
-		Top:          1,
-	})
-	require.ErrorIs(t, err, cloud.ErrNoCandidates)
-	assert.Contains(t, err.Error(), "publishes no machines in "+string(widenedRegion),
-		"the second query is what turns the plain message into a named cause")
-	assert.Equal(t, int64(2), stub.requests.Load(),
-		"the failed answer and the diagnosis, and nothing beyond either")
+	for _, testCase := range []struct {
+		name     string
+		key      string
+		pages    [][]byte
+		requests int64
+	}{
+		{
+			name: "a rejected key cached nothing, so the diagnosis sweeps again",
+			key:  "not-a-valid-key", requests: 2,
+		},
+		{
+			name:  "an unpriceable region was cached, so the diagnosis re-reads it for free",
+			key:   stubKey,
+			pages: [][]byte{skuPage(t, seriesOfCatalogue(t, reference), []cloud.Region{reference.catalog.Region}, "")},
+			// The sweep succeeded and only composing europe-west1 failed.
+			requests: 1,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			stub := newBillingStub(t, testCase.pages)
+			live := livePriceProvider(t, stub, testCase.key, cloud.FetchPolicy{})
+
+			_, err := cloud.Recommend(t.Context(), live, &cloud.RecommendRequest{
+				Cloud:        cloud.ProviderGCP,
+				Architecture: cloud.ArchitectureX8664,
+				OS:           cloud.OSLinux,
+				Workload:     cloud.WorkloadCost,
+				Regions:      []cloud.Region{widenedRegion},
+				MinVCPU:      1,
+				MinMemoryGiB: 1,
+				Top:          1,
+			})
+			require.ErrorIs(t, err, cloud.ErrNoCandidates)
+			assert.Contains(t, err.Error(), "publishes no machines in "+string(widenedRegion),
+				"the second query is what turns the plain message into a named cause")
+			assert.Equal(t, testCase.requests, stub.requests.Load(),
+				"the failed answer and the diagnosis, and nothing beyond either")
+		})
+	}
 }
 
 // A region the catalogue prices nothing for is answered from the snapshot,
