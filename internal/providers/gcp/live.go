@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"sync"
 	"time"
 
@@ -71,6 +72,33 @@ const (
 
 // ErrNoProject reports live risk requested without a project to bill it to.
 var ErrNoProject = errors.New("gcp live risk needs a project id")
+
+// ErrBadProject reports a project identifier that cannot be one.
+var ErrBadProject = errors.New("not a Google Cloud project id")
+
+// projectIDPattern is Google's documented project-id grammar: 6 to 30
+// characters, starting with a lowercase letter, lowercase letters, digits and
+// hyphens thereafter, not ending in a hyphen.
+//
+// It is enforced because the identifier is interpolated into the request path.
+// An unchecked value containing "/" silently redirects the call to a different
+// compute endpoint — still on the contracted host, so no credential escapes,
+// but the answer is then a 404 for a resource nobody asked about rather than
+// the preemption history. Refusing it names the mistake instead.
+var projectIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`)
+
+// ValidateProjectID rejects an identifier that is not a project id. The rule is
+// quoted in the error so a caller can see what was expected.
+func ValidateProjectID(project string) error {
+	if project == "" {
+		return ErrNoProject
+	}
+	if !projectIDPattern.MatchString(project) {
+		return fmt.Errorf("%w: %q must match %s", ErrBadProject, project, projectIDPattern)
+	}
+
+	return nil
+}
 
 // LiveRiskConfig is what the CLI resolves and hands to the provider.
 type LiveRiskConfig struct {
@@ -170,8 +198,8 @@ func (p *Provider) EnrichRisk(ctx context.Context, candidates []*cloud.Candidate
 	if p.liveRisk == nil {
 		return nil
 	}
-	if p.liveRisk.ProjectID == "" {
-		return ErrNoProject
+	if err := ValidateProjectID(p.liveRisk.ProjectID); err != nil {
+		return err
 	}
 
 	client, err := p.liveRisk.transport()
@@ -194,6 +222,8 @@ func (p *Provider) EnrichRisk(ctx context.Context, candidates []*cloud.Candidate
 		waitGroup sync.WaitGroup
 		mutex     sync.Mutex
 		slots     = make(chan struct{}, maxConcurrentLookups)
+		failed    int
+		firstErr  error
 	)
 
 	for k, group := range pending {
@@ -206,16 +236,22 @@ func (p *Provider) EnrichRisk(ctx context.Context, candidates []*cloud.Candidate
 			defer func() { <-slots }()
 
 			risk, lookupErr := p.preemptionRisk(ctx, client, k.machine, k.region)
+
+			mutex.Lock()
+			defer mutex.Unlock()
+
 			if lookupErr != nil {
 				slog.Debug("no preemption history",
 					slog.String("machine", k.machine), slog.String("region", k.region),
 					slog.Any("error", lookupErr))
 
+				failed++
+				if firstErr == nil {
+					firstErr = lookupErr
+				}
+
 				return
 			}
-
-			mutex.Lock()
-			defer mutex.Unlock()
 
 			for _, candidate := range group {
 				candidate.Risk = risk
@@ -224,6 +260,16 @@ func (p *Provider) EnrichRisk(ctx context.Context, candidates []*cloud.Candidate
 	}
 
 	waitGroup.Wait()
+
+	// One machine with no history is routine and stays at Debug. Every lookup
+	// failing is not: it is one cause for the whole page — the Compute API
+	// disabled, an unknown project, no compute.advice permission — and it is
+	// indistinguishable from success in the rendered answer, because both leave
+	// every candidate at RiskStatusUnavailable. The caller asked for this data
+	// explicitly and paid an API call per pair for it, so the batch reports.
+	if failed > 0 && failed == len(pending) {
+		return fmt.Errorf("all %d preemption lookups failed, first: %w", failed, firstErr)
+	}
 
 	return nil
 }

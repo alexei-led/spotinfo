@@ -12,6 +12,7 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"spotinfo/internal/cloud"
+	gcpprovider "spotinfo/internal/providers/gcp"
 	"spotinfo/internal/spot"
 )
 
@@ -260,4 +261,40 @@ func TestLiveRiskNeedsAnExplicitProject(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, cloud.ErrInvalidArgument)
 	assert.Contains(t, err.Error(), "--"+flagGCPProject)
+}
+
+// The project identifier is interpolated into the advice API path, so a value
+// that is not one redirects the call. Refused before any request is made,
+// because the alternative is a 404 reported as "no preemption history" for every
+// machine on the page.
+func TestLiveRiskRefusesAProjectThatIsNotOne(t *testing.T) {
+	t.Setenv(gcpProjectEnv, "")
+
+	for name, project := range map[string]string{
+		"path traversal": "p/regions/us-central1/instances",
+		"query string":   "proj?alt=media",
+		"space":          "my project",
+		"uppercase":      "MyProject",
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := runRecommend(t, shippedRegistry(t), recommendCommandName,
+				"--cloud", "gcp", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
+				"--"+flagLiveRisk, "--"+flagGCPProject, project)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, cloud.ErrInvalidArgument)
+			assert.ErrorIs(t, err, gcpprovider.ErrBadProject)
+		})
+	}
+}
+
+// The same rule has to apply to the environment variable, which is the path a
+// shell that already exports GOOGLE_CLOUD_PROJECT takes.
+func TestLiveRiskRefusesABadProjectFromTheEnvironment(t *testing.T) {
+	t.Setenv(gcpProjectEnv, "p/regions/us-central1/instances")
+
+	err := runRecommend(t, shippedRegistry(t), recommendCommandName,
+		"--cloud", "gcp", "--architecture", "x86_64", "--cpu", "2", "--memory", "8",
+		"--"+flagLiveRisk)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gcpprovider.ErrBadProject)
 }

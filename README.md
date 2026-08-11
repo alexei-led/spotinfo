@@ -73,6 +73,10 @@ RANK  CLOUD  REGION       MACHINE         ... USD/HOUR  SAVINGS  RISK
   application-default login`, a service account, or the GCE metadata server).
   Without them the command still answers, reporting `unavailable`.
 - **One call per recommendation**, on the ranked page only — never the catalogue.
+- **A page that fetched nothing says so.** If every lookup fails — no credentials, the
+  Compute API disabled, no `compute.advice` permission — one warning goes to stderr
+  naming the first cause, because `unavailable` alone cannot be told apart from "Google
+  has no history for these machines". `docs/troubleshooting.md` tables the cases.
 - **`kind` is `preemption_rate`, not `interruption_bucket`.** Google defines it as
   (preempted Spots) / (Spots that stopped running); AWS publishes the fraction of
   *running* instances interrupted. The numbers are not comparable, so

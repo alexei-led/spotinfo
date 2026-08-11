@@ -225,6 +225,11 @@ func TestEnrichRiskAttachesThePreemptionRateItFetched(t *testing.T) {
 // A lookup that fails leaves the candidate with the risk it already had. The
 // recommendation is complete without it, and reporting "unavailable" is honest
 // where inventing a rate would not be.
+//
+// Every lookup failing still reports, because that is one cause for the whole
+// page — a disabled API, an unknown project, a missing permission — and it is
+// indistinguishable in the rendered answer from a page Google has no history
+// for. The caller logs it and keeps the recommendations it already ranked.
 func TestEnrichRiskLeavesRiskUnavailableWhenALookupFails(t *testing.T) {
 	t.Parallel()
 
@@ -241,10 +246,77 @@ func TestEnrichRiskLeavesRiskUnavailableWhenALookupFails(t *testing.T) {
 			probe := newLiveRiskServer(t, respond)
 			candidate := liveCandidate("n2-standard-4", "us-central1")
 
-			require.NoError(t, liveProvider(t, probe).EnrichRisk(t.Context(), []*cloud.Candidate{candidate}),
-				"a failed lookup must not fail the recommendation")
+			err := liveProvider(t, probe).EnrichRisk(t.Context(), []*cloud.Candidate{candidate})
+
+			require.Error(t, err, "a page where every lookup failed must say so, not read as no history")
+			assert.Contains(t, err.Error(), "all 1 preemption lookups failed")
 			assert.Equal(t, cloud.RiskStatusUnavailable, candidate.Risk.Status)
 			assert.Nil(t, candidate.Risk.MaxPercent, "an unfetched rate must never read as a measured one")
+		})
+	}
+}
+
+// The batch error must never reach the caller as a failed recommendation: the
+// answer is already ranked and complete, and risk is the optional extra.
+func TestEnrichRiskFailureDoesNotFailTheRecommendation(t *testing.T) {
+	t.Parallel()
+
+	probe := newLiveRiskServer(t, func(string) (int, string) {
+		return http.StatusForbidden, `{"error":{"code":403,"message":"compute.advice denied"}}`
+	})
+
+	provider := liveProvider(t, probe)
+	report, err := cloud.Recommend(t.Context(), provider, &cloud.RecommendRequest{
+		Cloud:        cloud.ProviderGCP,
+		Architecture: cloud.ArchitectureX8664,
+		OS:           cloud.OSLinux,
+		Workload:     cloud.WorkloadCost,
+		Regions:      []cloud.Region{cloud.RegionAll},
+		MinVCPU:      2,
+		MinMemoryGiB: 4,
+		Top:          2,
+		EnrichRisk:   true,
+	})
+
+	require.NoError(t, err, "a 403 on the risk extra must not lose the ranked page")
+	require.NotEmpty(t, report.Recommendations)
+
+	for _, recommendation := range report.Recommendations {
+		assert.Equal(t, cloud.RiskStatusUnavailable, recommendation.Risk.Status)
+	}
+}
+
+func TestValidateProjectID(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		project string
+		wantErr error
+	}{
+		"typical":         {project: "example-project", wantErr: nil},
+		"minimum length":  {project: "abc123", wantErr: nil},
+		"empty":           {project: "", wantErr: ErrNoProject},
+		"path traversal":  {project: "p/regions/us-central1/instances", wantErr: ErrBadProject},
+		"query injection": {project: "proj?alt=media", wantErr: ErrBadProject},
+		"space":           {project: "my project", wantErr: ErrBadProject},
+		"leading digit":   {project: "1project", wantErr: ErrBadProject},
+		"trailing hyphen": {project: "project-", wantErr: ErrBadProject},
+		"uppercase":       {project: "MyProject", wantErr: ErrBadProject},
+		"too short":       {project: "abcde", wantErr: ErrBadProject},
+		"too long":        {project: strings.Repeat("a", 31), wantErr: ErrBadProject},
+		"percent encoded": {project: "proj%2f..", wantErr: ErrBadProject},
+		"absolute url":    {project: "https://evil.example", wantErr: ErrBadProject},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := ValidateProjectID(tc.project)
+			if tc.wantErr == nil {
+				require.NoError(t, err)
+
+				return
+			}
+			require.ErrorIs(t, err, tc.wantErr)
 		})
 	}
 }

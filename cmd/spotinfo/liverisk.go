@@ -96,6 +96,13 @@ func withLiveRisk(ctx *cli.Context, provider cloud.Provider, request *cloud.Reco
 		return nil, fmt.Errorf("%w: --%s needs a project; pass --%s or set %s",
 			cloud.ErrInvalidArgument, flagLiveRisk, flagGCPProject, gcpProjectEnv)
 	}
+	// Refused here rather than at the request, because the identifier is
+	// interpolated into the API path: an unchecked value redirects the call to a
+	// different compute endpoint, whose 404 is then reported as "no preemption
+	// history" for every machine on the page.
+	if err := gcpprovider.ValidateProjectID(project); err != nil {
+		return nil, fmt.Errorf("%w: %w", cloud.ErrInvalidArgument, err)
+	}
 
 	request.EnrichRisk = true
 
