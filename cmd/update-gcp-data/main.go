@@ -237,7 +237,47 @@ func fetchSources(ctx context.Context, contract *snapshot.SourceContract) ([]pag
 		})
 	}
 
+	if err := confirmWindowStable(ctx, client, pages); err != nil {
+		return nil, err
+	}
+
 	return pages, nil
+}
+
+// confirmWindowStable re-reads the first downloaded page after the last one and
+// refuses when it has moved.
+//
+// fetch guards each page against a rollover landing inside that page's own two
+// reads. By construction it cannot see one that lands *between* two pages, and
+// that is the case which actually corrupts a snapshot: a Spot price from one
+// generation divided by an On-Demand price from the next publishes a savings
+// figure spanning two days, and every downstream gate — manifest hash, parser
+// contract, coverage floor, per-machine spec cross-check — passes it.
+//
+// One re-read closes the whole gap. The first page's hash is known from before
+// any other page was fetched, so comparing it after the last one brackets every
+// interval between them at the cost of a single extra download per run.
+func confirmWindowStable(ctx context.Context, client *http.Client, pages []page) error {
+	// The architecture reference is recorded as provenance without being
+	// downloaded, so it carries no body to compare.
+	first := slices.IndexFunc(pages, func(p page) bool { return p.body != nil })
+	if first < 0 {
+		return nil
+	}
+
+	body, err := fetchWithRetry(ctx, client, pages[first].url)
+	if err != nil {
+		return err
+	}
+
+	if after := snapshot.SHA256Hex(body); after != pages[first].sha256 {
+		return fmt.Errorf("%w: %s hashed %s before the other pages were read and %s after. "+
+			"The source rolled over mid-run; a snapshot taken now can pair prices from two "+
+			"generations. Retry when the hashes agree",
+			ErrSourceUnstable, pages[first].url, pages[first].sha256, after)
+	}
+
+	return nil
 }
 
 // ErrSourceUnstable reports a page that served different bytes to two requests

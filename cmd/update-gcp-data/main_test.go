@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -249,6 +250,138 @@ func TestFetchAcceptsAPageThatIsStableAcrossTwoReads(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "n2-standard-4 $0.111472", string(body))
 	assert.Equal(t, int32(2), reads.Load())
+}
+
+// The per-page double read cannot see a rollover that lands between two pages,
+// which is the one that mixes a Spot price from one generation with an On-Demand
+// price from the next. The bracket re-read is what covers that gap.
+func TestWindowBracketRefusesAPageThatMovedWhileTheOthersWereRead(t *testing.T) {
+	t.Parallel()
+
+	var moved atomic.Bool
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if moved.Load() {
+			_, _ = io.WriteString(w, "n2-standard-4 $0.111472")
+
+			return
+		}
+		_, _ = io.WriteString(w, "n2-standard-4 $0.101336")
+	}))
+	defer source.Close()
+
+	client := contractedHostClient()
+
+	body, err := fetch(t.Context(), client, source.URL)
+	require.NoError(t, err, "the page is stable across its own two reads")
+
+	pages := []page{
+		// The architecture reference is provenance only; it must not be re-read.
+		{url: "https://cloud.google.com/compute/docs/cpu-platforms"},
+		{url: source.URL, sha256: snapshot.SHA256Hex(body), body: body},
+	}
+
+	// The CDN flips after every page has been read once — invisible to fetch.
+	moved.Store(true)
+
+	err = confirmWindowStable(t.Context(), client, pages)
+	require.ErrorIs(t, err, ErrSourceUnstable)
+	assert.Contains(t, err.Error(), "rolled over mid-run")
+}
+
+func TestWindowBracketAcceptsAStableWindow(t *testing.T) {
+	t.Parallel()
+
+	var reads atomic.Int32
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reads.Add(1)
+		_, _ = io.WriteString(w, "n2-standard-4 $0.111472")
+	}))
+	defer source.Close()
+
+	body := []byte("n2-standard-4 $0.111472")
+	pages := []page{{url: source.URL, sha256: snapshot.SHA256Hex(body), body: body}}
+
+	require.NoError(t, confirmWindowStable(t.Context(), contractedHostClient(), pages))
+	assert.Equal(t, int32(1), reads.Load(), "the bracket costs exactly one extra read per run")
+}
+
+// The bracket protects a refresh only if the acquisition path actually calls it,
+// so this drives fetchSources rather than confirmWindowStable. Every page is
+// stable across its own two reads and the source flips only after the last one —
+// the case no per-page double read can see. Deleting the call site fails here.
+func TestFetchSourcesBracketsTheWholeReadWindow(t *testing.T) {
+	t.Parallel()
+
+	var reads atomic.Int32
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		generation := "A"
+		// Downloaded pages cost two reads each; the flip lands after all of them
+		// and before the bracket re-read, so every per-page pair still agrees.
+		if reads.Add(1) > 2*gcpDownloadedPages {
+			generation = "B"
+		}
+		_, _ = io.WriteString(w, generation+r.URL.Path)
+	}))
+	defer source.Close()
+
+	contract := contractServedBy(t, source.URL)
+
+	_, err := fetchSources(t.Context(), contract)
+	require.ErrorIs(t, err, ErrSourceUnstable)
+	assert.Contains(t, err.Error(), "rolled over mid-run")
+	assert.Equal(t, int32(2*gcpDownloadedPages+1), reads.Load(),
+		"two reads per page, then one bracket re-read of the first")
+}
+
+// gcpDownloadedPages is how many contracted sources are actually fetched: every
+// source but the architecture reference, which is provenance only.
+const gcpDownloadedPages = 4
+
+// contractServedBy mirrors the committed contract's source list onto a test
+// server: the same number of sources, the same data kinds, one distinct path
+// each.
+//
+// Built as a struct rather than parsed, because ParseSourceContract requires
+// absolute https URLs and httptest serves plain http. That validation is not
+// what this test is about — fetchSources reads only Sources — and the page count
+// is still taken from the committed contract, so a source added there fails the
+// assertion below instead of silently weakening the test.
+func contractServedBy(t *testing.T, base string) *snapshot.SourceContract {
+	t.Helper()
+
+	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "providers", "gcp", "data", contractFile))
+	require.NoError(t, err)
+
+	committed, err := snapshot.ParseSourceContract(raw)
+	require.NoError(t, err)
+
+	sources := make([]snapshot.ContractSource, 0, len(committed.Sources))
+	downloaded := 0
+
+	for i := range committed.Sources {
+		source := committed.Sources[i]
+		source.URL = fmt.Sprintf("%s/page-%d", base, i)
+		sources = append(sources, source)
+
+		if !slices.Contains(source.DataKinds, snapshot.DataKindArchitecture) {
+			downloaded++
+		}
+	}
+
+	require.Equal(t, gcpDownloadedPages, downloaded,
+		"the read count asserted above is derived from this; update both together")
+
+	return &snapshot.SourceContract{Sources: sources}
+}
+
+// A contract whose only source is the undownloaded architecture reference has no
+// window to bracket, and must not be turned into a fetch of an empty URL.
+func TestWindowBracketSkipsPagesThatWereNeverDownloaded(t *testing.T) {
+	t.Parallel()
+
+	pages := []page{{url: "https://cloud.google.com/compute/docs/cpu-platforms"}}
+
+	require.NoError(t, confirmWindowStable(t.Context(), contractedHostClient(), pages))
 }
 
 // The weekly workflow branches on this code to report a wait rather than a
