@@ -1098,6 +1098,35 @@ which is the feed dependence this task exists to remove, and it costs
 `TestTheQueryProviderDeclaresNoArchitecture` for no schema gain. The recorded fixture states
 `x86_64` explicitly, so nothing about the empty shape is frozen into a golden.
 
+⚠️ → **superseded, and fixed: that note answered the schema question and left a surface
+divergence behind it.** Whether `""` can leave the enum is a different question from whether both
+surfaces publish the same value, and only the first was examined. Measured on the built binary:
+`spotinfo list --cloud aws --machine '^m5.large$' --offline --output json` and the
+`list_spot_machines` tool call with the same arguments returned the identical 29-row set with an
+identical `request` echo, and `architecture` was `""` on every CLI row and `x86_64` on every MCP
+row — because `list` loaded the lookup only when `--architecture` asked for it while the registry
+the MCP surface resolves through always loads it. That is acceptance criterion 2, and
+`internal/mcp/tools.go:121` claims the opposite in prose.
+
+The fix is one constructor, `newAWSProvider(client)` in `cmd/spotinfo/main.go`, used by both the
+registry factory and `list`. The schema decision above still stands — `""` stays in the enum,
+because an instance type the snapshot does not classify is still unclassified — and the request
+echo still reports an unset filter as `""`, which is the one place the empty string is right.
+The capability gate for AWS `list` moved onto the built provider's own declaration with it: the
+static package declaration let a request that filters by architecture past a broken snapshot, to
+fail inside `Query` with `INVALID_ARGUMENT` after acquisition where MCP refused it with
+`UNSUPPORTED_CAPABILITY` before it. `TestTheQueryProviderDeclaresNoArchitecture` was the
+assertion that encoded the defect; it is replaced by its inverse rather than deleted.
+
+- [x] one AWS constructor shared by the registry factory and `list`
+- [x] `TestListPublishesTheAWSArchitectureWithoutBeingAsked` — in-gate, verified failing on the
+      pre-fix tree
+- [x] `TestE2ETheCLIAndMCPAnswerTheSameListQuestionIdentically` — the `list` sibling of the
+      `recommend` parity test the finding named as missing, also verified failing pre-fix. It
+      aligns rows by `(region, machine)`: without `--sort` the order is the provider's, and AWS
+      advice comes out of a map, so the two surfaces enumerate the same rows in different orders.
+      That is not a contract either surface publishes; the row set and every field on it is.
+
 ➕ **`internal/mcp/testdata/` came out of the regeneration byte-identical** — same three md5s,
 empty `git diff`. That is the check on Tasks 5 and 6, which claim those goldens were hand-edited
 rather than regenerated: had either edit been wrong, the one permitted `UPDATE_GOLDEN=1` run

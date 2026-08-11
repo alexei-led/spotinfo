@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -203,6 +204,39 @@ func TestListFiltersAWSByArchitecture(t *testing.T) {
 	candidates := listedCandidates(t, output.Bytes())
 	require.Len(t, candidates, 1, "only the Graviton machine is arm64")
 	assert.Equal(t, cloud.MachineID("m6g.large"), candidates[0].Machine)
+}
+
+// Every AWS row carries the architecture the snapshot classifies it as, whether
+// or not --architecture was given.
+//
+// It used not to. `list` loaded the architecture lookup only when the flag asked
+// for one, while the MCP tool resolves through the registry, which always loads
+// it — so the same list question published `"architecture": ""` on every AWS row
+// from the CLI and `"x86_64"` over MCP. The request echo is the one place the
+// empty string is correct, and it stays empty: it reports that no architecture
+// filter was applied.
+//
+// This test cannot see the MCP surface; the E2E parity test does that. What it
+// pins is the half that broke, on the surface that broke it.
+func TestListPublishesTheAWSArchitectureWithoutBeingAsked(t *testing.T) {
+	client := newQueryClient(t)
+	client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return([]spot.Advice{{
+		Region: "us-east-1", Instance: "m5.large", InstanceType: "m5.large",
+		Range: spot.Range{Label: "<5%", Min: 0, Max: 5}, Savings: 59,
+		Info: spot.TypeInfo{Cores: 2, RAM: 8}, Price: 0.0399,
+	}}, nil).Once()
+
+	output, err := runListWith(t, awsOnlyRegistry(), client,
+		"--machine", "^m5.large$", "--region", "us-east-1", "--output", outputJSON)
+	require.NoError(t, err)
+
+	var report cloud.ListReport
+	require.NoError(t, json.Unmarshal([]byte(output), &report))
+
+	assert.Empty(t, report.Request.Architecture, "an unset --architecture echoes as no filter")
+	require.Len(t, report.Candidates, 1)
+	assert.Equal(t, cloud.ArchitectureX8664, report.Candidates[0].Architecture,
+		"the candidate must carry the architecture the snapshot publishes for it")
 }
 
 // The unified defaults are the same value on both surfaces, so they are read

@@ -59,23 +59,21 @@ type Provider struct {
 //
 // The architecture lookup and the sidecar provenance are optional, and each
 // degrades exactly the one thing it feeds rather than disabling the provider.
-// Requiring them meant the v1 surfaces — the root query command and the two
-// golden-pinned MCP tools, none of which publish an architecture or a source
-// list — failed with SNAPSHOT_UNAVAILABLE because a file they never read could
-// not be parsed.
+// Requiring them meant a surface that publishes neither an architecture nor a
+// source list failed with SNAPSHOT_UNAVAILABLE because a file it never read
+// could not be parsed.
 //
 // Nothing is guessed when either is missing, which is the promise that matters:
 // without the lookup the provider stops declaring CapabilityMachineArchitecture,
 // so an architecture-filtering request is refused with UNSUPPORTED_CAPABILITY
-// instead of being answered from instance names; without provenance the v2
+// instead of being answered from instance names; without provenance the ranked
 // report is refused by the recommender, whose contract requires at least one
 // source, rather than published with an invented one.
 //
-// A nil lookup is not reported here. Only the caller knows whether it failed to
-// load one or deliberately passed none — the query command renders no
-// architecture and asks for none — so the caller that tried and failed logs it,
-// and this constructor stays silent rather than warning on every invocation
-// about a capability nobody asked for.
+// A nil lookup is not reported here. In this binary it arrives only from a
+// caller that failed to load the snapshot — cmd/spotinfo builds every AWS
+// provider in one place — and that caller logs the failure with the error that
+// caused it, which is more than this function knows.
 func New(client savingsClient, architectures architectureLookup) (*Provider, error) {
 	if client == nil {
 		return nil, errors.New("aws provider requires a spot client")

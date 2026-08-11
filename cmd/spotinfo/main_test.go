@@ -41,7 +41,7 @@ func newQueryClient(t *testing.T) *mockspotClient {
 func candidatesFrom(t *testing.T, advices []spot.Advice) []cloud.Candidate {
 	t.Helper()
 
-	provider, err := awsQueryProvider(&fixedSpotClient{advices: advices}, false)
+	provider, err := newAWSProvider(&fixedSpotClient{advices: advices})
 	require.NoError(t, err)
 
 	result, err := provider.Query(context.Background(), &cloud.Query{OS: cloud.OSLinux})
@@ -56,7 +56,7 @@ func candidatesFrom(t *testing.T, advices []spot.Advice) []cloud.Candidate {
 func listJSONFrom(t *testing.T, advices []spot.Advice) []byte {
 	t.Helper()
 
-	provider, err := awsQueryProvider(&fixedSpotClient{advices: advices}, false)
+	provider, err := newAWSProvider(&fixedSpotClient{advices: advices})
 	require.NoError(t, err)
 
 	query := &cloud.Query{OS: cloud.OSLinux}

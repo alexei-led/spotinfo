@@ -491,10 +491,11 @@ type listReport struct {
 	SchemaVersion string `json:"schema_version"`
 	Status        string `json:"status"`
 	Request       struct {
-		Cloud   string   `json:"cloud"`
-		Regions []string `json:"regions"`
-		Machine string   `json:"machine"`
-		OS      string   `json:"os"`
+		Cloud        string   `json:"cloud"`
+		Regions      []string `json:"regions"`
+		Machine      string   `json:"machine"`
+		Architecture string   `json:"architecture"`
+		OS           string   `json:"os"`
 	} `json:"request"`
 	DataSource dataSource     `json:"data_source"`
 	Candidates []e2eCandidate `json:"candidates"`
@@ -687,6 +688,105 @@ func TestE2ETheCLIAndMCPAnswerTheSameQuestionIdentically(t *testing.T) {
 	assertEqual(t, first.Region, second.Region, "the first result must be the same region")
 	assertEqual(t, first.Cloud, second.Cloud, "the first result must be on the same cloud")
 	assertEqual(t, first.SpotUSDPerHour, second.SpotUSDPerHour, "the first result must carry the same price")
+}
+
+// The browse half of the same rule, and it used to be broken. `spotinfo list`
+// read the AWS architecture snapshot only when --architecture asked for one,
+// while list_spot_machines resolves through the registry, which always loads it.
+// The same question therefore returned the same 29 rows with `"architecture":
+// ""` from the CLI and `"x86_64"` over MCP — one question, two answers, which is
+// exactly what the neutral seam exists to prevent.
+//
+// The row set is compared in full rather than by its first entry: the defect was
+// on every row, and a check of one would have missed a divergence further down.
+func TestE2ETheCLIAndMCPAnswerTheSameListQuestionIdentically(t *testing.T) {
+	t.Parallel()
+
+	got := runSpotinfo(t, nil, "list", "--cloud", "aws",
+		"--machine", "^m5\\.large$", "--offline", "--output", "json")
+	requireZeroExit(t, got)
+
+	var fromCLI listReport
+
+	requireJSON(t, got.stdout, &fromCLI)
+
+	fromMCP := callListOverMCP(t, `{"cloud":"aws","machine":"^m5\\.large$","offline":true}`)
+
+	// The resolved request, echoed. Neither surface may resolve a default the
+	// other does not.
+	assertEqual(t, fromCLI.SchemaVersion, fromMCP.SchemaVersion, "schema_version")
+	assertEqual(t, fromCLI.Request.Cloud, fromMCP.Request.Cloud, "request.cloud")
+	assertEqual(t, fromCLI.Request.Machine, fromMCP.Request.Machine, "request.machine")
+	assertEqual(t, fromCLI.Request.OS, fromMCP.Request.OS, "request.os")
+	assertSliceEqual(t, fromCLI.Request.Regions, fromMCP.Request.Regions, "request.regions")
+	// The one place an empty architecture is the right answer: it reports that
+	// no architecture filter was applied. It must stay empty on both surfaces.
+	assertEqual(t, fromCLI.Request.Architecture, "", "request.architecture echoes no filter")
+	assertEqual(t, fromCLI.Request.Architecture, fromMCP.Request.Architecture, "request.architecture")
+
+	// Provenance too: a snapshot answer on one surface and a live one on the
+	// other would be the same rows established two different ways.
+	assertEqual(t, fromCLI.DataSource.Provider, fromMCP.DataSource.Provider, "data_source.provider")
+	assertEqual(t, fromCLI.DataSource.Mode, modeEmbedded, "data_source.mode under --offline")
+	assertEqual(t, fromCLI.DataSource.Mode, fromMCP.DataSource.Mode, "data_source.mode")
+
+	requireNotEmpty(t, fromCLI.Candidates, "the CLI returned no candidate")
+	requireNotEmpty(t, fromMCP.Candidates, "MCP returned no candidate")
+	assertLen(t, fromMCP.Candidates, len(fromCLI.Candidates), "candidates over MCP")
+
+	// Aligned by (region, machine) rather than by position. With no --sort the
+	// order is the provider's, and AWS advice comes out of a map, so the two
+	// runs enumerate the same rows in different orders. That is not a contract
+	// either surface publishes; the row set and every field on it is.
+	overMCP := make(map[string]e2eCandidate, len(fromMCP.Candidates))
+	for _, machine := range fromMCP.Candidates {
+		overMCP[machine.Region+"/"+machine.Machine] = machine
+	}
+
+	for _, overCLI := range fromCLI.Candidates {
+		where := overCLI.Region + "/" + overCLI.Machine
+
+		fromTool, answered := overMCP[where]
+		if !answered {
+			t.Errorf("%s: the CLI returned it and MCP did not", where)
+
+			continue
+		}
+
+		assertEqual(t, overCLI.SpotUSDPerHour, fromTool.SpotUSDPerHour, where+".spot_usd_per_hour")
+		assertEqual(t, overCLI.VCPU, fromTool.VCPU, where+".vcpu")
+		assertEqual(t, overCLI.MemoryGiB, fromTool.MemoryGiB, where+".memory_gib")
+		assertEqual(t, overCLI.Risk.Status, fromTool.Risk.Status, where+".risk.status")
+		assertEqual(t, overCLI.Architecture, fromTool.Architecture, where+".architecture")
+		// Asserted against the value, not only against each other: two surfaces
+		// that both published "" would agree and both be wrong.
+		assertEqual(t, overCLI.Architecture, "x86_64", where+".architecture is the published one")
+	}
+}
+
+// callListOverMCP asks the browse tool one question and returns the document it
+// answered with.
+func callListOverMCP(t *testing.T, arguments string) listReport {
+	t.Helper()
+
+	responses := mcpSession(t, fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_spot_machines","arguments":%s}}`,
+		arguments))
+
+	call, ok := responses[2]
+	if !ok {
+		t.Fatalf("the server returned no response for the tool call")
+	}
+
+	if len(call.Result.Content) == 0 {
+		t.Fatalf("the tool returned no content")
+	}
+
+	var report listReport
+
+	requireJSON(t, call.Result.Content[0].Text, &report)
+
+	return report
 }
 
 // A cloud with no redistributable risk data must report the absence, never a

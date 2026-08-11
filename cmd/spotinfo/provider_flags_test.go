@@ -128,12 +128,14 @@ func (r failingRegistry) Get(id cloud.ProviderID) (cloud.Provider, error) {
 
 var errRegistryConsulted = errors.New("registry consulted")
 
-// `spotinfo list --cloud aws` builds its provider from the acquisition client,
-// so it must not ask the registry for one. Resolving through the registry made
-// the command inherit inputs it never reads — the architecture snapshot and the
-// sidecar manifests — and an unparsable one failed
-// `spotinfo list --machine t3.micro` with SNAPSHOT_UNAVAILABLE while the advisor
-// and price data were intact.
+// `spotinfo list --cloud aws` builds its provider from the acquisition client
+// it already holds, so it must not ask the registry for one: a registry-level
+// AWS failure would otherwise fail a query the advisor and price feeds can
+// answer, with SNAPSHOT_UNAVAILABLE.
+//
+// It is still the same provider the registry would have handed back — both go
+// through newAWSProvider — so this test pins where the provider comes from, not
+// what it can answer.
 func TestListDoesNotBuildTheAWSProviderThroughTheRegistry(t *testing.T) {
 	var captured *cli.Context
 	app := newSpotinfoApp(
@@ -156,20 +158,18 @@ func TestListDoesNotBuildTheAWSProviderThroughTheRegistry(t *testing.T) {
 	assert.Equal(t, cloud.ProviderAWS, provider.ID())
 }
 
-// errArchitectureSnapshotUnreadable is what the registry's AWS factory reports
-// when the file the query command never reads cannot be parsed.
+// errArchitectureSnapshotUnreadable is a registry-level AWS failure.
 var errArchitectureSnapshotUnreadable = errors.New("read embedded architecture snapshot: unexpected EOF")
 
-// The query command renders no architecture and publishes no provenance, so
-// neither may gate it. Resolving its provider through the registry made it
-// inherit both, and an unparsable architecture manifest failed
-// `spotinfo --machine t3.micro` with SNAPSHOT_UNAVAILABLE while the advisor and
-// price data it does read were intact.
+// A registry-level AWS failure must not fail `spotinfo list`: the command
+// builds its AWS provider from the acquisition client it already holds, so a
+// factory that cannot serve one is never consulted. A genuinely broken advisor
+// or price snapshot still fails where the legacy client verifies its own
+// payloads, at acquisition.
 //
-// The registry here fails exactly that way for AWS. The command must still
-// answer, because it builds its provider from the acquisition client instead —
-// and a genuinely broken advisor or price snapshot still fails where the legacy
-// client verifies its own payloads, at acquisition.
+// The architecture snapshot itself no longer decides anything here — the shared
+// constructor degrades to no lookup when it is unreadable, so the provider
+// stops declaring architectures rather than refusing to exist.
 func TestQueryAnswersWhenTheArchitectureSnapshotIsUnreadable(t *testing.T) {
 	registry := mustRegistry(providers.Registration{
 		ID:    cloud.ProviderAWS,
@@ -195,30 +195,24 @@ func TestQueryAnswersWhenTheArchitectureSnapshotIsUnreadable(t *testing.T) {
 	assert.Contains(t, output.String(), "t3.micro")
 }
 
-// The other half of the same rule: the provider the query command builds carries
-// no architecture lookup, so it declares no architecture rather than classifying
-// machines from their names. Nothing on this command filters by one.
-func TestTheQueryProviderDeclaresNoArchitecture(t *testing.T) {
+// The AWS provider reads the architecture snapshot unconditionally, whoever
+// builds it.
+//
+// This test used to assert the opposite — that the provider `spotinfo list`
+// builds declares no architecture — because the lookup was loaded only when
+// --architecture asked for it. That assertion was the defect: it made the same
+// list question publish an empty architecture on every AWS row from the CLI and
+// a real one over MCP, which resolves through the registry and always loaded the
+// lookup. One constructor now serves both, so neither can drift from the other.
+func TestTheAWSProviderAlwaysDeclaresItsArchitectures(t *testing.T) {
 	t.Parallel()
 
-	provider, err := awsQueryProvider(stubSavingsClient{}, false)
+	provider, err := newAWSProvider(stubSavingsClient{})
 	require.NoError(t, err)
-	assert.Nil(t, provider.Capabilities().Architectures)
+	assert.Contains(t, provider.Capabilities().Architectures, cloud.ArchitectureX8664)
+	assert.Contains(t, provider.Capabilities().Architectures, cloud.ArchitectureARM64)
 	assert.True(t, provider.Capabilities().Has(cloud.CapabilityRisk),
 		"everything the list command does render must still be declared")
-}
-
-// The other half of the same rule: --architecture is a declared list flag, so
-// asking for it must read the snapshot rather than refuse the request. Without
-// the lookup the provider declares no architecture and the request would be
-// rejected with UNSUPPORTED_CAPABILITY — which is the correct answer only when
-// nobody asked.
-func TestTheQueryProviderLoadsArchitecturesWhenTheFlagAsksForThem(t *testing.T) {
-	t.Parallel()
-
-	provider, err := awsQueryProvider(stubSavingsClient{}, true)
-	require.NoError(t, err)
-	assert.Contains(t, provider.Capabilities().Architectures, cloud.ArchitectureARM64)
 }
 
 // runList and runRecommend drive the production app assembly. The mock client

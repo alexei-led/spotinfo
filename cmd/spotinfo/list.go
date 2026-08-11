@@ -14,8 +14,6 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"spotinfo/internal/cloud"
-	awsprovider "spotinfo/internal/providers/aws"
-	"spotinfo/internal/spot"
 )
 
 // `spotinfo list` browses: it filters a cloud's catalogue and renders every
@@ -291,15 +289,20 @@ func listCapabilityRequest(ctx *cli.Context, sortKey cloud.SortKey) cloud.Capabi
 // resolveListProvider picks the provider that answers this request, after
 // proving it can answer it.
 //
-// AWS does not resolve through the registry, and that is deliberate. What AWS
-// can answer is a property of the feeds, so the package declaration answers the
-// gate and awsQueryProvider then builds the provider from the acquisition
-// client alone. Resolving through the registry made this command inherit every
-// input that factory reads, so an unreadable architecture manifest failed
-// `spotinfo list --machine t3.micro` with SNAPSHOT_UNAVAILABLE while the advisor
-// and price data it does read were intact. A genuinely broken advisor or price
-// snapshot still fails at acquisition, where the legacy client verifies its own
-// payloads against their manifests.
+// AWS does not resolve through the registry, and that is deliberate: this
+// command builds its AWS provider from the acquisition client it already holds,
+// so a registry-level failure cannot fail a query the AWS feeds can answer. It
+// is nonetheless the same provider either way — both paths go through
+// newAWSProvider — which is what makes one list question have one answer
+// whichever surface asked it. A genuinely broken advisor or price snapshot
+// still fails at acquisition, where the legacy client verifies its own payloads
+// against their manifests.
+//
+// The capability gate reads the built provider's own declaration on every
+// branch. Gating AWS on the package declaration instead let a request that
+// filters by architecture past a broken snapshot, to be refused later inside
+// Query with a different error than the MCP surface reports for the same
+// question — and after acquisition rather than before it.
 func resolveListProvider(ctx *cli.Context, registry providerRegistry,
 	client spotClient, request cloud.CapabilityRequest,
 ) (cloud.Provider, error) {
@@ -308,18 +311,11 @@ func resolveListProvider(ctx *cli.Context, registry providerRegistry,
 		return nil, err
 	}
 
-	if id == cloud.ProviderAWS {
-		if capErr := awsprovider.Capabilities().Require(request); capErr != nil {
-			return nil, fmt.Errorf("%s: %w", id, capErr)
-		}
-
-		return awsQueryProvider(client, request.Architecture != "")
-	}
-
-	provider, err := registry.Get(id)
+	provider, err := listProvider(id, registry, client)
 	if err != nil {
 		return nil, err
 	}
+
 	if capErr := provider.Capabilities().Require(request); capErr != nil {
 		return nil, fmt.Errorf("%s: %w", id, capErr)
 	}
@@ -327,16 +323,11 @@ func resolveListProvider(ctx *cli.Context, registry providerRegistry,
 	return provider, nil
 }
 
-// awsQueryProvider builds the neutral provider this command acquires through.
-//
-// The architecture snapshot is read only when --architecture asks for it. The
-// lookup is the one input this command can do without: without it the provider
-// declares no architecture, so a request that filters on one would be refused
-// rather than answered from an unclassified catalogue — and an unreadable
-// snapshot must not fail a query that never mentions an architecture.
-func awsQueryProvider(client spotClient, withArchitecture bool) (cloud.Provider, error) {
-	if !withArchitecture {
-		provider, err := awsprovider.New(client, nil)
+// listProvider builds the AWS provider from the acquisition client and resolves
+// every other cloud from the registry.
+func listProvider(id cloud.ProviderID, registry providerRegistry, client spotClient) (cloud.Provider, error) {
+	if id == cloud.ProviderAWS {
+		provider, err := newAWSProvider(client)
 		if err != nil {
 			return nil, fmt.Errorf("build aws provider: %w", err)
 		}
@@ -344,17 +335,7 @@ func awsQueryProvider(client spotClient, withArchitecture bool) (cloud.Provider,
 		return provider, nil
 	}
 
-	lookup, err := spot.LoadEmbeddedArchitectureLookup()
-	if err != nil {
-		return nil, fmt.Errorf("--%s needs the aws architecture snapshot: %w", flagArchitecture, err)
-	}
-
-	provider, err := awsprovider.New(client, lookup)
-	if err != nil {
-		return nil, fmt.Errorf("build aws provider: %w", err)
-	}
-
-	return provider, nil
+	return registry.Get(id)
 }
 
 // listQuery maps the command's flags onto the neutral query. Every filter is
