@@ -148,7 +148,9 @@ validate_spot_cost:
   image: ghcr.io/alexei-led/spotinfo:latest
   script:
     - |
-      CURRENT_PRICE=$(spotinfo --type "$INSTANCE_TYPE" --region "$AWS_REGION" --output number)
+      # --output number prints the savings percent, not a price. Read the price from JSON.
+      CURRENT_PRICE=$(spotinfo --type "^${INSTANCE_TYPE}$" --region "$AWS_REGION" \
+        --output json | jq -r '.[0].price')
       if (( $(echo "$CURRENT_PRICE > $MAX_SPOT_PRICE" | bc -l) )); then
         echo "Spot price $CURRENT_PRICE exceeds budget $MAX_SPOT_PRICE"
         exit 1

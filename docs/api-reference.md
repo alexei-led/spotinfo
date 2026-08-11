@@ -270,7 +270,7 @@ This tool searches the embedded AWS Spot Instance data and returns matching inst
         "data_freshness": {
           "type": "string",
           "description": "Freshness the source can honestly claim, derived from it rather than asserted",
-          "enum": ["embedded-snapshot", "live"]
+          "enum": ["embedded-snapshot", "live", "cached"]
         }
       },
       "required": [
@@ -730,7 +730,7 @@ The spotinfo MCP server uses embedded data included in the binary at build time:
 2. **Update Lag**: Data freshness depends on the weekly refresh workflow
 3. **GCP Regional Coverage**: Limited to `us-central1` — the only region with static pricing pages
 4. **GCP Risk Data**: Preemption history requires an authenticated beta API; it is not embedded
-5. **Azure Coverage**: 8 reviewed regions and 26 reviewed machine series, not the whole Azure catalogue
+5. **Azure Coverage**: 55 reviewed regions and 26 reviewed machine series, not the whole Azure catalogue
 6. **Azure Risk Data**: Eviction rates require a subscription (Resource Graph, Resource SKUs); they are not embedded
 
 ## Performance Characteristics

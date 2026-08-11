@@ -1,6 +1,6 @@
 # Claude Desktop Integration Guide
 
-This guide provides detailed instructions for integrating `spotinfo` with Claude Desktop using the Model Context Protocol (MCP). After setup, you'll be able to ask Claude natural language questions about AWS EC2 Spot Instances.
+This guide provides detailed instructions for integrating `spotinfo` with Claude Desktop using the Model Context Protocol (MCP). After setup, you can ask Claude questions about Spot machines on AWS, GCP and Azure.
 
 ## Prerequisites
 

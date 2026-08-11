@@ -314,11 +314,29 @@ graph TB
 
 ### Fallback Strategy
 
-1. **Primary**: Fetch fresh data from AWS feeds
-2. **Secondary**: Use embedded data if network unavailable
-3. **Live Pricing**: For instance types with $0 in the static feed, fetch current prices via EC2 `DescribeSpotPriceHistory` API (requires AWS credentials)
-4. **Recommendation architecture**: Use only the committed reviewed family snapshot; unknown families fail closed rather than being inferred from AWS naming.
-5. **Placement Scores**: No degradation — `--with-score` fails with an explicit error if AWS is unreachable. A synthesised score is indistinguishable from a real one, so none is produced.
+AWS feed resolution runs in this order. The first tier that answers wins:
+
+1. **Fresh cache**: a copy on disk that has not expired. The advisor document is held for 24
+   hours, prices for 1 hour, because the two feeds change at different rates.
+2. **Origin**: fetch from AWS. An expired cache entry revalidates with `If-None-Match` /
+   `If-Modified-Since` rather than downloading again; a `304` costs one round trip and no
+   payload, and the answer is still reported as `live`.
+3. **Expired cache**: AWS data that is merely old. It outranks the snapshot, which is AWS
+   data that is old *and* frozen at build time.
+4. **Committed snapshot**: the embedded copy. Always available.
+
+Every cache failure is non-fatal: a read-only filesystem costs time, not answers.
+`--offline` answers from tier 4 alone and makes no request. `--refresh` skips tiers 1 and 3.
+Because a cached answer is neither live nor embedded, it is reported as its own state:
+`cached`.
+
+Beyond the feeds:
+
+- **Live Pricing**: For instance types with $0 in the static feed, fetch current prices via EC2 `DescribeSpotPriceHistory` API (requires AWS credentials)
+- **Recommendation architecture**: Use only the committed reviewed family snapshot; unknown families fail closed rather than being inferred from AWS naming.
+- **Placement Scores**: No degradation — `--with-score` fails with an explicit error if AWS is unreachable. A synthesised score is indistinguishable from a real one, so none is produced.
+- **GCP and Azure**: no fallback exists, because no live path exists. Both answer from their
+  committed catalogue and make no request at run time.
 
 ## Data Processing Pipeline
 

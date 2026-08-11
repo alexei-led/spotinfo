@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `spotinfo` tool functions as a **Model Context Protocol (MCP) server**, enabling AI assistants like Claude to directly query AWS EC2 Spot Instance data. This provides a seamless way for AI agents to access real-time spot pricing and interruption data for infrastructure recommendations.
+The `spotinfo` tool functions as a **Model Context Protocol (MCP) server**, so an AI assistant can query Spot data directly. Three tools are served. `find_spot_instances` and `list_spot_regions` cover AWS. `recommend_spot_instances` ranks machines on AWS, GCP and Azure and returns a `spotinfo.recommend/v2` payload.
 
 ## What is MCP?
 
