@@ -1,3 +1,5 @@
 us-east-1/m6i.large: 72
 us-west-2/m5.xlarge: 65
 eu-west-1/t3.nano: 60
+us-east-1/m5.large: 68
+me-south-1/dl1.24xlarge: 41

@@ -141,8 +141,8 @@ func TestExpandAZSplitsZonalScoresAndPrices(t *testing.T) {
 
 	assert.Equal(t, "us-east-1a:6", getScoreDataValue(&rows[0]), "the regional score must not shadow the zone")
 	assert.Equal(t, "us-east-1b:4", getScoreDataValue(&rows[1]))
-	assert.InDelta(t, 0.09, candidatePrice(&rows[0]), 1e-9)
-	assert.InDelta(t, 0.11, candidatePrice(&rows[1]), 1e-9)
+	assert.Equal(t, "0.0900", candidatePriceCell(&rows[0]))
+	assert.Equal(t, "0.1100", candidatePriceCell(&rows[1]))
 
 	// A single zonal score is left alone, so the row keeps whatever the provider
 	// published for the region.

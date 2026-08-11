@@ -1,4 +1,0 @@
-Region,Instance Info,vCPU,Memory GiB,Savings over On-Demand,Frequency of interruption,USD/Hour,Price Source,Placement Score (Regional)
-us-east-1,m6i.large,2,8,72,<5%,0.0416,static,-
-us-west-2,m5.xlarge,4,16,65,5-10%,0.1234,live,8
-eu-west-1,t3.nano,2,0.5,60,10-15%,0.0016,static,-

@@ -180,6 +180,20 @@ func execListCmd(ctx *cli.Context, execCtx context.Context,
 		return err
 	}
 
+	return answerList(ctx, execCtx, provider, sortKey, output)
+}
+
+// answerList renders one browse answer from an already-resolved provider.
+//
+// It is split from resolution so the recorded output contract can be driven
+// from a fixed cloud.Provider stub. The AWS path builds its provider from the
+// acquisition client, and that provider reads its provenance from the committed
+// sidecar manifests — so a golden recorded through it would carry manifest
+// hashes and timestamps, and every weekly data-refresh pull request would
+// rewrite a contract nobody meant to change.
+func answerList(ctx *cli.Context, execCtx context.Context, provider cloud.Provider,
+	sortKey cloud.SortKey, output io.Writer,
+) error {
 	if invalid := validateListFlags(ctx); invalid != nil {
 		return invalid
 	}
@@ -193,22 +207,23 @@ func execListCmd(ctx *cli.Context, execCtx context.Context,
 	if err != nil {
 		return fmt.Errorf("failed to get spot savings: %w", err)
 	}
-	candidates := result.Candidates
-
-	// decide if region should be printed
-	regions := ctx.StringSlice(flagRegion)
-	printRegion := len(regions) > 1 || (len(regions) == 1 && regions[0] == allRegions)
 
 	// An empty match used to print a bare table frame and exit 0 with nothing
 	// on stderr, so a typo'd machine name was indistinguishable from a real
 	// "no such thing here". The formats keep rendering — an empty JSON array
 	// stays parseable — and the note goes to stderr so it never contaminates a
 	// piped result.
-	if len(candidates) == 0 {
+	if len(result.Candidates) == 0 {
 		log.Warn("no machines matched the query", slog.Any("filters", describeListFilters(ctx)))
 	}
 
-	return renderList(ctx.String(flagOutput), query, &result, printRegion, output)
+	return renderList(ctx.String(flagOutput), query, &result, showRegion(ctx.StringSlice(flagRegion)), output)
+}
+
+// showRegion reports whether the region column belongs on a rendered page: it
+// does when the answer can span more than one region.
+func showRegion(regions []string) bool {
+	return len(regions) > 1 || (len(regions) == 1 && regions[0] == allRegions)
 }
 
 // renderList writes the answer in the requested format.

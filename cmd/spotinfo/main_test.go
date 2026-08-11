@@ -263,7 +263,7 @@ func TestExecMainCmd_OutputFormats(t *testing.T) {
 			instanceType: "t2.micro",
 			region:       "us-east-1",
 			validateOutput: func(t *testing.T, output string) {
-				assert.Contains(t, output, "INSTANCE INFO", "Table should contain instance header")
+				assert.Contains(t, output, "MACHINE", "Table should contain instance header")
 				assert.Contains(t, output, "SAVINGS", "Table should contain savings header")
 				assert.Contains(t, output, "t2.micro", "Table should contain instance type")
 				assert.Contains(t, output, "50%", "Table should contain savings percentage")
@@ -285,9 +285,9 @@ func TestExecMainCmd_OutputFormats(t *testing.T) {
 			instanceType: "t2.micro",
 			region:       "us-east-1",
 			validateOutput: func(t *testing.T, output string) {
-				assert.Contains(t, output, "type=t2.micro", "Text format should contain type field")
+				assert.Contains(t, output, "machine=t2.micro", "Text format should contain the machine field")
 				assert.Contains(t, output, "saving=50%", "Text format should contain saving field")
-				assert.Contains(t, output, "interruption='<5%'", "Text format should contain interruption field")
+				assert.Contains(t, output, "risk='<5%'", "Text format should contain the risk field")
 				assert.Contains(t, output, "price=0.01", "Text format should contain price field")
 			},
 		},
@@ -297,7 +297,7 @@ func TestExecMainCmd_OutputFormats(t *testing.T) {
 			instanceType: "t2.micro",
 			region:       "us-east-1",
 			validateOutput: func(t *testing.T, output string) {
-				assert.Contains(t, output, "Instance Info,vCPU,Memory GiB", "Should contain CSV headers")
+				assert.Contains(t, output, "Machine,vCPU,Memory GiB", "Should contain CSV headers")
 				assert.Contains(t, output, "t2.micro,1,1,50,<5%", "Should contain CSV formatted data")
 			},
 		},
@@ -920,7 +920,7 @@ func TestPrintFunctions_EdgeCases(t *testing.T) {
 		printAdvicesTable([]cloud.Candidate{}, false, false, &output)
 		// Should produce at least headers
 		outputStr := output.String()
-		assert.Contains(t, outputStr, "INSTANCE INFO", "Should contain headers even with empty data")
+		assert.Contains(t, outputStr, "MACHINE", "Should contain headers even with empty data")
 	})
 
 	t.Run("printAdvicesNumber single vs multiple results", func(t *testing.T) {
@@ -955,7 +955,7 @@ func TestPrintFunctions_EdgeCases(t *testing.T) {
 		result := output.String()
 
 		assert.Contains(t, result, "region=us-west-2", "Should include region when flag is true")
-		assert.Contains(t, result, "type=t2.micro", "Should include instance type")
+		assert.Contains(t, result, "machine=t2.micro", "Should include the machine type")
 		assert.Contains(t, result, "saving=75%", "Should include savings")
 	})
 }
@@ -1085,9 +1085,34 @@ func TestFormatPrice(t *testing.T) {
 	}
 }
 
+// The CSV provenance column has three states, not two: a row the cloud did not
+// price has no source either, and labelling it "static" would name the feed a
+// price was read from for a price that was never read.
 func TestPriceSource(t *testing.T) {
-	assert.Equal(t, "static", priceSource(false))
-	assert.Equal(t, "live", priceSource(true))
+	priced := func(live bool) *cloud.Candidate {
+		return &cloud.Candidate{Spot: &cloud.PriceObservation{Live: live}}
+	}
+
+	assert.Equal(t, "static", priceSource(priced(false)))
+	assert.Equal(t, "live", priceSource(priced(true)))
+	assert.Equal(t, absentValue, priceSource(&cloud.Candidate{}))
+}
+
+// The four rendered formats must not print a price for a machine nobody priced.
+// The JSON form publishes null for those rows, and 0.0000 beside it would be
+// the same silent claim of a free machine in a different font.
+func TestAnUnpricedRowRendersItsAbsence(t *testing.T) {
+	unpriced := &cloud.Candidate{}
+
+	assert.Equal(t, absentValue, candidatePriceCell(unpriced))
+	assert.Equal(t, absentValue, csvPriceCell(unpriced))
+
+	amount, err := cloud.ParseMoney("0.041600000")
+	require.NoError(t, err)
+
+	priced := &cloud.Candidate{Spot: &cloud.PriceObservation{Amount: amount}}
+	assert.Equal(t, "0.0416", candidatePriceCell(priced))
+	assert.InDelta(t, 0.0416, csvPriceCell(priced), 1e-9)
 }
 
 func TestIsMCPMode(t *testing.T) {
@@ -1556,7 +1581,7 @@ func TestExecMainCmd_VisualFormattingBehavior(t *testing.T) {
 			region:       "us-east-1",
 			withScore:    false,
 			validateOutput: func(t *testing.T, output string) {
-				assert.Contains(t, output, "INSTANCE INFO", "Table should contain headers")
+				assert.Contains(t, output, "MACHINE", "Table should contain headers")
 				assert.Contains(t, output, "SAVINGS", "Table should contain savings header")
 				assert.Contains(t, output, "t2.micro", "Table should contain instance type")
 				assert.Contains(t, output, "50%", "Table should contain formatted savings percentage")
@@ -1569,7 +1594,7 @@ func TestExecMainCmd_VisualFormattingBehavior(t *testing.T) {
 			region:       "us-east-1",
 			withScore:    false,
 			validateOutput: func(t *testing.T, output string) {
-				assert.Contains(t, output, "Instance Info,vCPU,Memory GiB", "Should contain CSV headers")
+				assert.Contains(t, output, "Machine,vCPU,Memory GiB", "Should contain CSV headers")
 				assert.Contains(t, output, "t2.micro,1,1,50,<5%", "Should contain data-only CSV format")
 				// CSV should not contain visual formatting elements like emoji
 				assert.NotContains(t, output, "📊", "CSV should not contain emoji")
@@ -1583,7 +1608,7 @@ func TestExecMainCmd_VisualFormattingBehavior(t *testing.T) {
 			region:       "us-east-1",
 			withScore:    true,
 			validateOutput: func(t *testing.T, output string) {
-				assert.Contains(t, output, "INSTANCE INFO", "Table should contain headers")
+				assert.Contains(t, output, "MACHINE", "Table should contain headers")
 				assert.Contains(t, output, "SCORE", "Table should contain score header when scores enabled")
 				assert.Contains(t, output, "t2.micro", "Table should contain instance type")
 			},
@@ -1595,7 +1620,7 @@ func TestExecMainCmd_VisualFormattingBehavior(t *testing.T) {
 			region:       "us-east-1",
 			withScore:    true,
 			validateOutput: func(t *testing.T, output string) {
-				assert.Contains(t, output, "Instance Info,vCPU,Memory GiB", "Should contain CSV headers")
+				assert.Contains(t, output, "Machine,vCPU,Memory GiB", "Should contain CSV headers")
 				assert.Contains(t, output, "t2.micro,1,1,50,<5%", "Should contain data-only CSV format")
 				// Even with scores, CSV should remain data-only
 				assert.NotContains(t, output, "📊", "CSV should not contain emoji even with scores")

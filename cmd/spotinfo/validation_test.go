@@ -13,6 +13,7 @@ import (
 
 	"spotinfo/internal/cloud"
 	gcpprovider "spotinfo/internal/providers/gcp"
+	"spotinfo/internal/spot"
 )
 
 // Each case below used to be accepted and answered. A rejected flag is visible;
@@ -77,7 +78,11 @@ func TestListAcceptsEveryDocumentedSortAndFormat(t *testing.T) {
 		t.Helper()
 
 		client := newQueryClient(t)
-		client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return(contractAdvices(), nil).Once()
+		client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return([]spot.Advice{{
+			Region: "us-east-1", Instance: "m5.large", InstanceType: "m5.large",
+			Range: spot.Range{Label: "<5%", Min: 0, Max: 5}, Savings: 59,
+			Info: spot.TypeInfo{Cores: 2, RAM: 8}, Price: 0.0399,
+		}}, nil).Once()
 
 		var output bytes.Buffer
 		app := newSpotinfoApp(

@@ -421,7 +421,9 @@ already spelled by `internal/cloud/schema.go`.
 ➕ **Two column assertions are targets Tasks 4 and 7 must land, not descriptions of today.**
 The `recommend` table carries the same neutral columns on all three clouds, AWS included; and
 `list` names a `risk` column rather than AWS's "Frequency of interruption", because the column
-is a neutral risk observation once the command is cloud-neutral.
+is a neutral risk observation once the command is cloud-neutral. **Landed in Task 7**, which
+renamed the two columns and the two `text` keys and re-recorded the goldens; all 17 tests pass
+at that boundary.
 
 ➕ **Nothing in the suite asserts a rendering style, and three places had to be written that
 way.** The two renderers disagree today — the query command draws a box, the recommend table
@@ -749,7 +751,7 @@ branch that could be deleted.
 
 ➕ **Measured, on the committed Azure snapshot: 4 sources published, 77 omitted, provenance
 0.446 of the serialized payload.** Untrimmed it is over nine tenths. 0.446 is close to the half the
-test asserts, and deliberately so — the margin comes from trimming *both* scopes. Region-only or
+test asserts, and deliberately so — the margin comes from trimming _both_ scopes. Region-only or
 series-only trimming lands above half, which is the failure the plan's "Azure provenance
 composition" note warns about, so the ratio test is what would catch a half-done trim.
 
@@ -845,7 +847,7 @@ Azure `list` and `recommend` on every cloud.
 with no price before ranking. `TestRankerReappliesEveryConstraint` now asserts every published
 recommendation carries an amount, so the asymmetry between the two schemas is enforced rather
 than assumed. `savings_percent` stays published on an unpriced row: AWS publishes no on-demand
-price at all, so *every* AWS row already carries a discount without its denominator, and the
+price at all, so _every_ AWS row already carries a discount without its denominator, and the
 figure is the Spot Advisor's own — read from a different feed than the price. That is not the
 shape `internal/providers/azure/catalog.go` refuses, which is a savings figure Azure would have
 had to compute itself.
@@ -867,7 +869,9 @@ fix is a decision about `awsQueryProvider`, not about the schema: loading the lo
 when the flag is absent would populate the field and let `""` leave the enum, but it contradicts
 `TestTheQueryProviderDeclaresNoArchitecture` and the Task 4 rationale behind it. Left alone here
 rather than reversed inside a schema task. **Task 7 must decide before it records the `list`
-goldens.**
+goldens** — and did: the flag-gated load stands and the enum keeps `""`, because a lookup leaves
+an unclassified instance type empty as well, so the best-effort load would not have removed the
+value. The reasoning is under Task 7; nothing empty reached a golden.
 
 ⚠️ **`CLAUDE.md` still describes `spotinfo.recommend/v1` as a live contract** (lines 12,
 15, 68 and 129). Task 16 owns that file and already carries a checkbox for it; it was left alone
@@ -987,7 +991,7 @@ fails a test rather than shipping.
 ➕ **`sort`, `order` and `live_risk` are deliberately absent from `recommend_spot_machines`, and
 `cmd/spotinfo/mcp_vocabulary_test.go` records the difference as data.** A ranked page publishes
 each row's rank, so a client that wants another order sorts the array it was handed — on the CLI
-the flag reorders a *rendered* page, which MCP does not produce. `live_risk` has no task in this
+the flag reorders a _rendered_ page, which MCP does not produce. `live_risk` has no task in this
 plan that puts it on the MCP surface. The four score arguments carry the same "task 11" rows the
 CLI `vocabularyGaps` already has. As there, the test asserts the difference **equals** the table,
 so an argument that lands while its row stays fails as loudly as one that never lands.
@@ -1025,18 +1029,18 @@ alone rather than half-rewritten here.
 - Rename: `cmd/spotinfo/contract_v1_test.go` → `cmd/spotinfo/contract_test.go`
 - Modify: `cmd/spotinfo/contract_v2_test.go`
 
-- [ ] replace `contractAdvices()` with a fixed `cloud.Provider` stub, so both the `list` and
+- [x] replace `contractAdvices()` with a fixed `cloud.Provider` stub, so both the `list` and
       the `recommend` goldens stay independent of the embedded feeds and a weekly data-refresh
       PR cannot rewrite a contract
-- [ ] delete the `aws-root-v1.*` goldens and record `list` goldens for all five formats
-- [ ] record `recommend` v3 goldens from the same stub
-- [ ] point `contract_v2_test.go` at the renamed v3 schema and keep it reading `MaxTop` from
+- [x] delete the `aws-root-v1.*` goldens and record `list` goldens for all five formats
+- [x] record `recommend` v3 goldens from the same stub
+- [x] point `contract_v2_test.go` at the renamed v3 schema and keep it reading `MaxTop` from
       the schema, so raising one without the other still fails
-- [ ] run `UPDATE_GOLDEN=1 go test ./cmd/spotinfo/ ./internal/mcp/` once, then re-run without
+- [x] run `UPDATE_GOLDEN=1 go test ./cmd/spotinfo/ ./internal/mcp/` once, then re-run without
       it and confirm a pass
-- [ ] review the full golden diff and confirm every change is intended
-- [ ] confirm the Task 2 e2e suite now passes end to end
-- [ ] run `make test lint verify-data verify-architecture` — the gate is the full suite from
+- [x] review the full golden diff and confirm every change is intended
+- [x] confirm the Task 2 e2e suite now passes end to end
+- [x] run `make test lint verify-data verify-architecture` — the gate is the full suite from
       here on, with no skip
 
 ➕ **The fixed `cloud.Provider` stub must include a candidate with no price observation.** Every
@@ -1048,6 +1052,65 @@ formats print for them without anyone reviewing it. Decide what `table`, `text`,
 `number` show for an unpriced row **before** recording, not after: the JSON form now publishes
 `null`, and a renderer printing `0.0000` beside it would be the same silent zero in a different
 font.
+
+➕ **The unpriced row prints `-`, in all four rendered formats and in the CSV `Price Source`
+column with it.** `humanPrice` and `savingsDisplay` on the ranked page already print `-` for an
+absent amount, so this is an in-repo convention rather than a new glyph. `priceSource` took a
+`bool` and answered "static" for a row with no price at all, which names the feed a price was
+read from for a price that was never read; it takes the candidate now and has three states. The
+CSV price column is deliberately mixed — a float where there is a number, `-` where there is
+not — because a parser reading `0` there would read a price of zero. `number` is unchanged: it
+prints a savings percent, not a price, and the e2e suite requires it to stay a bare integer.
+
+➕ **The goldens are recorded from an AWS-id stub through `answerList`, and that split is what
+made a fixed provider reachable.** `resolveListProvider` sends AWS to `awsQueryProvider(client,
+…)` rather than to the registry — Task 3's guard, and `TestListDoesNotBuildTheAWSProviderThroughTheRegistry`
+pins it — so a registry stub cannot answer `spotinfo list --cloud aws`. Recording through the
+production adapter instead is what this checkbox forbids: `awsprovider.New` reads
+`spot.EmbeddedSourceRefs()`, so the JSON golden would carry the committed manifest hashes and
+`fetched_at`, and every weekly data-refresh PR would rewrite it. `execListCmd` is therefore split
+into "resolve the provider" and `answerList(ctx, execCtx, provider, sortKey, output)`, which the
+golden test drives with the stub after the production app has parsed the flags. The stub keeps
+the **aws** identifier: a GCP- or Azure-id fixture carrying zone prices and placement scores
+would contradict two refusals this plan documents as permanent.
+
+➕ **`list` renames two columns and two `text` keys, which is the Task 2 target the suite was
+still red on.** `Instance Info` → `Machine` and `Frequency of interruption` → `Risk` in `table`
+and `csv`; `type=` → `machine=` and `interruption=` → `risk=` in `text`. Both retired words name
+concepts this release retired — `--type` became `--machine`, and the column is a neutral risk
+observation on a cloud-neutral command.
+
+➕ **The recorded fixture is five candidates and covers every rendering branch**: a static price,
+a live one (the `*` suffix and the `live` price source), a regional placement score with no
+timestamp, a pair of zonal scores with their own zone prices and a fixed 2026-08-06 `FetchedAt`
+— fixed and in the past on purpose, because `addFreshnessInfo` marks anything older than thirty
+minutes and a fixture stamped near "now" would make the goldens flap — and the unpriced
+`me-south-1` row. The same stub answers `recommend`, where the ranked page drops two of the five:
+`t3.nano` for the memory floor and the unpriced row because `accepts` refuses a candidate with no
+price. That asymmetry is now visible in the recorded contract rather than only in prose.
+
+⚠️ → **decided: AWS `list` candidates keep `architecture: ""` when `--architecture` is unset, and
+`list-v1.schema.json` keeps admitting it.** Task 5 left this for Task 7. The alternative — loading
+the lookup best-effort in `awsQueryProvider` — does **not** let `""` leave the enum, because
+`provider.go:275` leaves an instance type the snapshot does not classify unclassified even with a
+lookup; it would also make the default browse answer depend on the embedded architecture snapshot,
+which is the feed dependence this task exists to remove, and it costs
+`TestTheQueryProviderDeclaresNoArchitecture` for no schema gain. The recorded fixture states
+`x86_64` explicitly, so nothing about the empty shape is frozen into a golden.
+
+➕ **`internal/mcp/testdata/` came out of the regeneration byte-identical** — same three md5s,
+empty `git diff`. That is the check on Tasks 5 and 6, which claim those goldens were hand-edited
+rather than regenerated: had either edit been wrong, the one permitted `UPDATE_GOLDEN=1` run
+would have shown it here.
+
+⚠️ **Two documents are wrong as of this commit, and Task 16 owns both.** `docs/usage.md:235`
+prints the retired CSV header row (`Instance Info,…,Frequency of interruption,…`) and
+`docs/usage.md:248` the retired `text` keys (`type=…, interruption='…'`); both are now sample
+output no build produces. `CLAUDE.md:459-460` names `cmd/spotinfo/testdata/aws-*-v1.*` as the
+golden-pinned AWS contract, and that path no longer exists — the recorded set is
+`cmd/spotinfo/testdata/{list-v1,recommend-v3}.*`, and its `internal/mcp` sibling went in Task 6.
+Left alone rather than half-rewritten here. (`docs/reviews/spotinfo-multicloud-v2-architecture-review.md:156`
+also names a deleted golden, but it records a past verification and is correct as history.)
 
 ---
 

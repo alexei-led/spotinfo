@@ -1,0 +1,5 @@
+region=us-east-1, machine=m6i.large, vCPU=2, memory=8GiB, saving=72%, risk='<5%', price=0.0416
+region=us-west-2, machine=m5.xlarge, vCPU=4, memory=16GiB, saving=65%, risk='5-10%', price=0.1234*, score=🟢 8
+region=eu-west-1, machine=t3.nano, vCPU=2, memory=0.5GiB, saving=60%, risk='10-15%', price=0.0016
+region=us-east-1, machine=m5.large, vCPU=2, memory=8GiB, saving=68%, risk='<5%', price=0.0350, score=us-east-1a:🟡 7*,us-east-1b:🟢 9*
+region=me-south-1, machine=dl1.24xlarge, vCPU=96, memory=768GiB, saving=41%, risk='10-15%', price=-

@@ -52,19 +52,29 @@ var (
 )
 
 const (
-	// Table column headers
+	// Table column headers. `machine` and `risk` are the vocabulary words: the
+	// command is cloud-neutral now, so the column carries a neutral risk
+	// observation rather than the AWS Spot Advisor's "frequency of interruption",
+	// and the machine-type column is named after the --machine filter that
+	// selects it.
 	regionColumn        = "Region"
-	instanceTypeColumn  = "Instance Info"
+	machineColumn       = "Machine"
 	vCPUColumn          = "vCPU"
 	memoryColumn        = "Memory GiB"
 	savingsColumn       = "Savings over On-Demand"
-	interruptionColumn  = "Frequency of interruption"
+	riskColumn          = "Risk"
 	priceColumn         = "USD/Hour"
 	priceSourceColumn   = "Price Source"
 	scoreColumn         = "Score"
 	scoreHeaderAZ       = "Placement Score (AZ)"
 	scoreHeaderRegional = "Placement Score (Regional)"
 	scoreHeaderGeneric  = "Placement Score"
+
+	// absentValue is what every rendered format prints for an observation the
+	// cloud did not publish. It is the same "-" the ranked page already prints
+	// for an absent price or savings figure, so one glyph means one thing across
+	// both commands.
+	absentValue = "-"
 
 	// Sort keys. The vocabulary itself lives in internal/cloud so `--sort` and
 	// the MCP `sort` argument cannot accept different words; these names are
@@ -524,21 +534,31 @@ func candidateSavings(candidate *cloud.Candidate) int {
 	return *candidate.SavingsPercent
 }
 
-// candidatePrice converts the fixed-point amount back to the float the price
-// formats take. An absent observation is an instance the feed does not price,
-// which this command renders as 0.0000.
-func candidatePrice(candidate *cloud.Candidate) float64 {
+// candidatePriceCell renders the price column.
+//
+// An absent observation is a machine the cloud published no price for — 600 of
+// 19,353 rows on the committed AWS snapshot under --region all — and it prints
+// absentValue, not 0.0000. The JSON form publishes null for exactly those rows,
+// and a rendered zero would be the same silent claim of a free machine in a
+// different font.
+func candidatePriceCell(candidate *cloud.Candidate) string {
 	if candidate.Spot == nil {
-		return 0
+		return absentValue
+	}
+
+	return formatPrice(candidate.Spot.Amount.Float64(), candidate.Spot.Live)
+}
+
+// csvPriceCell keeps the CSV column numeric wherever there is a number to
+// print, and prints absentValue where there is not. The column is deliberately
+// mixed: a parser that read 0 there would read a price of zero for a machine
+// nobody priced, which is the one value this must never publish.
+func csvPriceCell(candidate *cloud.Candidate) any {
+	if candidate.Spot == nil {
+		return absentValue
 	}
 
 	return candidate.Spot.Amount.Float64()
-}
-
-// candidateLivePrice reports whether the price came from the EC2 API rather than
-// the static feed.
-func candidateLivePrice(candidate *cloud.Candidate) bool {
-	return candidate.Spot != nil && candidate.Spot.Live
 }
 
 // candidateRisk renders the risk column from the neutral observation.
@@ -569,14 +589,18 @@ func printAdvicesText(candidates []cloud.Candidate, region bool, output io.Write
 			scoreStr = fmt.Sprintf(", score=%s", getScoreDisplayValue(candidate))
 		}
 
-		priceStr := formatPrice(candidatePrice(candidate), candidateLivePrice(candidate))
+		priceStr := candidatePriceCell(candidate)
 
+		// machine= and risk= are the vocabulary names. The keys used to be type=
+		// and interruption=, both of which name concepts this release retired:
+		// --type became --machine, and the column is a neutral risk observation
+		// rather than an AWS interruption bucket.
 		if region {
-			fmt.Fprintf(output, "region=%s, type=%s, vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s', price=%s%s\n", //nolint:errcheck
+			fmt.Fprintf(output, "region=%s, machine=%s, vCPU=%d, memory=%vGiB, saving=%d%%, risk='%s', price=%s%s\n", //nolint:errcheck
 				candidate.Location.Region, candidate.Machine.ID, candidate.Machine.VCPU, candidate.Machine.MemoryGiB,
 				candidateSavings(candidate), candidateRisk(candidate), priceStr, scoreStr)
 		} else {
-			fmt.Fprintf(output, "type=%s, vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s', price=%s%s\n", //nolint:errcheck
+			fmt.Fprintf(output, "machine=%s, vCPU=%d, memory=%vGiB, saving=%d%%, risk='%s', price=%s%s\n", //nolint:errcheck
 				candidate.Machine.ID, candidate.Machine.VCPU, candidate.Machine.MemoryGiB,
 				candidateSavings(candidate), candidateRisk(candidate), priceStr, scoreStr)
 		}
@@ -738,7 +762,7 @@ func determineScoreHeader(info scoreTypeInfo) string {
 
 // buildTableHeader creates the table header row.
 func buildTableHeader(scoreInfo scoreTypeInfo, region, csv bool) table.Row {
-	header := table.Row{instanceTypeColumn, vCPUColumn, memoryColumn, savingsColumn, interruptionColumn, priceColumn}
+	header := table.Row{machineColumn, vCPUColumn, memoryColumn, savingsColumn, riskColumn, priceColumn}
 	if csv {
 		header = append(header, priceSourceColumn)
 	}
@@ -773,20 +797,18 @@ func buildTableRow(candidate *cloud.Candidate, scoreInfo scoreTypeInfo, region, 
 		opt(opts)
 	}
 
-	live := candidateLivePrice(candidate)
-
 	var priceValue any
 	if csv {
-		priceValue = candidatePrice(candidate)
+		priceValue = csvPriceCell(candidate)
 	} else {
-		priceValue = formatPrice(candidatePrice(candidate), live)
+		priceValue = candidatePriceCell(candidate)
 	}
 	row := table.Row{
 		string(candidate.Machine.ID), candidate.Machine.VCPU, candidate.Machine.MemoryGiB,
 		candidateSavings(candidate), candidateRisk(candidate), priceValue,
 	}
 	if csv {
-		row = append(row, priceSource(live))
+		row = append(row, priceSource(candidate))
 	}
 	if scoreInfo.hasScores {
 		var score string
@@ -803,11 +825,18 @@ func buildTableRow(candidate *cloud.Candidate, scoreInfo scoreTypeInfo, region, 
 	return row
 }
 
-// priceSource returns a human-readable label for the price data source.
-func priceSource(live bool) string {
-	if live {
+// priceSource labels where the CSV row's price came from. A machine with no
+// price observation has no source either: "static" there would name the feed a
+// price was read from for a price that was never read.
+func priceSource(candidate *cloud.Candidate) string {
+	if candidate.Spot == nil {
+		return absentValue
+	}
+
+	if candidate.Spot.Live {
 		return "live"
 	}
+
 	return "static"
 }
 

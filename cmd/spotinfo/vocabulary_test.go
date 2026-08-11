@@ -351,7 +351,7 @@ func missingFrom(want, have []string) []string {
 	return absent
 }
 
-func sortedKeys(m map[string]string) []string {
+func sortedKeys[V any](m map[string]V) []string {
 	keys := slices.Sorted(maps.Keys(m))
 	if keys == nil {
 		return []string{}

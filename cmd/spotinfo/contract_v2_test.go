@@ -45,19 +45,19 @@ func publishedTopBound(t *testing.T) float64 {
 	require.NoError(t, json.Unmarshal(contents, &schema))
 
 	top := schema.Properties.Request.Properties.Top
-	require.Positive(t, top.Maximum, "the v2 contract must publish a request.top maximum")
-	require.InDelta(t, 1.0, top.Minimum, 0, "the v2 contract must publish a request.top minimum of 1")
+	require.Positive(t, top.Maximum, "the v3 contract must publish a request.top maximum")
+	require.InDelta(t, 1.0, top.Minimum, 0, "the v3 contract must publish a request.top minimum of 1")
 
 	return top.Maximum
 }
 
-func TestCLITopBoundMatchesThePublishedV2Contract(t *testing.T) {
+func TestCLITopBoundMatchesThePublishedV3Contract(t *testing.T) {
 	assert.InDelta(t, float64(cloud.MaxTop), publishedTopBound(t), 0,
 		"cloud.MaxTop and the published request.top maximum must agree; "+
 			"the CLI enforces MaxTop and the contract is what consumers validate against")
 }
 
-func TestCLIRejectsATopAboveThePublishedV2Contract(t *testing.T) {
+func TestCLIRejectsATopAboveThePublishedV3Contract(t *testing.T) {
 	bound := int(publishedTopBound(t))
 
 	_, err := runMulticloudRecommend(t,
@@ -68,12 +68,12 @@ func TestCLIRejectsATopAboveThePublishedV2Contract(t *testing.T) {
 	assert.Contains(t, err.Error(), "top must be between 1 and")
 }
 
-// The bound is enforced before the report path is chosen, so an AWS request
-// that would have been answered by v1 is rejected identically. That placement
-// is the point: the flag is the same flag on the same command, and which schema
-// answers is chosen by an unrelated flag, so a caller cannot be expected to know
-// the bound moves with it.
-func TestCLIRejectsATopAboveTheBoundBeforeChoosingASchema(t *testing.T) {
+// The bound is enforced before the provider is resolved and before the
+// workload's capability check, so every cloud and every policy is refused
+// identically. That placement is the point: the flag is the same flag on the
+// same command, and a caller cannot be expected to know the bound moves with
+// whichever cloud happens to answer.
+func TestCLIRejectsATopAboveTheBoundBeforeResolvingAProvider(t *testing.T) {
 	_, err := runRecommendWith(t, shippedRegistry(t),
 		"--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
 		"--workload", "web", "--top", strconv.Itoa(cloud.MaxTop+1))
@@ -83,7 +83,7 @@ func TestCLIRejectsATopAboveTheBoundBeforeChoosingASchema(t *testing.T) {
 
 // The emitted document must satisfy the bound it is validated against, at the
 // boundary as well as below it.
-func TestCLIEmitsAV2RequestTopWithinTheContract(t *testing.T) {
+func TestCLIEmitsAV3RequestTopWithinTheContract(t *testing.T) {
 	output, err := runMulticloudRecommend(t,
 		"--cloud", "gcp", "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
 		"--top", strconv.Itoa(cloud.MaxTop), "--output", "json")
