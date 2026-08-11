@@ -626,6 +626,16 @@ status. An unset key leaves the order to the provider, which is also what keeps 
 byte-identical: `legacySortBy("")` is `spot.SortByRange`, the same ordering the old default
 produced. `--order` alone is accepted and means ascending.
 
+➕ **The AWS golden pins the fixture order, not a sort, and always has.** Sorting happens inside
+`internal/spot.Client`; `spot.WithSort` is a client option and `contract_v1_test.go` mocks the
+client, so the row order of `cmd/spotinfo/testdata/aws-root-v1.*` is whatever `contractAdvices()`
+returns. Verified by reordering the fixture: the goldens fail, which is the discriminator — the
+recorded order is the input order. That is pre-existing (the retired `--sort interruption` default
+was equally invisible to the mock), so dropping the default did not loosen the contract, and
+adding `--sort risk` to the invocation would only imply a coverage the test does not have. **Task 7
+should keep this in mind** when `contractAdvices()` becomes a fixed `cloud.Provider` stub: ordering
+will still come from the stub, not from a sort.
+
 ➕ **The sort key names are the neutral field names.** `type` became `machine` and
 `interruption` became `risk`, so the CLI word and the `cloud.SortKey` it maps to are spelled the
 same — that is what "over neutral fields only" buys. `savings`, `price`, `region` and `score`

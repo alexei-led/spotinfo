@@ -144,9 +144,14 @@ func TestListDoesNotBuildTheAWSProviderThroughTheRegistry(t *testing.T) {
 	require.NotNil(t, captured)
 
 	// Production flag parsing and the production capability request, against a
-	// registry that fails the test if it is consulted.
+	// registry that fails the test if it is consulted. The sort key is parsed the
+	// way execListCmd parses it rather than passed as a literal, so this keeps
+	// tracking the production request if --sort ever gains a default.
+	sortKey, err := parseSortBy(captured.String(flagSort))
+	require.NoError(t, err)
+
 	provider, err := resolveListProvider(captured, failingRegistry{t: t}, stubSavingsClient{},
-		listCapabilityRequest(captured, ""))
+		listCapabilityRequest(captured, sortKey))
 	require.NoError(t, err)
 	assert.Equal(t, cloud.ProviderAWS, provider.ID())
 }
