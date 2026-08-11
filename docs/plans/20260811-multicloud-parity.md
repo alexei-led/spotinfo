@@ -2026,10 +2026,27 @@ premise of the placement-kind test. `TestInterruptionCappableKindsHoldsExactlyOn
 `RiskKindPreemptionRate` is absent — and its comment names the other so a reader knows why
 both exist. Moving the line would have read as deleting an assertion.
 
+➕ **All three were read off the MCP surface too, not only off the CLI.** A stdio session with
+`HTTP_PROXY`/`HTTPS_PROXY` pinned at a closed port returns each refusal as
+`spotinfo.error/v1` with `UNSUPPORTED_CAPABILITY` and the same message the CLI prints — no
+doubled `gcp: gcp:` prefix, even though `refuseUncappableWorkload` builds its own provider
+prefix while `Require`'s comes from the `Recommend` wrap. Azure `zone_detail` is only
+reachable here (`{"cloud":"azure","az":true}`), which is the case that decided where the
+wording lives.
+
 ➕ **Files this task's list omits.** `internal/cloud/recommend.go` (the workload refusal),
 `README.md:45-51` and `docs/troubleshooting.md` (six quoted messages and four retired flag
 names in the three refusal sections). Every console block written here was run against
 `.bin/spotinfo` at this commit and pasted, including the exit codes.
+
+➕ **Two `docs/clouds.md` claims had to move with the verdict table, or this commit would
+contradict itself.** The matrix said the query command was AWS-only, GCP had no placement
+figure and no live price fallback; the GCP section said any region but `us-central1` returns
+`NO_CANDIDATES`. All four are false since Tasks 4, 12 and 13, and marking them **Shipped** in
+`docs/reviews/multicloud-parity.md` here is what made leaving them a self-contradiction rather
+than inherited staleness. The rest of that page's Task 16 debt is untouched — including the
+retired `--cpu`/`--memory` examples in `README.md`, which a console-block check confirmed are
+the only remaining mismatch in the three files this task edits.
 
 ⚠️ **`text` and `csv` are still refused on `recommend`, and Task 17 will fail on it.**
 Measured: `spotinfo recommend --cloud gcp … --output csv` prints

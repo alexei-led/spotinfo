@@ -10,21 +10,21 @@ move without a code change.
 
 ## Matrix
 
-|                         | AWS                       | GCP                                   | Azure                    |
-| ----------------------- | ------------------------- | ------------------------------------- | ------------------------ |
-| `spotinfo recommend`    | yes                       | yes                                   | yes                      |
-| `spotinfo list`         | yes                       | yes                                   | yes                      |
-| Regions in the snapshot | 34 (Advisor), 40 (prices) | 1 — `us-central1`                     | 55                       |
-| Machine types           | 1,192                     | 333                                   | 224                      |
-| Machine series          | not enumerated            | 18                                    | 26                       |
-| Architectures           | x86_64, arm64             | x86_64 (275), arm64 (58)              | x86_64 (187), arm64 (37) |
-| Operating systems       | linux, windows            | linux                                 | linux, windows           |
-| Interruption risk       | published buckets         | `unavailable`, or opt-in live         | `unavailable`            |
-| Workloads accepted      | cost, web, ci, batch      | cost                                  | cost                     |
-| On-Demand price in v2   | no                        | yes                                   | yes                      |
-| Placement figures       | score, 1-10               | obtainability, beta                   | no                       |
-| Live price fallback     | yes                       | yes, with an API key                  | yes, 1-2 named regions   |
-| Credentials             | optional                  | optional, for `--live-risk`, `--with-score` and `--gcp-billing-key` | none |
+|                         | AWS                       | GCP                                                                 | Azure                    |
+| ----------------------- | ------------------------- | ------------------------------------------------------------------- | ------------------------ |
+| `spotinfo recommend`    | yes                       | yes                                                                 | yes                      |
+| `spotinfo list`         | yes                       | yes                                                                 | yes                      |
+| Regions in the snapshot | 34 (Advisor), 40 (prices) | 1 — `us-central1`                                                   | 55                       |
+| Machine types           | 1,192                     | 333                                                                 | 224                      |
+| Machine series          | not enumerated            | 18                                                                  | 26                       |
+| Architectures           | x86_64, arm64             | x86_64 (275), arm64 (58)                                            | x86_64 (187), arm64 (37) |
+| Operating systems       | linux, windows            | linux                                                               | linux, windows           |
+| Interruption risk       | published buckets         | `unavailable`, or opt-in live                                       | `unavailable`            |
+| Workloads accepted      | cost, web, ci, batch      | cost                                                                | cost                     |
+| On-Demand price in v2   | no                        | yes                                                                 | yes                      |
+| Placement figures       | score, 1-10               | obtainability, beta                                                 | no                       |
+| Live price fallback     | yes                       | yes, with an API key                                                | yes, 1-2 named regions   |
+| Credentials             | optional                  | optional, for `--live-risk`, `--with-score` and `--gcp-billing-key` | none                     |
 
 Every limit on this page is either a vendor limit or a reviewed decision.
 [reviews/multicloud-parity.md](reviews/multicloud-parity.md) says which is which, and what it
@@ -78,9 +78,14 @@ $ spotinfo list --cloud gcp --machine "^n2-standard-4$" --output text
 region=us-central1, machine=n2-standard-4, vCPU=4, memory=16GiB, saving=47%, risk='unavailable', price=0.1013
 ```
 
-**Regions.** `us-central1` only. Google publishes Spot prices per region through a page
-selector, and the committed snapshot covers the one reviewed region. Any other region returns
-`NO_CANDIDATES`. An unset `--region` expands to every published region, which is this one.
+**Regions.** The committed snapshot carries `us-central1` only. Google publishes Spot prices
+per region through a page selector, and one region is what it server-renders. An unset
+`--region` expands to every region the snapshot has, which is this one, and any other region
+returns `NO_CANDIDATES` — **unless `--gcp-billing-key`, or `SPOTINFO_GCP_BILLING_KEY`, prices
+it from the Cloud Billing Catalog API for that one invocation.** A key that the API refuses is
+not an error: the run logs the refusal at `--debug` and answers from the snapshot. Nothing
+fetched this way enters the snapshot; Google does not state redistribution terms for the
+catalogue, which is why it stays a runtime path.
 
 **Machines.** 333 types in 18 series: `c2`, `c3`, `c3d`, `c4`, `c4a`, `c4d`, `e2`, `m1`,
 `m2`, `m3`, `n1`, `n2`, `n2d`, `n4`, `n4a`, `n4d`, `t2a`, `t2d`. The Arm series are `c4a`,
