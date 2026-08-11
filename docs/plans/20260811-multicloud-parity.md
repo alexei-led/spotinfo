@@ -1156,23 +1156,69 @@ refusal tests here only to delete them there is churn.
 - Modify: `cmd/spotinfo/provider_flags.go`
 - Create: `cmd/spotinfo/refusals_test.go`
 
-- [ ] refuse `--az`, `--min-score` and `--score-timeout` when `--with-score` is absent
-- [ ] refuse `--with-score` on a cloud without `CapabilityPlacementScore`, with
+- [x] refuse `--az`, `--min-score` and `--score-timeout` when `--with-score` is absent
+- [x] refuse `--with-score` on a cloud without `CapabilityPlacementScore`, with
       `UNSUPPORTED_CAPABILITY` — reuse the existing capability, do not add a new one
-- [ ] on Azure, make the `--with-score` and `--live-risk` refusals name the reason: both
+- [x] on Azure, make the `--with-score` and `--live-risk` refusals name the reason: both
       exist as vendor APIs but need an Azure subscription, which this build does not
       authenticate to. A reader must be able to tell "not built" from "not published"
-- [ ] refuse `--gcp-project` when the cloud is not GCP, matching how `--live-risk` is refused
-- [ ] refuse `--offline` and `--refresh` **only** on a cloud without
+- [x] refuse `--gcp-project` when the cloud is not GCP, matching how `--live-risk` is refused
+- [x] refuse `--offline` and `--refresh` **only** on a cloud without
       `CapabilityLiveEnrichment` (`internal/cloud/provider.go:29`, already declared by AWS);
       Tasks 10 and 13 set it for Azure and GCP, which retires the refusal without a test edit
-- [ ] write the refusal test **driven by the registry, not by a hard-coded cloud list**: for
+- [x] write the refusal test **driven by the registry, not by a hard-coded cloud list**: for
       each registered provider, assert `--offline` is refused **if and only if**
       `Capabilities().Has(CapabilityLiveEnrichment)` is false. A literal cloud table would have
       to be edited by Tasks 10 and 13, which is the churn this rescoping exists to avoid
-- [ ] write a table-driven test for the remaining refusals: exit code, empty stdout, message
+- [x] write a table-driven test for the remaining refusals: exit code, empty stdout, message
       names both the flag and the cloud
-- [ ] run `make test` — must pass before Task 9
+- [x] run `make test` — must pass before Task 9
+
+➕ **`--gcp-project` lost its urfave/cli `EnvVars`, and that is what makes the refusal safe.**
+Measured before the change: with `GOOGLE_CLOUD_PROJECT` exported, `ctx.IsSet(--gcp-project)`
+and `LocalFlagNames` both report the flag as **set** on a bare `spotinfo list` — urfave/cli
+records an env-provided value as `HasBeenSet`. Refusing a set `--gcp-project` off GCP under
+that declaration would refuse every default AWS invocation on any machine that has ever
+touched GCP. The variable is still read, by the `os.Getenv` fallback `withLiveRisk` already
+had, so the env path is unchanged and `TestLiveRiskRefusesABadProjectFromTheEnvironment` still
+proves it reaches `ValidateProjectID`; the flag's `Usage` names the variable in place of the
+`[$GOOGLE_CLOUD_PROJECT]` suffix urfave/cli printed. `TestAnExportedProjectVariableDoesNotRefuse
+AnotherCloudsQuery` is the guard against re-adding it.
+
+➕ **The capability gate runs before the companion check, deliberately.** On a cloud that
+publishes no placement score, `--min-score 5` reports "gcp publishes no placement_score" rather
+than "--min-score needs --with-score": adding `--with-score` there would not help, so the
+capability is the answer that does. `refuseUnsupportedFlags` therefore sits in
+`resolveListProvider` beside `Capabilities.Require`, and `requireWithScore` in
+`validateListFlags`, which runs after it. Both are still before acquisition — Invariant 3.
+The two existing rows of `TestUnsupportedCapabilitiesFailBeforeAcquisition` that drive
+`--min-score` and `--az` on a score-free GCP pin that order.
+
+➕ **The companion refusals are declared on `list` only, because `recommend` declares none of
+the four score flags yet.** Task 11 lands them there; its ➕ line below records that it must
+call `requireWithScore` too, or `--az` arrives on `recommend` silently ignored — the exact
+defect this task exists to remove. No dead call was added here for it.
+
+➕ **Two refusal classes, and the test separates them.** A capability refusal is about one
+cloud and names it. A companion refusal is a flag-combination error refused identically
+everywhere, so naming a cloud there would imply another cloud accepts it; `namesCloud` in
+`cmd/spotinfo/refusals_test.go` carries the distinction as data. Three rows were also added to
+the e2e table — `list --az`, `list --gcp-project`, `list --cloud azure --with-score` — which is
+where the real process exit code and the empty stdout are observed. No `--offline` row: that
+refusal is retired by Tasks 10 and 13.
+
+⚠️ **`internal/mcp` still accepts `az` and `score_timeout` without `with_score`.**
+`requestedPlacement` (`internal/mcp/tools.go:394`) refuses `min_score` without `with_score` and
+ignores the other two: `az` sets `SingleZone` on a request with `Enabled: false`, and
+`score_timeout` is dropped. That is the same silent no-op on the other surface, and this task's
+file list is CLI-only, so it is recorded rather than fixed. **Task 15 must check it** when it
+verifies acceptance criterion 2 — the CLI now refuses what MCP answers.
+
+➕ **`--score-timeout` is unbounded on the CLI where MCP bounds it.** `internal/mcp` rejects a
+value outside 1..`cloud.MaxScoreTimeoutSeconds`; `listQuery` applies `if timeout > 0` and drops
+anything else without a word, so `--score-timeout -5` and `--score-timeout 99999` are both
+accepted. Same no-op class, no checkbox here; worth folding into Task 11, which is already
+changing how the score flags act.
 
 ---
 
@@ -1312,6 +1358,13 @@ widening the catalogue key. It never needed a task boundary, only a code-change 
 - [ ] write a test asserting the AWS path still produces the same score it does today
 - ➕ delete the four `vocabularyGaps` rows marked "task 11" in
   `cmd/spotinfo/vocabulary_test.go`
+- ➕ call `requireWithScore` (`cmd/spotinfo/provider_flags.go`, Task 8) from
+  `execRecommendCmd` when the four flags land. Task 8 refuses `--az`, `--min-score` and
+  `--score-timeout` without `--with-score` on `list` only, because `recommend` declares none
+  of them today; declaring them without the check lands three silently ignored flags
+- ➕ bound `--score-timeout` on the CLI the way `internal/mcp` bounds `score_timeout`
+  (1..`cloud.MaxScoreTimeoutSeconds`). `listQuery` drops anything outside `timeout > 0` with
+  no error, so a negative or absurd value is accepted and ignored
 - [ ] run `make test` — must pass before Task 12
 
 ### Task 12: Fetch GCP obtainability

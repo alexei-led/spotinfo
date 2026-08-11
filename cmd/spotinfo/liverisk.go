@@ -32,9 +32,19 @@ const gcpProjectEnv = "GOOGLE_CLOUD_PROJECT"
 // risk, from the Spot Advisor feed, and already reports it without this flag.
 // The flag names one mechanism — the authenticated GCP preemption lookup — and
 // refusing it is not a claim about what any other cloud measures.
+//
+// Azure gets its own sentence because the difference is real and a reader has
+// to be able to see it. Azure publishes an eviction rate; this build simply
+// cannot read it, for the same reason it serves no Spot Placement Score. That
+// is a decision about the binary, not a fact about the vendor.
 func unsupportedLiveRisk(id cloud.ProviderID) error {
-	return fmt.Errorf("%w: --%s fetches %s preemption rates and is not implemented for %s",
-		cloud.ErrUnsupportedCapability, flagLiveRisk, cloud.ProviderGCP, id)
+	if id == cloud.ProviderAzure {
+		return refusedFlag(flagLiveRisk, id,
+			azureSubscriptionReason("an eviction rate through Azure Resource Graph"))
+	}
+
+	return refusedFlag(flagLiveRisk, id,
+		fmt.Sprintf("the flag fetches %s preemption rates and is implemented for no other cloud", cloud.ProviderGCP))
 }
 
 // rejectLiveRiskOffGCP runs before the report path is chosen.
@@ -66,11 +76,19 @@ func liveRiskFlags() []cli.Flag {
 // gcpProjectFlag names the project an authenticated GCP call is billed to. Both
 // commands carry it: the authenticated paths are per-command, but the project
 // they bill is one concept and must have one name.
+//
+// The environment variable is read by withLiveRisk below, not declared here as
+// urfave/cli EnvVars. Both mechanisms produce the same project, but EnvVars also
+// makes the flag report itself as *set* — measured: with GOOGLE_CLOUD_PROJECT
+// exported, ctx.IsSet and LocalFlagNames both name --gcp-project on a bare
+// `spotinfo list`. refuseUnsupportedFlags refuses this flag off GCP, so under
+// EnvVars an exported variable would refuse every default AWS invocation on a
+// machine that has ever touched GCP. One explicit read keeps "the caller named a
+// project" distinguishable from "a project is lying around in the environment".
 func gcpProjectFlag() *cli.StringFlag {
 	return &cli.StringFlag{
-		Name:    flagGCPProject,
-		Usage:   "Google Cloud project to bill authenticated GCP calls to",
-		EnvVars: []string{gcpProjectEnv},
+		Name:  flagGCPProject,
+		Usage: "Google Cloud project to bill authenticated GCP calls to (or $" + gcpProjectEnv + ")",
 	}
 }
 

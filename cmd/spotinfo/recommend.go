@@ -57,6 +57,12 @@ func execRecommendCmd(ctx *cli.Context, execCtx context.Context, registry provid
 		return liveRiskErr
 	}
 
+	// Every other flag this cloud cannot act on, refused here rather than
+	// accepted and ignored — and before acquisition, so a refusal costs no I/O.
+	if refusal := refuseUnsupportedFlags(ctx, provider); refusal != nil {
+		return refusal
+	}
+
 	workload, err := recommendWorkload(ctx)
 	if err != nil {
 		return err

@@ -316,6 +316,10 @@ func resolveListProvider(ctx *cli.Context, registry providerRegistry,
 		return nil, err
 	}
 
+	if refusal := refuseUnsupportedFlags(ctx, provider); refusal != nil {
+		return nil, refusal
+	}
+
 	if capErr := provider.Capabilities().Require(request); capErr != nil {
 		return nil, fmt.Errorf("%s: %w", id, capErr)
 	}
@@ -440,7 +444,14 @@ func validateListFlags(ctx *cli.Context) error {
 			cloud.ErrInvalidArgument, flagMinMemoryGiB)
 	}
 
-	return validateScoreFloor(ctx.Int(flagMinScore), ctx.Bool(flagWithScore))
+	// The companion check first: --min-score, --az and --score-timeout all
+	// describe a lookup only --with-score makes, and a range check on a filter
+	// that cannot run is the wrong thing to report.
+	if err := requireWithScore(ctx); err != nil {
+		return err
+	}
+
+	return validateScoreFloor(ctx.Int(flagMinScore))
 }
 
 // validateOrder accepts an unset order as ascending: --sort leaves the order to
@@ -454,16 +465,11 @@ func validateOrder(order string) error {
 		cloud.ErrInvalidArgument, order, orderAsc, orderDesc)
 }
 
-// validateScoreFloor rejects a minimum score that nothing can satisfy. Scores
-// are only fetched under --with-score, so on its own this filter compared every
-// candidate against an absent score and dropped all of them: zero bytes on
-// stdout, zero on stderr, exit 0.
-func validateScoreFloor(minScore int, withScore bool) error {
-	if minScore != 0 && !withScore {
-		return fmt.Errorf("%w: --%s needs --%s, which is what fetches the placement scores it filters on",
-			cloud.ErrInvalidArgument, flagMinScore, flagWithScore)
-	}
-
+// validateScoreFloor rejects a minimum score no score can satisfy. The
+// companion rule — that the filter needs --with-score to have anything to
+// filter — lives in requireWithScore, beside the same rule for --az and
+// --score-timeout.
+func validateScoreFloor(minScore int) error {
 	if minScore < 0 || minScore > maxPlacementScore {
 		return fmt.Errorf("%w: --%s must be between 1 and %d",
 			cloud.ErrInvalidArgument, flagMinScore, maxPlacementScore)

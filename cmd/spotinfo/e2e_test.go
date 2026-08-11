@@ -895,6 +895,28 @@ func TestE2ERejectedInputExitsNonZeroWithAnEmptyStdout(t *testing.T) {
 			args:     []string{"list", "--cloud", "oracle"},
 			contains: "oracle",
 		},
+		// The three refusals below replace flags that were accepted and
+		// silently ignored. Each one survives the whole plan, which is why it
+		// is safe to pin here: --az and --gcp-project are refused on the same
+		// grounds whatever a cloud later gains, and Azure's placement score
+		// stays out of reach while this build authenticates to no Azure
+		// subscription. --offline and --refresh on a snapshot-only cloud are
+		// deliberately absent: those refusals are retired by a later capability.
+		{
+			name:     "zone-level scores without the lookup that produces them",
+			args:     []string{"list", "--az"},
+			contains: "--with-score",
+		},
+		{
+			name:     "a gcp project on a cloud that bills no gcp call",
+			args:     []string{"list", "--gcp-project", "some-project"},
+			contains: "--gcp-project",
+		},
+		{
+			name:     "a placement score this build cannot authenticate to",
+			args:     []string{"list", "--cloud", "azure", "--with-score"},
+			contains: "subscription",
+		},
 		// A recommend-only flag passed to `list` is deliberately absent from
 		// this table. --workload is undefined there, so urfave/cli rejects it
 		// while parsing and writes its usage banner to stdout — which the
