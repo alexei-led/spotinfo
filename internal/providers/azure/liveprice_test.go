@@ -261,6 +261,38 @@ func TestEveryLiveFailureFallsBackToTheSnapshot(t *testing.T) {
 	}
 }
 
+// An empty answer is diagnosed by re-querying without the filters, and a sweep
+// that failed in transport cached nothing — so that second query re-reads the
+// region that failed. This is the ceiling the guard in
+// internal/cloud/diagnose.go accepts and documents: one extra read of the one
+// failed region, and only on a run that has already failed.
+func TestTheDiagnosisRereadsOnlyTheRegionThatFailed(t *testing.T) {
+	reference := newTestProvider(t)
+	stub := newRetailStub(t, retailItems(snapshotPrices(t, reference)))
+	stub.status = http.StatusInternalServerError
+
+	live := liveProvider(t, stub, cloud.FetchPolicy{})
+	failed := stub.requests.Load()
+
+	const impossibleVCPU = 1 << 20
+
+	_, err := cloud.Recommend(t.Context(), live, &cloud.RecommendRequest{
+		Cloud:        cloud.ProviderAzure,
+		Architecture: cloud.ArchitectureX8664,
+		OS:           cloud.OSLinux,
+		Workload:     cloud.WorkloadCost,
+		Regions:      []cloud.Region{stubRegion},
+		MinVCPU:      impossibleVCPU,
+		MinMemoryGiB: 1,
+		Top:          1,
+	})
+	require.ErrorIs(t, err, cloud.ErrNoCandidates)
+	assert.Contains(t, err.Error(), "no machine has at least",
+		"the second query is what turns the plain message into a named cause")
+	assert.Equal(t, int32(2), stub.requests.Load()-failed,
+		"the failed answer and the diagnosis, and nothing beyond either")
+}
+
 // A sweep that comes back thinner than the reviewed per-region floor is refused
 // whole. Half a region is not a cheaper answer, it is a wrong one.
 func TestAThinSweepIsRefusedRatherThanPublished(t *testing.T) {

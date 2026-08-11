@@ -62,16 +62,35 @@ func diagnoseNoCandidates(ctx context.Context, provider Provider, request *Recom
 	// catalogue behind a key — so a capability test alone would disable this
 	// diagnosis everywhere and leave the whole file dead.
 	//
-	// An answer served from the committed snapshot was served from bytes already
-	// in memory. On GCP and Azure that makes the second query free outright. On
-	// AWS it is weaker than it sounds and the gap is accepted deliberately:
-	// `embedded-snapshot` there means the *feeds* fell back, which is what
+	// The mode is a proxy for cost, and on every provider it is an imperfect
+	// one. The gap is accepted deliberately, and stated here rather than denied.
+	//
+	// On GCP and Azure the proxy is inverted. Both cache the live document the
+	// moment they have read it, so a fetch that *succeeded* makes the widened
+	// query a cache hit — and that is exactly the state this guard declines to
+	// diagnose. A fetch that failed in transport cached nothing, so the widened
+	// query sweeps again: a GCP recommendation against an unreachable catalogue
+	// spends a second livePriceBudget, and Azure re-reads the one region that
+	// failed. A failure *after* the read — an undecodable document, a region the
+	// catalogue does not price — was cached and is free.
+	//
+	// On AWS `embedded-snapshot` means the *feeds* fell back, which is what
 	// --offline guarantees (it also clears the live-price provider) but is
 	// equally what happens when the feeds are unreachable and the EC2 API is
 	// not. In that one state the widened query can still spend a live-price
-	// timeout. It is bounded, it happens only on a run that has already failed
-	// and is already degraded, and it buys the caller the one sentence that says
-	// which constraint emptied the set.
+	// timeout.
+	//
+	// Every case is one extra acquisition, falls only on a run that has already
+	// failed and is already degraded, and buys the caller the one sentence
+	// naming the constraint that emptied the set. The cheap fix — a provider
+	// that remembers this run's fetch failed — is not available here:
+	// mcpProviders memoises one registry per policy for the server's lifetime,
+	// so an instance-scoped flag would turn one transient failure into a
+	// permanently snapshot-only server. Removing the cost needs a Result that
+	// reports it fell back, which is a v2 contract addition rather than an
+	// error-path tweak. gcp.TestTheDiagnosisCostsOneExtraSweepAtMost and
+	// azure.TestTheDiagnosisRereadsOnlyTheRegionThatFailed measure that ceiling
+	// meanwhile, so the next wording of this claim stays a fact.
 	if provider.Capabilities().LiveEnrichment && mode != DataModeEmbeddedSnapshot {
 		return plain
 	}

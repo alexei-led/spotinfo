@@ -361,6 +361,35 @@ func TestARejectedKeyFallsBackToTheCommittedSnapshot(t *testing.T) {
 	assert.Positive(t, stub.requests.Load(), "the key was supplied, so the lookup was attempted")
 }
 
+// An empty answer is diagnosed by re-querying the provider without the filters,
+// and a fetch that failed in transport cached nothing — so that second query
+// sweeps the catalogue again. This is the ceiling the guard in
+// internal/cloud/diagnose.go accepts and documents: one extra sweep, never
+// more, and only on a run that has already failed.
+//
+// It is asserted rather than reasoned about because the comment it pins is a
+// claim about cost, and the previous wording of that claim was wrong.
+func TestTheDiagnosisCostsOneExtraSweepAtMost(t *testing.T) {
+	stub := newBillingStub(t, nil)
+	live := livePriceProvider(t, stub, "not-a-valid-key", cloud.FetchPolicy{})
+
+	_, err := cloud.Recommend(t.Context(), live, &cloud.RecommendRequest{
+		Cloud:        cloud.ProviderGCP,
+		Architecture: cloud.ArchitectureX8664,
+		OS:           cloud.OSLinux,
+		Workload:     cloud.WorkloadCost,
+		Regions:      []cloud.Region{widenedRegion},
+		MinVCPU:      1,
+		MinMemoryGiB: 1,
+		Top:          1,
+	})
+	require.ErrorIs(t, err, cloud.ErrNoCandidates)
+	assert.Contains(t, err.Error(), "publishes no machines in "+string(widenedRegion),
+		"the second query is what turns the plain message into a named cause")
+	assert.Equal(t, int64(2), stub.requests.Load(),
+		"the failed answer and the diagnosis, and nothing beyond either")
+}
+
 // A region the catalogue prices nothing for is answered from the snapshot,
 // which for that region means no candidates rather than another region's rows.
 func TestARegionTheCatalogueDoesNotPriceFallsBackToTheSnapshot(t *testing.T) {

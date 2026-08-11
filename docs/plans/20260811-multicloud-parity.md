@@ -1901,12 +1901,26 @@ runs when the failed answer was served from the committed snapshot and is skippe
 `live`/`cached`. This also restores the message on Azure, which lost it silently in Task 10.
 `internal/cloud/diagnose_test.go` covers all three cases.
 
-**The new guard is exact on GCP and Azure and deliberately approximate on AWS.**
+➕ **The new guard is approximate on all three clouds, and on GCP and Azure the approximation
+is _inverted_.** The first wording of this note claimed it was exact there. It is not: both
+providers cache the live document the moment they have read it, so a fetch that **succeeded**
+makes the widened query a cache hit — and that is exactly the state the guard declines to
+diagnose — while a fetch that failed **in transport** cached nothing, so the widened query
+sweeps again. A GCP recommendation against an unreachable catalogue therefore spends a second
+`livePriceBudget`, and Azure re-reads the one region that failed; a failure _after_ the read
+(an undecodable document, a region the catalogue does not price) was cached and is free. On AWS
 `spot.Client.DataSource` returns `embedded` whenever _either feed_ fell back, which is what
 `--offline` guarantees — it clears the live-price provider too — but is equally what happens
-when the feeds are unreachable and the EC2 API is not. In that one state the widened query can
-still spend a live-price timeout. Accepted: it is bounded, it happens only on a run that has
-already failed and is already degraded, and the alternative is no diagnosis on any cloud.
+when the feeds are unreachable and the EC2 API is not, so the widened query can still spend a
+live-price timeout. Accepted on all three: one extra acquisition, only on a run that has
+already failed and is already degraded, against no diagnosis on any cloud. The cheap fix — a
+provider that remembers this run's fetch failed — is unavailable because `mcpProviders`
+memoises one registry per policy for the server's lifetime, so an instance-scoped flag would
+turn one transient failure into a permanently snapshot-only server; removing the cost needs a
+`Result` that reports it fell back, which is a v2 contract addition.
+`gcp.TestTheDiagnosisCostsOneExtraSweepAtMost` and
+`azure.TestTheDiagnosisRereadsOnlyTheRegionThatFailed` **measure** the ceiling at two requests
+each, so the next wording of this claim stays a fact rather than a reading.
 
 ➕ **Files this task's list omits.** `internal/cloud/money.go` (`MoneyFromNanos`, the
 constructor a composed price needs so two nano terms are summed exactly instead of rounded
