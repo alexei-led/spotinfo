@@ -191,62 +191,97 @@ func sortRecommendations(recommendations []cloud.RecommendationDTO, order cloud.
 	}
 
 	slices.SortStableFunc(recommendations, func(left, right cloud.RecommendationDTO) int {
-		if order.Descending {
-			return compare(&right, &left)
-		}
-
-		return compare(&left, &right)
+		return compare(&left, &right, order.Descending)
 	})
 
 	return nil
 }
 
-// requireScoresToSortByThem refuses `--sort score` on a page that fetched none.
+// requireScoresToSortByThem refuses `--sort score` on a page whose placement
+// figures it could not order.
 //
 // The ranked page publishes a placement figure now, so the key is no longer
-// meaningless — but only under --with-score. Without it every row's figure is
-// absent, compareOptionalFloat sorts them all equal, and the flag exits 0
-// having done nothing. It is stated as a companion rule rather than as an
-// unsupported key so the message says what to add.
+// meaningless — but only for a regional one fetched by --with-score. There are
+// two ways to ask for a sort that would order nothing, and both exit 0 having
+// done exactly that, so both are refused as companion rules rather than as an
+// unsupported key: the message then says what to change.
+//
+//   - without --with-score, every row's figure is absent and compareOptional
+//     sorts them all equal
+//   - with --az, every row carries zone figures and no regional one, which is
+//     the only figure comparePlacements orders by
 //
 // It is a recommend-only rule: `list` reaches its placement capability through
 // listCapabilityRequest, which already treats a score sort as a score request.
 func requireScoresToSortByThem(ctx *cli.Context, key cloud.SortKey) error {
-	if key != cloud.SortByPlacementScore || lineageBool(ctx, flagWithScore) {
+	if key != cloud.SortByPlacementScore {
 		return nil
 	}
 
-	return fmt.Errorf("%w: --%s %s needs --%s, which is what fetches the placement figures it orders by",
-		cloud.ErrInvalidArgument, flagSort, sortScore, flagWithScore)
+	if !lineageBool(ctx, flagWithScore) {
+		return fmt.Errorf("%w: --%s %s needs --%s, which is what fetches the placement figures it orders by",
+			cloud.ErrInvalidArgument, flagSort, sortScore, flagWithScore)
+	}
+
+	// Keyed off --az rather than off the kind: neither kind publishes a regional
+	// figure once zone detail was asked for, so both clouds have the same hole.
+	if lineageBool(ctx, flagAZ) {
+		return fmt.Errorf("%w: --%s %s cannot be combined with --%s: only a regional placement figure "+
+			"orders a page, and --%s asks for one figure per zone instead",
+			cloud.ErrInvalidArgument, flagSort, sortScore, flagAZ, flagAZ)
+	}
+
+	return nil
 }
+
+// recommendationComparison orders two rows in the direction the caller asked
+// for.
+//
+// The direction is an argument rather than something the caller applies by
+// flipping an ascending comparison, because flipping inverts how an absent
+// figure is placed along with everything else: `--order desc` put every row a
+// provider published no figure for *first*, ahead of the best measured one,
+// which is the one position compareOptional exists to keep it out of.
+type recommendationComparison func(left, right *cloud.RecommendationDTO, descending bool) int
 
 // recommendationComparator resolves a neutral sort key against the fields a
 // recommendation publishes.
-func recommendationComparator(key cloud.SortKey) (func(left, right *cloud.RecommendationDTO) int, error) {
+func recommendationComparator(key cloud.SortKey) (recommendationComparison, error) {
 	switch key {
 	case cloud.SortByMachine:
-		return func(left, right *cloud.RecommendationDTO) int {
-			return cmp.Compare(left.Machine, right.Machine)
+		return func(left, right *cloud.RecommendationDTO, descending bool) int {
+			return orient(cmp.Compare(left.Machine, right.Machine), descending)
 		}, nil
 	case cloud.SortByRegion:
-		return func(left, right *cloud.RecommendationDTO) int {
-			return cmp.Compare(left.Region, right.Region)
+		return func(left, right *cloud.RecommendationDTO, descending bool) int {
+			return orient(cmp.Compare(left.Region, right.Region), descending)
 		}, nil
 	case cloud.SortByPrice:
 		return comparePrices, nil
 	case cloud.SortBySavings:
-		return func(left, right *cloud.RecommendationDTO) int {
-			return compareOptionalFloat(left.SavingsPercent, right.SavingsPercent)
+		return func(left, right *cloud.RecommendationDTO, descending bool) int {
+			return compareOptional(left.SavingsPercent, right.SavingsPercent, descending)
 		}, nil
 	case cloud.SortByRisk:
-		return func(left, right *cloud.RecommendationDTO) int {
-			return compareOptionalFloat(left.Risk.MaxPercent, right.Risk.MaxPercent)
+		return func(left, right *cloud.RecommendationDTO, descending bool) int {
+			return compareOptional(left.Risk.MaxPercent, right.Risk.MaxPercent, descending)
 		}, nil
 	case cloud.SortByPlacementScore:
 		return comparePlacements, nil
 	default:
 		return nil, fmt.Errorf("%w: unknown sort %q", cloud.ErrInvalidArgument, key)
 	}
+}
+
+// orient applies the sort direction to a comparison of two figures that are
+// both present. A tie stays a tie in either direction, so a stable sort still
+// leaves the ranking policy's own order among equals alone.
+func orient(result int, descending bool) int {
+	if descending {
+		return -result
+	}
+
+	return result
 }
 
 // comparePrices orders the fixed-point wire amounts numerically. They are
@@ -257,7 +292,7 @@ func recommendationComparator(key cloud.SortKey) (func(left, right *cloud.Recomm
 // publishes rows AWS has no price for. A recommendation never carries one —
 // accepts() drops a price-less candidate before ranking — so an absent amount
 // is treated the same as an unparsable one rather than given an order.
-func comparePrices(left, right *cloud.RecommendationDTO) int {
+func comparePrices(left, right *cloud.RecommendationDTO, descending bool) int {
 	if left.SpotUSDPerHour == nil || right.SpotUSDPerHour == nil {
 		return 0
 	}
@@ -268,7 +303,7 @@ func comparePrices(left, right *cloud.RecommendationDTO) int {
 		return 0
 	}
 
-	return cmp.Compare(leftAmount.Nanos(), rightAmount.Nanos())
+	return orient(cmp.Compare(leftAmount.Nanos(), rightAmount.Nanos()), descending)
 }
 
 // comparePlacements orders the ranked page by its regional placement figure.
@@ -281,18 +316,22 @@ func comparePrices(left, right *cloud.RecommendationDTO) int {
 // Only the regional figure orders a page. Under --az a candidate carries one
 // observation per zone and no regional one, and picking a maximum or a mean
 // across zones would be this tool inventing a regional figure the provider
-// declined to give — so those rows keep the ranking policy's own order.
-func comparePlacements(left, right *cloud.RecommendationDTO) int {
+// declined to give — so that combination is refused outright by
+// requireScoresToSortByThem rather than accepted and left ordering nothing.
+func comparePlacements(left, right *cloud.RecommendationDTO, descending bool) int {
 	if left.RegionScore != nil || right.RegionScore != nil {
-		return compareOptionalInt(left.RegionScore, right.RegionScore)
+		return compareOptional(left.RegionScore, right.RegionScore, descending)
 	}
 
-	return compareOptionalFloat(left.RegionObtainability, right.RegionObtainability)
+	return compareOptional(left.RegionObtainability, right.RegionObtainability, descending)
 }
 
-// compareOptionalInt orders an integer figure a provider may not publish,
-// putting an absent one last under either order — see compareOptionalFloat.
-func compareOptionalInt(left, right *int) int {
+// compareOptional orders a figure a provider may not publish. An absent value
+// sorts last under either order, because "not measured" is not a position on
+// the scale — which is why the direction is applied to the two present values
+// here rather than by flipping the whole comparison, and why a page sorted
+// descending no longer opens with every row nobody measured.
+func compareOptional[T cmp.Ordered](left, right *T, descending bool) int {
 	switch {
 	case left == nil && right == nil:
 		return 0
@@ -301,23 +340,7 @@ func compareOptionalInt(left, right *int) int {
 	case right == nil:
 		return -1
 	default:
-		return cmp.Compare(*left, *right)
-	}
-}
-
-// compareOptionalFloat orders a figure a provider may not publish. An absent
-// value sorts last under either order, because "not measured" is not a position
-// on the scale.
-func compareOptionalFloat(left, right *float64) int {
-	switch {
-	case left == nil && right == nil:
-		return 0
-	case left == nil:
-		return 1
-	case right == nil:
-		return -1
-	default:
-		return cmp.Compare(*left, *right)
+		return orient(cmp.Compare(*left, *right), descending)
 	}
 }
 

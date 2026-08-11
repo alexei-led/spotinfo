@@ -1627,22 +1627,39 @@ unconditionally and the recorded recommend invocation passes no `--with-score`, 
 `recommend` started publishing the block, a stub that ignored the request would have recorded a
 column the shipped binary never draws.
 
-➕ **`--sort score` works on `recommend` now, and needs `--with-score`.** Task 4 refused the key
-with "which recommend does not publish"; that sentence is false as of this task, so the
-comparator was implemented — each kind ordered on its own scale, a mixed pair left unordered,
-and only the *regional* figure ordering a page, because inventing a maximum or a mean across
-zones would be publishing a regional figure the provider declined to give. Without
-`--with-score` every figure is absent and the sort would exit 0 having done nothing, so it is
-refused as a companion rule. `TestRecommendRefusesASortKeyItDoesNotPublish` still passes
+➕ **`--sort score` works on `recommend` now, and needs `--with-score` _and_ a regional figure.**
+Task 4 refused the key with "which recommend does not publish"; that sentence is false as of this
+task, so the comparator was implemented — each kind ordered on its own scale, a mixed pair left
+unordered, and only the _regional_ figure ordering a page, because inventing a maximum or a mean
+across zones would be publishing a regional figure the provider declined to give. That leaves
+**two** ways to ask for an ordering that would order nothing, and `requireScoresToSortByThem`
+refuses both as companion rules: without `--with-score` every figure is absent, and under `--az`
+every row carries one figure per zone and no regional one. The second refusal was missing on the
+first pass — `spotinfo recommend --with-score --az --sort score` was accepted, exited 0 and left
+the page in ranking-policy order with a zone-score column contradicting it — and landed in the fix
+commit below, keyed off `--az` rather than off the kind because neither kind publishes a regional
+figure once zone detail was asked for. `TestRecommendRefusesASortKeyItDoesNotPublish` still passes
 unchanged; only its comment moved. **`list --sort score` is deliberately untouched** — Task 8
 scoped its companion set to the three flags, and re-opening it there is not this task's to do.
+
+➕ **A figure nobody published sorts last under either order, and the direction is now an argument
+to the comparator rather than a flip of it.** `sortRecommendations` built a descending page with
+`compare(&right, &left)`, which inverts the absent handling along with everything else: `--sort
+score --order desc` opened with every row whose placement lookup produced nothing, ranked above
+the best measured score — silence above measurement, which is the comparison `placement_status`
+exists to prevent. Each comparator now takes `descending` and applies it only to two _present_
+values, so a tie is still a tie in both directions and the stable sort still leaves the ranking
+policy's own order among equals alone; `compareOptionalInt` and `compareOptionalFloat` collapsed
+into one generic `compareOptional`. **This changes `--sort savings|risk --order desc` too**, which
+carried the same defect from Task 4: a row with no published discount or no published risk no
+longer sorts ahead of every row that has one.
 
 ➕ **The four score arguments are not added to the MCP `recommend_spot_machines` tool.** Its
 argument set is pinned by `docs/plans/contracts/recommend-v3-input.schema.json` and recorded in
 `internal/mcp/testdata/recommend-v3-input-schema.json`, both Task 6/7 artifacts; widening them
 is a contract change no checkbox here owns, and it would rewrite a golden. The four
 `mcpArgumentGaps` rows stay, with their reason corrected from "task 11 puts the score flags on
-recommend" to the real one. The `list_spot_machines` tool *did* gain the `min_score`-versus-kind
+recommend" to the real one. The `list_spot_machines` tool _did_ gain the `min_score`-versus-kind
 refusal, so the two surfaces agree wherever both declare the argument.
 
 ⚠️ **A ranked page's placement figures are reachable only from the CLI.** Acceptance criterion 2
@@ -1656,7 +1673,10 @@ having ordered nothing — the same defect `requireScoresToSortByThem` now remov
 It is left alone deliberately: Task 8 scoped its companion set to `--az`, `--min-score` and
 `--score-timeout`, and widening that set on `list` is not this task's to do. **Task 15 should
 check it** alongside the other companion-flag notes. The one-line fix is to add the sort key to
-`requireWithScore`.
+`requireWithScore`. **`list --with-score --az --sort score` is the same hole for the other
+reason** — `spot.SortByScore` reads only `RegionScore` (`internal/spot/types.go:102`), which
+`--az` never sets — and it is deferred with it. `recommend` refuses both combinations as of the
+fix commit; `list` refuses neither.
 
 ➕ **Nothing re-applies `Placement.MinScore` in `internal/cloud`.** `rank()` and `accepts()`
 never see it: the floor is honoured during acquisition by `spot.WithMinScore`, and every other

@@ -470,6 +470,105 @@ func TestSortingByPlacementNeedsTheFiguresFetched(t *testing.T) {
 	assert.Empty(t, output)
 }
 
+// zonedCandidate attaches the figures --az asks for: one observation per zone
+// and no regional one at all.
+func zonedCandidate(candidate cloud.Candidate, zone string, score int) cloud.Candidate {
+	location := candidate.Location
+	location.Zone = zone
+
+	candidate.Placements = []cloud.PlacementObservation{{
+		Location: location,
+		Kind:     cloud.PlacementKindPlacementScore,
+		Score:    score,
+	}}
+	candidate.PlacementStatus = cloud.PlacementStatusAvailable
+
+	return candidate
+}
+
+// --az is the second way to ask for an ordering that would order nothing: only
+// the regional figure sorts a page, and a zone-detailed one publishes none. It
+// is refused for the same reason the missing --with-score is, rather than
+// exiting 0 with the ranking policy's order and a score column that contradicts
+// it.
+func TestSortingByPlacementIsRefusedUnderZoneDetail(t *testing.T) {
+	registry := listRegistry(cloud.ProviderAWS, awsCapabilities(),
+		zonedCandidate(neutralCandidate(cloud.ProviderAWS, "us-east-1", "m6i.large", "0.010000000", 2, 8),
+			"us-east-1a", 2),
+		zonedCandidate(neutralCandidate(cloud.ProviderAWS, "us-east-1", "m5.large", "0.050000000", 2, 8),
+			"us-east-1b", 9),
+	)
+
+	output, err := runRankedPage(t, registry, "--with-score", "--az", "--sort", sortScore, "--order", orderDesc)
+	require.ErrorIs(t, err, cloud.ErrInvalidArgument)
+	assert.Contains(t, err.Error(), "--"+flagAZ, "the refusal must name the flag that leaves nothing to order")
+	assert.Empty(t, output)
+}
+
+// unmeasuredPlacement is a candidate whose placement lookup ran and produced
+// nothing — the shape a partly failed region sweep leaves behind.
+func unmeasuredPlacement(candidate cloud.Candidate) cloud.Candidate {
+	candidate.PlacementStatus = cloud.PlacementStatusUnavailable
+
+	return candidate
+}
+
+func withSavings(candidate cloud.Candidate, percent int) cloud.Candidate {
+	candidate.SavingsPercent = &percent
+
+	return candidate
+}
+
+// A figure nobody published sorts last under either order. Descending used to
+// be built by flipping the ascending comparison, which inverted the absent
+// handling with it and opened a "best placement first" page with every row that
+// was never measured — silence ranked above measurement, which is the one
+// comparison the placement status exists to prevent.
+func TestAFigureNobodyPublishedSortsLastUnderEitherOrder(t *testing.T) {
+	unmeasured := neutralCandidate(cloud.ProviderAWS, "us-east-1", "unmeasured", "0.010000000", 2, 8)
+	lower := neutralCandidate(cloud.ProviderAWS, "us-east-1", "lower-figure", "0.020000000", 2, 8)
+	higher := neutralCandidate(cloud.ProviderAWS, "us-east-1", "higher-figure", "0.030000000", 2, 8)
+
+	for _, test := range []struct {
+		name       string
+		args       []string
+		candidates []cloud.Candidate
+	}{
+		{
+			name: sortScore,
+			args: []string{"--with-score", "--sort", sortScore},
+			candidates: []cloud.Candidate{
+				unmeasuredPlacement(unmeasured), scoredCandidate(lower, 3), scoredCandidate(higher, 9),
+			},
+		},
+		{
+			// The same helper orders --sort savings and --sort risk, so the
+			// property is held on a second key rather than on the one path that
+			// happened to expose it.
+			name: sortSavings,
+			args: []string{"--sort", sortSavings},
+			candidates: []cloud.Candidate{
+				unmeasured, withSavings(lower, 20), withSavings(higher, 70),
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			registry := listRegistry(cloud.ProviderAWS, awsCapabilities(), test.candidates...)
+
+			for _, order := range []string{orderAsc, orderDesc} {
+				page, err := runRankedPage(t, registry, append([]string{"--order", order}, test.args...)...)
+				require.NoError(t, err)
+
+				unmeasuredAt := indexOfMachine(t, page, "unmeasured")
+				assert.Greater(t, unmeasuredAt, indexOfMachine(t, page, "lower-figure"),
+					"%s order must not rank an unmeasured row above a measured one", order)
+				assert.Greater(t, unmeasuredAt, indexOfMachine(t, page, "higher-figure"),
+					"%s order must not rank an unmeasured row above a measured one", order)
+			}
+		})
+	}
+}
+
 // A lookup that came back empty is not the same answer as a lookup nobody
 // asked for, and Placements is a slice, so both are the empty slice without an
 // explicit status. Every surface has to be able to tell them apart.
