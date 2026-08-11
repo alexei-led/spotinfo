@@ -13,16 +13,16 @@ brew install alexei-led/tap/spotinfo
 
 Give `recommend` an architecture and a size floor. These three flags are required:
 
-```bash
-spotinfo recommend --architecture x86_64 --cpu 4 --memory 16
+```console
+$ spotinfo recommend --architecture x86_64 --min-vcpu 4 --min-memory-gib 16
+RANK  CLOUD  REGION          MACHINE     ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR    SAVINGS  RISK          WHY
+   1  aws    ap-south-1      t3a.xlarge  x86_64           4        16.0  0.0259          58%  10-15%        ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
+   2  aws    ap-southeast-3  t3.xlarge   x86_64           4        16.0  0.0262          73%  <5%           ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
+   3  aws    ca-west-1       r6i.xlarge  x86_64           4        32.0  0.0276          77%  >20%          ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
 ```
 
-```
-RANK  REGION     INSTANCE         ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR  SAVINGS  INTERRUPTION  WHY
-   1  us-east-1  t3.xlarge        x86_64           4        16.0    0.0502      61%  <5%           ARCHITECTURE_MATCH,...
-   2  us-east-1  m7i-flex.xlarge  x86_64           4        16.0    0.0888      51%  <5%           ARCHITECTURE_MATCH,...
-   3  us-east-1  d3en.xlarge      x86_64           4        16.0    0.0929      71%  <5%           ARCHITECTURE_MATCH,...
-```
+Every region is searched by default, which is why the answer is three regions you did not
+name. Section 5 says what that costs and how to narrow it.
 
 The `WHY` column lists the rule each candidate satisfied. It is deterministic, so two runs on
 the same data give the same codes.
@@ -30,13 +30,14 @@ the same data give the same codes.
 ## 3. Change the cloud
 
 ```bash
-spotinfo recommend --cloud gcp   --architecture x86_64 --cpu 4 --memory 16
-spotinfo recommend --cloud azure --architecture arm64  --cpu 4 --memory 16
+spotinfo recommend --cloud gcp   --architecture x86_64 --min-vcpu 4 --min-memory-gib 16
+spotinfo recommend --cloud azure --architecture arm64  --min-vcpu 4 --min-memory-gib 16
 ```
 
-GCP and Azure need no credentials and make no request. Both report `RISK: unavailable`,
-because neither publishes an interruption figure that can ship in the binary. Read
-[clouds.md](clouds.md) for what each cloud serves.
+Neither needs credentials. Both report `RISK: unavailable`, because neither publishes an
+interruption figure that can ship in the binary. GCP answers from that snapshot alone unless
+you pass `--gcp-billing-key`; Azure refreshes prices from its anonymous Retail Prices API when
+you name one or two regions. Read [clouds.md](clouds.md) for what each cloud serves.
 
 ## 4. Change the workload
 
@@ -49,80 +50,128 @@ because neither publishes an interruption figure that can ship in the binary. Re
 | `ci`     | 16%                  | aws             |
 | `batch`  | 22%                  | aws             |
 
-```bash
-spotinfo recommend --architecture x86_64 --cpu 2 --memory 8 --workload batch
+```console
+$ spotinfo recommend --architecture x86_64 --min-vcpu 2 --min-memory-gib 8 --workload batch
+RANK  CLOUD  REGION          MACHINE    ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR    SAVINGS  RISK          WHY
+   1  aws    ap-south-1      t3a.large  x86_64           2         8.0  0.0125          61%  10-15%        ARCHITECTURE_MATCH,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET,WORKLOAD_BATCH_CAP_MET
+   2  aws    ap-southeast-3  t3.large   x86_64           2         8.0  0.0149          74%  <5%           ARCHITECTURE_MATCH,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET,WORKLOAD_BATCH_CAP_MET
+   3  aws    ca-west-1       t3.large   x86_64           2         8.0  0.0153          77%  5-10%         ARCHITECTURE_MATCH,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET,WORKLOAD_BATCH_CAP_MET
 ```
 
-The workload also selects the report schema on AWS. `cost` emits `spotinfo.recommend/v2`.
-`web`, `ci` and `batch` emit `spotinfo.recommend/v1`.
+The ceilings are AWS Spot Advisor bucket boundaries, so `web`, `ci` and `batch` are refused on
+a cloud that measures something else. Every cloud accepts `cost`. The report schema is
+`spotinfo.recommend/v3` for every workload and every cloud.
 
-## 5. Widen the search
+## 5. Widen or narrow the search
 
 ```bash
-# Every AWS region, five results
-spotinfo recommend --architecture x86_64 --cpu 4 --memory 16 --region all --top 5
+# Five results instead of three
+spotinfo recommend --architecture x86_64 --min-vcpu 4 --min-memory-gib 16 --top 5
 
 # Two named regions
-spotinfo recommend --architecture arm64 --cpu 2 --memory 8 \
+spotinfo recommend --architecture arm64 --min-vcpu 2 --min-memory-gib 8 \
   --region us-east-1 --region eu-west-1
 
 # A machine-name pattern, as an RE2 regexp
-spotinfo recommend --architecture x86_64 --cpu 4 --memory 16 --instance "^c[0-9]"
+spotinfo recommend --architecture x86_64 --min-vcpu 4 --min-memory-gib 16 --machine "^c[0-9]"
 
 # A price ceiling
-spotinfo recommend --architecture x86_64 --cpu 4 --memory 16 --budget 0.06
+spotinfo recommend --architecture x86_64 --min-vcpu 4 --min-memory-gib 16 --max-price 0.03
 ```
 
 If a ceiling admits nothing, the command names the screen that emptied the set:
 
 ```console
-$ spotinfo recommend --cloud gcp --architecture x86_64 --cpu 4 --memory 16 --budget 0.001
+$ spotinfo recommend --cloud gcp --architecture x86_64 --min-vcpu 4 --min-memory-gib 16 --max-price 0.001
 spotinfo: no candidates: no machine costs 0.001000000 USD per hour or less; gcp publishes nothing below 0.042496000 USD per hour, the price of c3d-standard-4 in us-central1
 ```
 
-On AWS, `--region` defaults to `us-east-1`. On GCP and Azure it defaults to every published
-region.
+`--region` defaults to `all` on every cloud. Comparing regions is the point of the tool, so
+that default stays — but on AWS it has a real cost. Every region is queried, and every machine
+the static price feed does not price falls through to a live EC2 call that the command waits
+for. Seconds, not milliseconds.
+
+**When speed matters, reach for `--offline` first.** It is the lever that always collapses the
+wait, because it makes no request at all. Naming a region helps only when that region's
+machines are all priced in the static feed. Measured on one machine, with no AWS credentials
+to answer the fallback:
+
+| Command                                      | All regions | `--region us-east-1` | `--offline` |
+| -------------------------------------------- | ----------- | -------------------- | ----------- |
+| `spotinfo list --machine '^m5\.'`            | 4.19 s      | 0.11 s               | 0.12 s      |
+| `spotinfo recommend --architecture x86_64 …` | 4.4 s       | 4.2 s                | 0.12 s      |
+
+The `recommend` row is the one to remember: naming a single region bought nothing there,
+because that region also holds machines the static feed does not price.
 
 ## 6. Get JSON
 
 ```bash
-spotinfo recommend --cloud azure --architecture arm64 --cpu 4 --memory 16 --output json
+spotinfo recommend --cloud azure --architecture arm64 --min-vcpu 4 --min-memory-gib 16 \
+  --output json
 ```
 
 The report carries the request that produced it, the ranking policy, every source URL with
 its SHA-256, and the ranked machines. Pipe it into `jq`:
 
-```bash
-spotinfo recommend --cloud gcp --architecture x86_64 --cpu 8 --memory 32 --output json \
+```console
+$ spotinfo recommend --cloud gcp --architecture x86_64 --min-vcpu 8 --min-memory-gib 32 --output json \
   | jq -r '.recommendations[] | "\(.machine) \(.spot_usd_per_hour)"'
+c3d-standard-8 0.084992000
+n2d-standard-8 0.107648000
+c3-standard-8 0.108704000
 ```
 
-## 7. Explore AWS directly
+## 7. Browse instead of ranking
 
-The bare command is a different tool for a different question. It filters the AWS Spot
-Advisor and shows an interruption column for every match. It is AWS-only.
+`spotinfo list` answers a different question: not "what should I run" but "what is there". It
+requires no flags, prints every match with its price and its risk, and works on all three
+clouds.
+
+```console
+$ spotinfo list --machine "^m5\." --region us-east-1 --sort price --output text
+machine=m5.large, vCPU=2, memory=8GiB, saving=59%, risk='>20%', price=0.0410
+machine=m5.xlarge, vCPU=4, memory=16GiB, saving=68%, risk='>20%', price=0.0621
+machine=m5.2xlarge, vCPU=8, memory=32GiB, saving=64%, risk='>20%', price=0.1518
+machine=m5.4xlarge, vCPU=16, memory=64GiB, saving=67%, risk='>20%', price=0.2967
+```
 
 ```bash
-# Every m5 machine in one region
-spotinfo --type "m5.*" --region us-east-1
-
-# With placement scores, cheapest first
-spotinfo --type "m5.*" --with-score --sort price
+# With AWS placement scores, cheapest first. This one needs AWS credentials
+spotinfo list --machine "^m5\." --region us-east-1 --with-score --sort price
 
 # CSV for a spreadsheet
-spotinfo --cpu 4 --memory 16 --region all --output csv
+spotinfo list --min-vcpu 4 --min-memory-gib 16 --region us-east-1 --output csv
+```
+
+`list` also has an `--output number` that `recommend` refuses: it prints one savings percent,
+which cannot describe a ranked page.
+
+One of the two commands is always needed. `spotinfo` on its own prints the help and exits
+non-zero:
+
+```console
+$ spotinfo
+spotinfo: invalid argument: no command given; run "spotinfo list" to browse or "spotinfo recommend" to rank
 ```
 
 ## 8. Work offline
 
 ```bash
-spotinfo recommend --architecture x86_64 --cpu 2 --memory 8 --offline
+spotinfo recommend --architecture x86_64 --min-vcpu 2 --min-memory-gib 8 --offline
 ```
 
-`--offline` answers from the snapshot inside the binary and makes no request at all. It
-applies to AWS, and to Azure when you name one or two regions — those refresh their prices
-from Azure's anonymous Retail Prices API, and `--offline` skips that. GCP has no live price
-path, so the flag changes nothing there.
+`--offline` answers from the snapshot inside the binary and makes no request at all. It is
+accepted on every cloud, and it changes what happens on each of them:
+
+- **AWS** stops fetching the advisor and price feeds, and stops the live EC2 price fallback.
+  That is the whole four-second wait from section 5.
+- **Azure** stops the Retail Prices refresh that a one- or two-region query would make.
+- **GCP** stops the Cloud Billing Catalog lookup that `--gcp-billing-key` enables. With no key
+  there is nothing to stop, so the flag changes nothing you can see.
+
+`--offline` is a flag on `list` and on `recommend`, not on the root command. Over MCP, pass
+the `offline: true` tool argument instead.
 
 ## Next
 
