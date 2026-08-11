@@ -33,10 +33,10 @@ func gcpCandidates() []cloud.Candidate {
 }
 
 // A ceiling finer than the fixed-point scale filters here exactly as it does in
-// find_spot_instances. A client that turns a monthly budget into an hourly one
+// list_spot_machines. A client that turns a monthly budget into an hourly one
 // sends 0.041666666666666664 routinely, and the two tools must not disagree
 // about whether that is a usable ceiling or an invalid argument.
-func TestFinerThanScalePriceCeilingStillFiltersOnV2(t *testing.T) {
+func TestFinerThanScalePriceCeilingStillFiltersOnRecommend(t *testing.T) {
 	t.Parallel()
 
 	for name, test := range map[string]struct {
@@ -66,20 +66,7 @@ func TestFinerThanScalePriceCeilingStillFiltersOnV2(t *testing.T) {
 }
 
 func offlineProvider(id cloud.ProviderID, candidates []cloud.Candidate) *stubProvider {
-	for i := range candidates {
-		candidates[i].Provider = id
-	}
-
-	return &stubProvider{
-		id:           id,
-		capabilities: offlineLinuxCapabilities(),
-		result: cloud.Result{
-			Provider:   id,
-			Mode:       cloud.DataModeEmbeddedSnapshot,
-			Sources:    testSources(),
-			Candidates: candidates,
-		},
-	}
+	return stubFor(id, offlineLinuxCapabilities(), candidates)
 }
 
 func recommendTool(providers providerRegistry) *RecommendTool {
@@ -139,7 +126,7 @@ func TestRecommendInputSchemaMatchesTheRecordedContract(t *testing.T) {
 	require.NoError(t, err)
 
 	registered, ok := server.mcpServer.ListTools()[recommendToolName]
-	require.True(t, ok, "recommend_spot_instances must be registered")
+	require.True(t, ok, recommendToolName+" must be registered")
 
 	encoded, err := json.MarshalIndent(registered.Tool, "", "  ")
 	require.NoError(t, err)

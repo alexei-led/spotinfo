@@ -1,6 +1,7 @@
 package cloud
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -83,4 +84,103 @@ func TestRequireTreatsZeroValuedFieldsAsUnrequested(t *testing.T) {
 		Architecture: ArchitectureX8664,
 		Needed:       []Capability{CapabilitySpotPrice, CapabilityMachineSpec},
 	}))
+}
+
+// The sort vocabulary is shared by both surfaces, so its words are pinned here
+// rather than in either of them. "score" is the one word that is not its
+// field's name; every other is the neutral key spelled out.
+func TestParseSortKeyResolvesTheSharedVocabulary(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, []string{"machine", "price", "region", "risk", "savings", "score"}, SortKeyNames(),
+		"the sort vocabulary is the plan's; adding a word is a vocabulary change")
+
+	for word, want := range map[string]SortKey{
+		"machine":     SortByMachine,
+		"price":       SortByPrice,
+		"region":      SortByRegion,
+		"risk":        SortByRisk,
+		"savings":     SortBySavings,
+		sortWordScore: SortByPlacementScore,
+		// An unset key is not an error: it leaves the order to the provider.
+		"": "",
+	} {
+		key, err := ParseSortKey(word)
+		require.NoError(t, err)
+		assert.Equal(t, want, key)
+	}
+
+	// The retired CLI word, and the neutral field name behind "score". Neither
+	// may be accepted: an unrecognised key used to fall through to the
+	// interruption sort silently, with an exit code of 0.
+	for _, word := range []string{"interruption", "placement_score", "SCORE"} {
+		_, err := ParseSortKey(word)
+		require.ErrorIs(t, err, ErrInvalidArgument, "%q must be refused", word)
+	}
+}
+
+// regionStub answers a fixed result and records whether it was queried at all.
+type regionStub struct {
+	capabilities Capabilities
+	result       Result
+	queried      int
+}
+
+func (s *regionStub) ID() ProviderID             { return s.result.Provider }
+func (s *regionStub) Capabilities() Capabilities { return s.capabilities }
+
+func (s *regionStub) Query(_ context.Context, _ *Query) (Result, error) {
+	s.queried++
+
+	return s.result, nil
+}
+
+// RegionsOf derives the answer from one query rather than from a new interface
+// method, so it must deduplicate and order what that query returns.
+func TestRegionsOfDeduplicatesAndSortsWhatOneQueryReturns(t *testing.T) {
+	t.Parallel()
+
+	provider := &regionStub{
+		capabilities: linuxSpotOnly(),
+		result: Result{
+			Provider: ProviderGCP,
+			Mode:     DataModeEmbeddedSnapshot,
+			Candidates: []Candidate{
+				{Location: Location{Region: "us-central1"}},
+				{Location: Location{Region: "europe-west1"}},
+				{Location: Location{Region: "us-central1"}},
+			},
+		},
+	}
+
+	regions, result, err := RegionsOf(t.Context(), provider)
+	require.NoError(t, err)
+	assert.Equal(t, []Region{"europe-west1", "us-central1"}, regions)
+	assert.Equal(t, ProviderGCP, result.Provider, "the caller gets the provenance of the same acquisition")
+	assert.Equal(t, 1, provider.queried, "one query answers the whole question")
+}
+
+// An empty answer publishes [], never null: the slice is always allocated.
+func TestRegionsOfPublishesAnEmptyListRatherThanNil(t *testing.T) {
+	t.Parallel()
+
+	provider := &regionStub{capabilities: linuxSpotOnly(), result: Result{Provider: ProviderAzure}}
+
+	regions, _, err := RegionsOf(t.Context(), provider)
+	require.NoError(t, err)
+	assert.NotNil(t, regions)
+	assert.Empty(t, regions)
+}
+
+// The capability check is inside the helper, so every caller gets Invariant 3
+// from one place. A provider that cannot price Linux spot machines is refused
+// before it is asked anything.
+func TestRegionsOfChecksCapabilitiesBeforeAcquisition(t *testing.T) {
+	t.Parallel()
+
+	provider := &regionStub{capabilities: Capabilities{}, result: Result{Provider: ProviderAWS}}
+
+	_, _, err := RegionsOf(t.Context(), provider)
+	require.ErrorIs(t, err, ErrUnsupportedCapability)
+	assert.Zero(t, provider.queried, "the capability check must run before acquisition")
 }

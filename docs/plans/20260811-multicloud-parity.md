@@ -886,31 +886,136 @@ rather than half-rewritten here, but it is wrong as of this commit.
   `internal/mcp/helpers_test.go`, `internal/mcp/bench_test.go`, `internal/mcp/race_test.go`
 - Modify: `internal/cloud/provider.go`
 
-- [ ] replace the three tools with `list_spot_machines`, `recommend_spot_machines` and
+- [x] replace the three tools with `list_spot_machines`, `recommend_spot_machines` and
       `list_cloud_regions`, each taking `cloud` as an argument rather than implying AWS
-- [ ] add a **`RegionsOf(ctx, Provider)` helper**, not a `Regions()` interface method, so
+- [x] add a **`RegionsOf(ctx, Provider)` helper**, not a `Regions()` interface method, so
       `list_cloud_regions` can enumerate a non-AWS cloud. `fetchRegions` at `tools.go:570`
       hardcodes an AWS query today. A `Query` with `Regions: [all]` already yields the answer,
       which is what that function does — the helper generalises it in one file. Adding a method
       to `cloud.Provider` would instead break all three providers and five test stubs for no
       extra capability
-- [ ] let `list_cloud_regions` also publish the full source list for a cloud, resolving
+- [x] let `list_cloud_regions` also publish the full source list for a cloud, resolving
       `sources_omitted` from Task 5
-- [ ] derive every argument name through `mcpArgName`, and assert it in a test rather than
+- [x] derive every argument name through `mcpArgName`, and assert it in a test rather than
       hand-writing the names
-- [ ] make every tool return a structured `spotinfo.error/v1` body with a stable `code`;
+- [x] make every tool return a structured `spotinfo.error/v1` body with a stable `code`;
       delete the bare-string error path. This also retires the v1 `min_memory_gb` unit
       mislabel, recorded here as **resolved by deletion**
-- [ ] add `readOnlyHint: true`, `idempotentHint: true`, `destructiveHint: false` and
+- [x] add `readOnlyHint: true`, `idempotentHint: true`, `destructiveHint: false` and
       `openWorldHint: true` to all three tools, using the `mcp-go` v0.57.0 annotation builders
-- [ ] take every default from the shared default set, so no default can differ by surface
-- [ ] sweep the old tool names out of code and tests — they also appear in
+- [x] take every default from the shared default set, so no default can differ by surface
+- [x] sweep the old tool names out of code and tests — they also appear in
       `internal/providers/aws/provider_test.go` and `internal/spot/data_test.go`
-- [ ] write a test asserting every MCP argument name equals `mcpArgName` of its CLI flag
-- [ ] write a test asserting every tool declares the read-only and idempotent annotations
-- [ ] write tests for the structured error body of each tool
-- [ ] write a test asserting `list_cloud_regions` answers for all three clouds
-- [ ] run `go test ./... -skip 'E2E'` — must pass before Task 7
+- [x] write a test asserting every MCP argument name equals `mcpArgName` of its CLI flag
+- [x] write a test asserting every tool declares the read-only and idempotent annotations
+- [x] write tests for the structured error body of each tool
+- [x] write a test asserting `list_cloud_regions` answers for all three clouds
+- [x] run `go test ./... -skip 'E2E'` — must pass before Task 7
+
+➕ **`spotinfo.regions/v1` is a fourth schema, and the plan's Schemas paragraph does not name
+it.** `list_cloud_regions` had to publish something, and a bare `{regions, total}` map — what the
+retired `list_spot_regions` returned — could not carry the source list the checkbox above asks
+for. The new payload reuses the `data_source` and source DTOs of the other two, so the omitted
+entries are recovered in exactly the shape they were trimmed from. No contract file: no checkbox
+asks for one, and `internal/cloud/sources_test.go` covers the document beside the trimming it
+undoes — the test asserts published + omitted on a `list` answer equals what the regions answer
+publishes, so the two cannot drift apart.
+
+➕ **`RegionsOf` returns `([]Region, Result, error)`, not just the regions.** The caller needs the
+provenance of the same acquisition, and a second query to fetch it would double the work. The
+capability check lives inside the helper, so all three tools get Invariant 3 from one place. The
+query pins `OS: linux` the way `fetchRegions` did: every provider declares it, and an empty OS is
+an untested path through three catalogues to answer a question that is not about an operating
+system.
+
+➕ **Measured, on the shipped binary: `list_cloud_regions --cloud azure` publishes 81 sources
+with `sources_omitted: 0`, against 2 published and 79 omitted for a one-row `list_spot_machines`
+answer in the same session.** That is the resolvability the checkbox asks for, checked rather
+than asserted.
+
+➕ **"No default can differ by surface" needed the vocabulary itself to move, not just the
+values.** `internal/mcp` cannot import `cmd/spotinfo`, so a shared default has to live in
+`internal/cloud`. Moved there: the `--sort` word list (`SortKeyNames`, `ParseSortKey` — the CLI
+words, so `score` still means `placement_score` on both surfaces), `OrderAsc`/`OrderDesc`,
+`MaxPlacementScore` and `DefaultScoreTimeoutSeconds`. That last one **was** a real drift:
+`internal/mcp` declared 30 with a comment justifying it by the v1 input-schema golden this task
+deletes, while the CLI read `spot.DefaultScoreTimeoutSeconds`. `internal/spot` keeps a private
+30-second fallback for a lookup it was given no timeout for — a client's own default, not a
+surface's. `cmd/spotinfo` now spells `sortMachine`, `orderAsc` and `allRegions` from the neutral
+constants, so one value is provably read by both.
+
+➕ **`offline` and `refresh` are real arguments, and landing them was a composition change.**
+The server held one acquisition client, so the two flags had no per-call meaning; advertising them
+anyway would have been the defect the retired `include_names` parameter was. `providerRegistry.Get`
+now takes a `cloud.FetchPolicy`, and `mcpProviders` in `cmd/spotinfo/main.go` builds at most one
+registry per policy and reuses it — a refreshing call always builds fresh and **replaces** the
+memoised entry, so the next caller answers from what refresh fetched rather than from the copy it
+superseded. `runMCPServer` no longer reads a `cli.Context`: the data policy is a tool argument now,
+not a property of the process. Verified against the shipped binary — the same
+`list_spot_machines` call reports `embedded-snapshot` with `offline: true` and `cached` without it.
+`stubRegistry` records the policy of every lookup, and `TestTheDataPolicyReachesAcquisition`
+asserts it for both tools, because "accepted" and "honoured" are otherwise indistinguishable.
+
+➕ **One CLI/MCP asymmetry is deliberate: an explicit empty `architecture`.** `--architecture ""`
+is unset on the CLI, because `listQuery` trims and tests for empty; `architecture: ""` over MCP is
+refused, because `ParseArchitecture` rejects it. That matches what the recommend tool already does
+for `cloud`, `os` and `workload`: an argument a caller omits is absent, an argument they send as
+`""` is a value none of the enums list, and folding the second into the first answers a question
+they did not ask. Recorded rather than reconciled — changing either side would make one of those
+two rules inconsistent.
+
+➕ **`mcpProviders` is covered directly, not only through the tools.** Every MCP test drives a stub
+registry, so the tool-side assertion proves the policy reaches `Get` and stops there.
+`TestTheMCPProviderCacheHonoursTheDataPolicy` in `cmd/spotinfo` takes the other half: the same
+policy reuses one client, a different policy gets a different one, and a refresh **replaces** the
+memoised entry so the next caller answers from what it fetched. Verified by deleting the
+assignment — the test goes red on exactly that line, which nothing else in the suite did.
+
+➕ **`stubFor` copies its fixtures, found by `go test -race`.** It stamps each candidate with the
+cloud it is serving, and parallel subtests routinely share one fixture slice — stamping in place is
+a write the detector reports against whichever sibling reads it. It reproduced roughly one run in
+six; six clean runs after the copy, and `-race` is green across every package.
+
+➕ **Three contract artefacts moved together for those two arguments, and none was regenerated.**
+`docs/plans/contracts/recommend-v3-input.schema.json` (normative), the `recommendArgs` allow-list
+and `internal/mcp/testdata/recommend-v3-input-schema.json` (golden). No `UPDATE_GOLDEN` run
+anywhere in this task: the golden diff is the tool rename, the four annotation values and those two
+properties, each reviewed line by line.
+`TestRegisteredInputSchemaAgreesWithTheNormativeContract` asserts all three agree, so dropping one
+fails a test rather than shipping.
+
+➕ **`sort`, `order` and `live_risk` are deliberately absent from `recommend_spot_machines`, and
+`cmd/spotinfo/mcp_vocabulary_test.go` records the difference as data.** A ranked page publishes
+each row's rank, so a client that wants another order sorts the array it was handed — on the CLI
+the flag reorders a *rendered* page, which MCP does not produce. `live_risk` has no task in this
+plan that puts it on the MCP surface. The four score arguments carry the same "task 11" rows the
+CLI `vocabularyGaps` already has. As there, the test asserts the difference **equals** the table,
+so an argument that lands while its row stays fails as loudly as one that never lands.
+
+➕ **`mcp.Server.Tools()` is exported for that test.** `mcpArgName` lives in package `main`, so the
+derivation has to be asserted from the side that owns the vocabulary — against what the server
+actually registered, not against a second list that could drift from it. Task 1's ➕ predicted the
+test would live in `cmd/spotinfo`; this is the accessor that lets it read the surface.
+
+➕ **The concurrency tests were retargeted, not deleted with their helpers.** `race_test.go` exists
+for the shared state inside `spot.Client`, which is unchanged; each test now drives the handler
+that replaced the one it used to drive. The benchmarks whose subject is genuinely gone — the v1
+response builders, the reliability score, the interruption filter — went with it, and
+`BenchmarkParseListRequest` and `BenchmarkListReport` took their place.
+
+➕ **The e2e suite went from 4 failing top-level tests to 1 at this boundary.**
+`TestE2EMCPServerCompletesAHandshakeAndAnswers` and `TestE2EMCPAnswersEveryCloudInOneSchema` now
+pass against the shipped binary, and so does
+`TestE2ETheCLIAndMCPAnswerTheSameQuestionIdentically` — which is what forced `offline` to be a real
+argument, since it passes `"offline":true` to the recommend tool. Only
+`TestE2ETheListCommandRendersEveryOutputFormat` still fails, on the `machine` and `risk` column
+names the plan already records as a Task 7 target.
+
+⚠️ **Four documents still name the retired tools, so Task 16's scope grew.** `docs/mcp-server.md`,
+`docs/api-reference.md`, `docs/troubleshooting.md` and `docs/claude-desktop-setup.md` describe
+`find_spot_instances`, `list_spot_regions` and `recommend_spot_instances`, their v1 response shape
+and their arguments. `CLAUDE.md` lines 12 and 14 are wrong for the same reason. They were left
+alone rather than half-rewritten here.
 
 ### Task 7: Regenerate every golden once and review the diff
 

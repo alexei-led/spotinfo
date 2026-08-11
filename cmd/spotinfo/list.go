@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"maps"
 	"math"
 	"os"
 	"slices"
@@ -38,23 +37,10 @@ const listCommandName = "list"
 // a page a person reads.
 var outputFormats = []string{outputNumber, outputText, outputJSON, outputTable, outputCSV}
 
-// sortByNames maps the --sort vocabulary onto the neutral sort keys. Every name
-// is the neutral field's own name, so the same word means the same thing on
-// both commands and on every cloud. The provider translates them back into its
-// own ordering, so a cloud that already sorts its own data keeps deciding what
-// each key means for it.
-var sortByNames = map[string]cloud.SortKey{
-	sortMachine: cloud.SortByMachine,
-	sortRisk:    cloud.SortByRisk,
-	sortSavings: cloud.SortBySavings,
-	sortPrice:   cloud.SortByPrice,
-	sortRegion:  cloud.SortByRegion,
-	sortScore:   cloud.SortByPlacementScore,
-}
-
 // sortKeyNames lists the --sort vocabulary in a stable order, for help and
-// error text.
-func sortKeyNames() []string { return slices.Sorted(maps.Keys(sortByNames)) }
+// error text. The vocabulary itself lives in internal/cloud, so the flag and
+// the MCP `sort` argument accept the same words by construction.
+func sortKeyNames() []string { return cloud.SortKeyNames() }
 
 // parseSortBy resolves the --sort vocabulary. An unset key is not an error: it
 // leaves the order to the provider, which is the only honest default across
@@ -62,17 +48,7 @@ func sortKeyNames() []string { return slices.Sorted(maps.Keys(sortByNames)) }
 //
 // An unrecognised key used to fall through to the interruption sort, silently
 // and with an exit code of 0.
-func parseSortBy(value string) (cloud.SortKey, error) {
-	if value == "" {
-		return "", nil
-	}
-	if sortBy, ok := sortByNames[value]; ok {
-		return sortBy, nil
-	}
-
-	return "", fmt.Errorf("%w: unknown sort %q, want one of %s",
-		cloud.ErrInvalidArgument, value, strings.Join(sortKeyNames(), "|"))
-}
+func parseSortBy(value string) (cloud.SortKey, error) { return cloud.ParseSortKey(value) }
 
 // listCommand declares `spotinfo list` with the vocabulary flags marked for it.
 //
@@ -152,7 +128,7 @@ func listCommand(action cli.ActionFunc) *cli.Command {
 			&cli.IntFlag{
 				Name:  flagScoreTimeout,
 				Usage: "timeout for score enrichment in seconds",
-				Value: spot.DefaultScoreTimeoutSeconds,
+				Value: cloud.DefaultScoreTimeoutSeconds,
 			},
 			&cli.BoolFlag{
 				Name:  flagOffline,

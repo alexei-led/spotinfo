@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -14,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"spotinfo/internal/cloud"
+	"spotinfo/internal/providers"
 	awsprovider "spotinfo/internal/providers/aws"
 	"spotinfo/internal/spot"
 )
@@ -97,8 +100,14 @@ func offlineLinuxCapabilities() cloud.Capabilities {
 
 // stubRegistry serves the providers a test registered and reports every other
 // recognised cloud as unavailable, exactly as the compiled registry does.
+//
+// It records the data policy each lookup asked for. Without that, a tool that
+// accepts `offline` and ignores it is indistinguishable from one that honours
+// it — which is the defect the retired include_names parameter was.
 type stubRegistry struct {
 	providers map[cloud.ProviderID]cloud.Provider
+	policies  []cloud.FetchPolicy
+	mutex     sync.Mutex
 }
 
 func newStubRegistry(provided ...cloud.Provider) *stubRegistry {
@@ -110,13 +119,35 @@ func newStubRegistry(provided ...cloud.Provider) *stubRegistry {
 	return registry
 }
 
-func (r *stubRegistry) Get(id cloud.ProviderID) (cloud.Provider, error) {
+func (r *stubRegistry) Get(id cloud.ProviderID, policy cloud.FetchPolicy) (cloud.Provider, error) {
+	r.mutex.Lock()
+	r.policies = append(r.policies, policy)
+	r.mutex.Unlock()
+
 	if provider, ok := r.providers[id]; ok {
 		return provider, nil
 	}
 
 	return nil, fmt.Errorf("%w: cloud provider %q is unavailable (PROVIDER_NOT_REGISTERED)", cloud.ErrDataUnavailable, id)
 }
+
+// lastPolicy reports the data policy the most recent lookup asked for.
+func (r *stubRegistry) lastPolicy() cloud.FetchPolicy {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	return r.policies[len(r.policies)-1]
+}
+
+// compiledRegistry adapts the production provider registry, whose Get takes no
+// data policy, to the seam the server needs. Only cmd/spotinfo builds a policy
+// aware one; a test that just needs the real providers uses this.
+type compiledRegistry struct{ registry *providers.Registry }
+
+func (c compiledRegistry) Get(id cloud.ProviderID, _ cloud.FetchPolicy) (cloud.Provider, error) {
+	return c.registry.Get(id)
+}
+func (c compiledRegistry) Registered() []cloud.ProviderID { return c.registry.Registered() }
 
 func (r *stubRegistry) Registered() []cloud.ProviderID {
 	ids := make([]cloud.ProviderID, 0, len(r.providers))
@@ -129,19 +160,34 @@ func (r *stubRegistry) Registered() []cloud.ProviderID {
 	return ids
 }
 
-// awsStub builds a registry holding one AWS provider that answers with the
-// given candidates.
-func awsStub(candidates ...cloud.Candidate) (*stubProvider, *stubRegistry) {
-	provider := &stubProvider{
-		id:           cloud.ProviderAWS,
-		capabilities: awsCapabilities(),
+// stubFor builds a provider of one cloud answering with the given candidates,
+// stamped with that cloud so the published document is self-consistent.
+//
+// The fixtures are copied before they are stamped. Parallel subtests routinely
+// share one fixture slice, and stamping it in place is a write the race
+// detector reports against whichever sibling reads it.
+func stubFor(id cloud.ProviderID, capabilities cloud.Capabilities, fixtures []cloud.Candidate) *stubProvider {
+	candidates := slices.Clone(fixtures)
+	for i := range candidates {
+		candidates[i].Provider = id
+	}
+
+	return &stubProvider{
+		id:           id,
+		capabilities: capabilities,
 		result: cloud.Result{
-			Provider:   cloud.ProviderAWS,
+			Provider:   id,
 			Mode:       cloud.DataModeEmbeddedSnapshot,
 			Sources:    testSources(),
 			Candidates: candidates,
 		},
 	}
+}
+
+// awsStub builds a registry holding one AWS provider that answers with the
+// given candidates.
+func awsStub(candidates ...cloud.Candidate) (*stubProvider, *stubRegistry) {
+	provider := stubFor(cloud.ProviderAWS, awsCapabilities(), candidates)
 
 	return provider, newStubRegistry(provider)
 }
@@ -340,6 +386,25 @@ func awsAdapterRegistry(t *testing.T, advices []spot.Advice) *stubRegistry {
 
 // errAcquisition is the acquisition failure used where the message does not matter.
 var errAcquisition = errors.New("acquisition failed")
+
+// assertGolden compares against a recorded contract file. A regeneration always
+// fails the run: rewriting the file and then comparing it to itself would let a
+// job that happens to set UPDATE_GOLDEN report a client-visible contract change
+// as a pass.
+func assertGolden(t *testing.T, name string, actual []byte) {
+	t.Helper()
+
+	path := filepath.Join("testdata", name)
+	if os.Getenv("UPDATE_GOLDEN") == "1" {
+		require.NoError(t, os.WriteFile(path, actual, 0o600))
+		t.Fatalf("%s regenerated; review the diff and re-run without UPDATE_GOLDEN", name)
+	}
+
+	expected, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, string(expected), string(actual),
+		"%s records the published MCP contract; regenerate with UPDATE_GOLDEN=1 and review the diff", name)
+}
 
 // Every capability gate in this package is asserted against awsCapabilities().
 // If the real adapter and this fixture drift, those gates prove nothing about

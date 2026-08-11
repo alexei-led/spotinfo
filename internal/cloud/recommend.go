@@ -182,7 +182,7 @@ func (r *RecommendRequest) validateBounds() error {
 		return fmt.Errorf("%w: min_memory_gib must be a positive number", ErrInvalidArgument)
 	}
 	if r.MaxPrice != nil && r.MaxPrice.IsZero() {
-		return fmt.Errorf("%w: max_price_per_hour must be positive", ErrInvalidArgument)
+		return fmt.Errorf("%w: max_price must be positive", ErrInvalidArgument)
 	}
 	// Only the lower bound is a domain rule: a result set of nothing is not a
 	// recommendation. MaxTop is not enforced here because it would apply to the

@@ -27,11 +27,14 @@ const (
 	rateLimitInterval = 100 * time.Millisecond
 
 	// AWS API configuration
-	defaultTargetCapacity      = 1
-	defaultMaxResults          = 30
-	maxRetryAttempts           = 5
-	DefaultScoreTimeoutSeconds = 30
-	defaultScoreTimeout        = DefaultScoreTimeoutSeconds * time.Second
+	defaultTargetCapacity = 1
+	defaultMaxResults     = 30
+	maxRetryAttempts      = 5
+	// defaultScoreTimeout bounds a lookup this client was given no timeout for.
+	// It is the client's own fallback, not a surface default: the value the CLI
+	// flag and the MCP argument advertise is cloud.DefaultScoreTimeoutSeconds,
+	// which is where a caller-facing default belongs.
+	defaultScoreTimeout = 30 * time.Second
 )
 
 // errScoreProviderUnavailable wraps every placement-score failure. Reported

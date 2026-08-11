@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -65,22 +66,25 @@ const (
 	scoreHeaderRegional = "Placement Score (Regional)"
 	scoreHeaderGeneric  = "Placement Score"
 
-	// Sort keys. Each names a neutral observation, so the same word means the
-	// same thing on both commands and on every cloud.
-	sortMachine = "machine"
-	sortRisk    = "risk"
-	sortSavings = "savings"
-	sortPrice   = "price"
-	sortRegion  = "region"
+	// Sort keys. The vocabulary itself lives in internal/cloud so `--sort` and
+	// the MCP `sort` argument cannot accept different words; these names are
+	// spelled from the neutral keys rather than beside them. "score" is the one
+	// word that is not its field's name — the field is placement_score.
+	sortMachine = string(cloud.SortByMachine)
+	sortRisk    = string(cloud.SortByRisk)
+	sortSavings = string(cloud.SortBySavings)
+	sortPrice   = string(cloud.SortByPrice)
+	sortRegion  = string(cloud.SortByRegion)
 	sortScore   = "score"
 
 	// Score thresholds
 	excellentScoreThreshold = 8 // Scores 8-10 are excellent
 	moderateScoreThreshold  = 5 // Scores 5-7 are moderate
 	poorScoreThreshold      = 1 // Scores 1-4 are poor
-	// maxPlacementScore is the top of the AWS placement-score scale, which the
-	// --min-score usage text already published as 1-10.
-	maxPlacementScore = 10
+	// maxPlacementScore is the top of the placement-score scale, which the
+	// --min-score usage text already published as 1-10. Read from the neutral
+	// domain so the CLI flag and the MCP argument cannot advertise two bounds.
+	maxPlacementScore = cloud.MaxPlacementScore
 
 	// Build constants
 	unknownBuildValue = "unknown"
@@ -109,12 +113,13 @@ const (
 	flagQuiet   = "quiet"
 	flagJSONLog = "json-log"
 
-	// Sort order values
-	orderAsc  = "asc"
-	orderDesc = "desc"
+	// Sort order values, read from the neutral domain: one spelling for the
+	// flag, the tool argument and the published request echo.
+	orderAsc  = cloud.OrderAsc
+	orderDesc = cloud.OrderDesc
 
 	// allRegions is the --region value selecting every published region.
-	allRegions = "all"
+	allRegions = string(cloud.RegionAll)
 
 	// appName is the CLI application name.
 	appName = "spotinfo"
@@ -153,7 +158,7 @@ func rootCmd(ctx *cli.Context) error {
 	// Checked before anything else: --mcp has always been dispatched from here,
 	// and it is the one bare invocation that means something.
 	if isMCPMode(ctx) {
-		return runMCPServer(ctx, mainCtx)
+		return runMCPServer(mainCtx)
 	}
 
 	_ = cli.ShowAppHelp(ctx)
@@ -215,9 +220,19 @@ func undefinedFlagName(err error) (string, bool) {
 // The default is unchanged: without the flag, live data is still fetched and the
 // snapshot remains a fallback.
 func newSpotClient(ctx *cli.Context) *spot.Client {
+	return newSpotClientFor(cloud.FetchPolicy{
+		Offline: lineageBool(ctx, flagOffline),
+		Refresh: lineageBool(ctx, flagRefresh),
+	})
+}
+
+// newSpotClientFor builds the client for one data policy. It is split from the
+// flag reading above because the MCP surface takes the same policy per tool
+// call rather than once per process.
+func newSpotClientFor(requested cloud.FetchPolicy) *spot.Client {
 	policy := spot.FetchPolicy{
-		UseEmbedded: lineageBool(ctx, flagOffline),
-		Refresh:     lineageBool(ctx, flagRefresh),
+		UseEmbedded: requested.Offline,
+		Refresh:     requested.Refresh,
 	}
 
 	client := spot.NewWithFetchOptions(spot.DefaultTimeoutSeconds*time.Second, policy)
@@ -292,6 +307,71 @@ func newProviderRegistry(client *spot.Client) (*providers.Registry, error) {
 	return registry, nil
 }
 
+// mcpProviders hands the MCP server the providers one tool call must be
+// answered from. Each call names its own data policy — one server answers many
+// clients, and a snapshot-only question from one of them must not put the
+// process into snapshot-only mode for the rest.
+//
+// A registry is built at most once per policy and then reused: the feeds a
+// spot.Client caches are what make a second call fast. A refreshing call always
+// builds a fresh one — "ignore the cache" cannot be answered from a client that
+// already read it — and replaces the memoised entry, so the next call answers
+// from the data that refresh just fetched rather than from the copy it was
+// meant to supersede.
+type mcpProviders struct {
+	built map[bool]*providers.Registry
+	mutex sync.Mutex
+}
+
+// newMCPProviders builds the default registry eagerly, so a composition failure
+// is reported before the server starts serving rather than inside a tool call.
+func newMCPProviders() (*mcpProviders, error) {
+	registry, err := newProviderRegistry(newSpotClientFor(cloud.FetchPolicy{}))
+	if err != nil {
+		return nil, err
+	}
+
+	return &mcpProviders{built: map[bool]*providers.Registry{false: registry}}, nil
+}
+
+// Get resolves one provider under the request's data policy.
+func (m *mcpProviders) Get(id cloud.ProviderID, policy cloud.FetchPolicy) (cloud.Provider, error) {
+	registry, err := m.registry(policy)
+	if err != nil {
+		return nil, err
+	}
+
+	return registry.Get(id)
+}
+
+// Registered names the clouds this binary serves. It reads the default
+// registry: which providers are compiled in does not depend on data policy.
+func (m *mcpProviders) Registered() []cloud.ProviderID {
+	registry, err := m.registry(cloud.FetchPolicy{})
+	if err != nil {
+		return nil
+	}
+
+	return registry.Registered()
+}
+
+func (m *mcpProviders) registry(policy cloud.FetchPolicy) (*providers.Registry, error) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	if built, ok := m.built[policy.Offline]; ok && !policy.Refresh {
+		return built, nil
+	}
+
+	registry, err := newProviderRegistry(newSpotClientFor(policy))
+	if err != nil {
+		return nil, err
+	}
+	m.built[policy.Offline] = registry
+
+	return registry, nil
+}
+
 // isMCPMode checks if the application should run in MCP server mode
 func isMCPMode(ctx *cli.Context) bool {
 	// Check CLI flag first
@@ -307,8 +387,13 @@ func isMCPMode(ctx *cli.Context) bool {
 	return false
 }
 
-// runMCPServer starts the MCP server
-func runMCPServer(ctx *cli.Context, execCtx context.Context) error {
+// runMCPServer starts the MCP server.
+//
+// It reads no flags: the query flags live on the two subcommands now, and the
+// data policy this server answers under is a per-tool-call argument rather than
+// a property of the process. Transport and port still come from the
+// environment.
+func runMCPServer(execCtx context.Context) error {
 	log.Info("starting MCP server mode")
 
 	// Get transport mode
@@ -325,9 +410,7 @@ func runMCPServer(ctx *cli.Context, execCtx context.Context) error {
 			slog.String("port", port))
 	}
 
-	client := newSpotClient(ctx)
-
-	registry, err := newProviderRegistry(client)
+	registries, err := newMCPProviders()
 	if err != nil {
 		return err
 	}
@@ -338,7 +421,7 @@ func runMCPServer(ctx *cli.Context, execCtx context.Context) error {
 		Transport: transport,
 		Port:      port,
 		Logger:    log,
-		Providers: registry,
+		Providers: registries,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create MCP server: %w", err)

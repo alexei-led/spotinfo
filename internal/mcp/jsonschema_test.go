@@ -291,11 +291,14 @@ func TestValidatorRejectsEachWayAPayloadCanViolateAContract(t *testing.T) {
 	}
 }
 
-// spotinfo.list/v1 is the browse payload. It shares the candidate, risk, price
-// and source blocks with spotinfo.recommend/v3 and drops the ranking, so it is
-// validated here, beside them, against its own contract file. Task 6 makes it
-// the list_spot_machines payload; the document is already the one the CLI
-// publishes.
+// spotinfo.list/v1 is the browse payload, and this is what proves the MCP
+// surface publishes it: the document is taken from the list_spot_machines
+// handler, not built beside it, so an argument the tool drops or a field it
+// spells differently fails here rather than reaching a client.
+//
+// It is the same document `spotinfo list --output json` prints —
+// TestListToolPublishesTheSameDocumentAsTheCLI pins that equality — so one
+// contract check covers both surfaces.
 func TestListPayloadValidatesAgainstTheContract(t *testing.T) {
 	t.Parallel()
 
@@ -304,9 +307,11 @@ func TestListPayloadValidatesAgainstTheContract(t *testing.T) {
 	fetchedAt := time.Date(2026, time.August, 6, 8, 58, 27, 0, time.UTC)
 
 	for _, test := range []struct {
-		name       string
-		provider   cloud.ProviderID
-		candidates []cloud.Candidate
+		name         string
+		provider     cloud.ProviderID
+		capabilities cloud.Capabilities
+		candidates   []cloud.Candidate
+		args         map[string]any
 		// wantKeys are the optional per-candidate keys this case must actually
 		// publish. Without them the schema check passes on a document that
 		// carries none of them, which proves nothing about the ones a flag adds.
@@ -320,14 +325,16 @@ func TestListPayloadValidatesAgainstTheContract(t *testing.T) {
 		wantNonNull []string
 	}{
 		{
-			name:     "aws with published risk, zone prices and placement scores",
-			provider: cloud.ProviderAWS,
+			name:         "aws with published risk, zone prices and placement scores",
+			provider:     cloud.ProviderAWS,
+			capabilities: awsCapabilities(),
 			candidates: withZonePrice(buildCandidates(testCandidate{
 				Region: "us-east-1", Machine: "m6i.large", Price: 0.0416, Savings: 72, Live: true,
 				RiskLabel: "<5%", RiskMin: 0, RiskMax: 5, VCPU: 2, MemoryGiB: 8,
 				RegionScore: &regionScore, ZoneScores: map[string]int{"us-east-1a": 7},
 				ScoreFetchedAt: &fetchedAt,
 			}), "us-east-1a", "0.039"),
+			args:     map[string]any{argWithScore: true, argAZ: true},
 			wantKeys: []string{"live_price", "zone_prices", "region_score", "zone_scores", "score_fetched_at"},
 		},
 		{
@@ -339,8 +346,9 @@ func TestListPayloadValidatesAgainstTheContract(t *testing.T) {
 			// what the document published until this case existed. The Advisor
 			// savings figure survives beside it because it comes from the
 			// advisor feed, not from the price feed.
-			name:     "aws machine the price feed does not price",
-			provider: cloud.ProviderAWS,
+			name:         "aws machine the price feed does not price",
+			provider:     cloud.ProviderAWS,
+			capabilities: awsCapabilities(),
 			candidates: buildCandidates(testCandidate{
 				Region: "us-east-1", Machine: "dl1.24xlarge", Savings: 41,
 				RiskLabel: "10-15%", RiskMin: 10, RiskMax: 15, VCPU: 96, MemoryGiB: 768,
@@ -350,38 +358,30 @@ func TestListPayloadValidatesAgainstTheContract(t *testing.T) {
 			wantNonNull: []string{"savings_percent"},
 		},
 		{
-			name:        "gcp without risk",
-			provider:    cloud.ProviderGCP,
-			candidates:  gcpCandidates(),
-			wantKeys:    []string{"live_price"},
-			wantNonNull: []string{"spot_usd_per_hour"},
+			name:         "gcp without risk",
+			provider:     cloud.ProviderGCP,
+			capabilities: offlineLinuxCapabilities(),
+			candidates:   gcpCandidates(),
+			wantKeys:     []string{"live_price"},
+			wantNonNull:  []string{"spot_usd_per_hour"},
 		},
 		{
-			name:     "an answer with no candidates",
-			provider: cloud.ProviderAzure,
+			name:         "an answer with no candidates",
+			provider:     cloud.ProviderAzure,
+			capabilities: offlineLinuxCapabilities(),
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			for i := range test.candidates {
-				test.candidates[i].Provider = test.provider
+			registry := newStubRegistry(stubFor(test.provider, test.capabilities, test.candidates))
+
+			args := map[string]any{argCloud: string(test.provider)}
+			for name, value := range test.args {
+				args[name] = value
 			}
 
-			result := cloud.Result{
-				Provider:   test.provider,
-				Mode:       cloud.DataModeEmbeddedSnapshot,
-				Sources:    testSources(),
-				Candidates: test.candidates,
-			}
-
-			report, err := cloud.NewListReport(&cloud.Query{
-				Regions: []cloud.Region{allRegions}, OS: cloud.OSLinux,
-			}, &result)
-			require.NoError(t, err)
-
-			encoded, err := json.Marshal(report)
-			require.NoError(t, err)
+			encoded := payloadOf(t, callTool(t, listTool(registry).Handle, args))
 			assertValidAgainstSchema(t, schema, encoded)
 
 			var document struct {

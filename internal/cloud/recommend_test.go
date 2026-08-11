@@ -224,7 +224,7 @@ func TestValidateRejectsEveryInputOutsideTheContract(t *testing.T) {
 		{name: "zero memory", mutate: func(r *RecommendRequest) { r.MinMemoryGiB = 0 }, want: "min_memory_gib"},
 		{name: "zero top", mutate: func(r *RecommendRequest) { r.Top = 0 }, want: "top must be"},
 		{name: "negative top", mutate: func(r *RecommendRequest) { r.Top = -1 }, want: "top must be"},
-		{name: "zero budget", mutate: func(r *RecommendRequest) { r.MaxPrice = &Money{} }, want: "max_price_per_hour"},
+		{name: "zero budget", mutate: func(r *RecommendRequest) { r.MaxPrice = &Money{} }, want: "max_price"},
 		{name: "no regions", mutate: func(r *RecommendRequest) { r.Regions = nil }, want: "at least one region"},
 		{name: "empty region", mutate: func(r *RecommendRequest) { r.Regions = []Region{" "} }, want: "region must not be empty"},
 		{

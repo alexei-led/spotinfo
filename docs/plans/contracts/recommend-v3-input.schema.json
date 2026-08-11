@@ -25,6 +25,8 @@
     "min_memory_gib": {"type": "number", "exclusiveMinimum": 0},
     "max_price": {"type": "number", "exclusiveMinimum": 0},
     "workload": {"type": "string", "enum": ["cost", "web", "ci", "batch"], "default": "cost"},
-    "top": {"type": "integer", "minimum": 1, "maximum": 50, "default": 3}
+    "top": {"type": "integer", "minimum": 1, "maximum": 50, "default": 3},
+    "offline": {"type": "boolean", "default": false},
+    "refresh": {"type": "boolean", "default": false}
   }
 }

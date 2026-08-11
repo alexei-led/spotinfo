@@ -16,6 +16,10 @@ const (
 	// price and source blocks with v3 and drops the ranking: a browse answer
 	// states what is there, not what to pick.
 	SchemaVersionListV1 = "spotinfo.list/v1"
+	// SchemaVersionRegionsV1 is the region-enumeration payload. It carries the
+	// *complete* source list of one cloud, which is what makes the
+	// sources_omitted count of a trimmed list or recommend answer resolvable.
+	SchemaVersionRegionsV1 = "spotinfo.regions/v1"
 	// SchemaVersionErrorV1 is the shared error payload.
 	SchemaVersionErrorV1 = "spotinfo.error/v1"
 
@@ -210,6 +214,49 @@ type ListReport struct { //nolint:govet // field order follows the published sch
 	Warnings      []string           `json:"warnings"`
 }
 
+// RegionsReport is the spotinfo.regions/v1 payload: every region one cloud
+// publishes, with the complete list of documents that cloud was read from.
+//
+// It publishes no candidates, so nothing can be trimmed against a row set and
+// sources_omitted is always zero. That is the point: a list or recommend answer
+// scopes its provenance to the rows it carries and counts what it left out, and
+// this is where the omitted entries are recovered from.
+type RegionsReport struct { //nolint:govet // field order follows the published schema
+	SchemaVersion string        `json:"schema_version"`
+	Status        string        `json:"status"`
+	Cloud         ProviderID    `json:"cloud"`
+	Regions       []Region      `json:"regions"`
+	DataSource    DataSourceDTO `json:"data_source"`
+}
+
+// NewRegionsReport assembles the region payload from the regions a provider
+// published and the result they were derived from.
+func NewRegionsReport(result *Result, regions []Region) (*RegionsReport, error) {
+	// No published candidates, so sourceDTOs trims nothing: this answer
+	// describes a cloud, not a set of rows.
+	sources, omitted, err := sourceDTOs(result, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if regions == nil {
+		regions = []Region{}
+	}
+
+	return &RegionsReport{
+		SchemaVersion: SchemaVersionRegionsV1,
+		Status:        statusOK,
+		Cloud:         result.Provider,
+		Regions:       regions,
+		DataSource: DataSourceDTO{
+			Provider:       result.Provider,
+			Mode:           result.Mode,
+			Sources:        sources,
+			SourcesOmitted: omitted,
+		},
+	}, nil
+}
+
 // ErrorReport is the spotinfo.error/v1 payload. Cloud is null when the request
 // named no parsable provider.
 type ErrorReport struct { //nolint:govet // field order follows the published schema
@@ -231,11 +278,12 @@ func NewErrorReport(code ErrorCode, message, cloudValue string) *ErrorReport {
 	return report
 }
 
-// orderAscending and orderDescending are the two values the published request
-// echo reports for a sort direction.
+// OrderAsc and OrderDesc are the two sort directions. They are the words a
+// caller writes, the values the published request echo reports, and the enum
+// both surfaces advertise — one spelling, decided here.
 const (
-	orderAscending  = "asc"
-	orderDescending = "desc"
+	OrderAsc  = "asc"
+	OrderDesc = "desc"
 )
 
 // NewListReport assembles the spotinfo.list/v1 payload from the query that was
@@ -280,9 +328,9 @@ func NewListReport(query *Query, result *Result) (*ListReport, error) {
 }
 
 func listRequestDTO(query *Query, provider ProviderID) ListRequestDTO {
-	order := orderAscending
+	order := OrderAsc
 	if query.Sort.Descending {
-		order = orderDescending
+		order = OrderDesc
 	}
 
 	echoed := ListRequestDTO{

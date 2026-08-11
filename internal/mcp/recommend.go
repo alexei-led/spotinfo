@@ -5,41 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"slices"
-	"strconv"
-	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"spotinfo/internal/cloud"
 )
 
-// Recommendation argument keys. They match
-// docs/plans/contracts/recommend-v3-input.schema.json, which is the normative
-// input contract.
-//
-// argMaxPrice is spelled apart from the v1 tool's argMaxPricePerHour on
-// purpose: the vocabulary names the concept --max-price, and the v1 name stays
-// where it is until the tool that declares it is retired.
-const (
-	argCloud        = "cloud"
-	argMachine      = "machine"
-	argArchitecture = "architecture"
-	argOS           = "os"
-	argMinMemoryGiB = "min_memory_gib"
-	argMaxPrice     = "max_price"
-	argWorkload     = "workload"
-	argTop          = "top"
-)
-
-const recommendToolName = "recommend_spot_instances"
-
-// recommendArgs is the closed set of arguments the v3 input contract declares.
-// mcp-go checks a request against the advertised schema only under
-// server.WithInputSchemaValidation, which this server cannot adopt: the v1
-// find_spot_instances handler clamps the limit and score bounds its own schema
-// declares, so switching validation on would turn every clamp into an error and
-// break a golden-pinned surface. This tool therefore enforces its own object.
+// recommendArgs is the closed set of arguments the v3 input contract declares
+// (docs/plans/contracts/recommend-v3-input.schema.json, the normative input
+// contract). rejectUnknownArgs enforces it; see the note beside listArgs for
+// why the host does not.
 var recommendArgs = map[string]struct{}{
 	argCloud:        {},
 	argRegions:      {},
@@ -51,20 +26,17 @@ var recommendArgs = map[string]struct{}{
 	argMaxPrice:     {},
 	argWorkload:     {},
 	argTop:          {},
-}
-
-// exclusiveMinimum declares the contract's exclusive lower bound, which mcp-go
-// has no helper for. `minimum: 0` is not the same promise: it advertises zero as
-// an acceptable memory floor or price ceiling, and the handler rejects both.
-func exclusiveMinimum(bound float64) mcp.PropertyOption {
-	return func(schema map[string]any) { schema["exclusiveMinimum"] = bound }
+	argOffline:      {},
+	argRefresh:      {},
 }
 
 // registerRecommendTool advertises the provider-neutral recommendation tool.
 // The schema mirrors the published v3 input contract; the MCP host rejects
 // values outside each enum before a request reaches the handler.
+//
+//nolint:funlen // one statement per advertised argument; splitting it hides the schema
 func (s *Server) registerRecommendTool() {
-	tool := mcp.NewTool(recommendToolName,
+	tool := mcp.NewTool(recommendToolName, append(readOnlyToolAnnotations(),
 		mcp.WithDescription("Recommend Spot machines from committed multi-cloud price data. "+
 			"Returns a spotinfo.recommend/v3 payload with explicit risk availability per cloud."),
 		mcp.WithString(argCloud,
@@ -76,7 +48,7 @@ func (s *Server) registerRecommendTool() {
 			mcp.Items(map[string]any{jsonSchemaType: jsonTypeString, jsonSchemaMinLength: 1}),
 			mcp.MinItems(1),
 			mcp.UniqueItems(true),
-			mcp.DefaultArray([]string{allRegions})),
+			mcp.DefaultArray([]string{string(cloud.RegionAll)})),
 		mcp.WithString(argMachine,
 			mcp.Description("Machine type RE2 regexp. Omit for no machine-name filter"),
 			mcp.DefaultString("")),
@@ -109,32 +81,28 @@ func (s *Server) registerRecommendTool() {
 			mcp.Min(1),
 			mcp.Max(cloud.MaxTop),
 			mcp.DefaultNumber(cloud.DefaultTop)),
+		mcp.WithBoolean(argOffline,
+			mcp.Description("Answer from the committed snapshots and make no request at all"),
+			mcp.DefaultBool(false)),
+		mcp.WithBoolean(argRefresh,
+			mcp.Description("Ignore any locally cached provider document for this call"),
+			mcp.DefaultBool(false)),
 		// The contract declares a closed object. This advertises it to the
 		// client; rejectUnknownArgs is what enforces it, because the host does
 		// not validate a request against the schema for us.
 		mcp.WithSchemaAdditionalProperties(false),
-	)
+	)...)
 
 	s.mcpServer.AddTool(tool, NewRecommendTool(s.providers, s.logger).Handle)
 }
 
-func providerEnum() []string {
-	ids := cloud.ProviderIDs()
-	names := make([]string, 0, len(ids))
-	for _, id := range ids {
-		names = append(names, string(id))
-	}
-
-	return names
-}
-
-// RecommendTool implements the recommend_spot_instances MCP tool.
+// RecommendTool implements the recommend_spot_machines MCP tool.
 type RecommendTool struct {
 	providers providerRegistry
 	logger    *slog.Logger
 }
 
-// NewRecommendTool creates a new recommend_spot_instances tool handler.
+// NewRecommendTool creates a new recommend_spot_machines tool handler.
 func NewRecommendTool(providers providerRegistry, logger *slog.Logger) *RecommendTool {
 	return &RecommendTool{providers: providers, logger: logger}
 }
@@ -145,32 +113,33 @@ func NewRecommendTool(providers providerRegistry, logger *slog.Logger) *Recommen
 //
 //nolint:gocritic // hugeParam: signature dictated by mcp-go's server.ToolHandlerFunc
 func (t *RecommendTool) Handle(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	t.logger.Debug("handling recommend_spot_instances request", slog.Any("arguments", req.Params.Arguments))
-
-	args, ok := req.Params.Arguments.(map[string]any)
-	if !ok {
-		args = make(map[string]any)
-	}
+	args := argumentsOf(req)
+	t.logger.Debug("handling "+recommendToolName+" request", slog.Any("arguments", args))
 
 	request, err := parseRecommendRequest(args)
 	if err != nil {
-		return recommendError(cloud.CodeInvalidArgument, err, rawCloud(args)), nil
+		return toolError(cloud.CodeInvalidArgument, err, rawCloud(args)), nil
 	}
 
-	report, err := t.recommend(ctx, request)
+	policy, err := requestedPolicy(args)
 	if err != nil {
-		t.logger.Debug("recommend_spot_instances failed",
+		return toolError(cloud.CodeInvalidArgument, err, rawCloud(args)), nil
+	}
+
+	report, err := t.recommend(ctx, request, policy)
+	if err != nil {
+		t.logger.Debug(recommendToolName+" failed",
 			slog.String(argCloud, string(request.Cloud)), slog.Any("error", err))
 
-		return recommendError(cloud.CodeOf(err), err, rawCloud(args)), nil
+		return toolError(cloud.CodeOf(err), err, rawCloud(args)), nil
 	}
 
 	encoded, err := json.Marshal(report)
 	if err != nil {
-		return recommendError(cloud.CodeInternal, err, rawCloud(args)), nil
+		return toolError(cloud.CodeInternal, err, rawCloud(args)), nil
 	}
 
-	t.logger.Debug("recommend_spot_instances completed",
+	t.logger.Debug(recommendToolName+" completed",
 		slog.String(argCloud, string(request.Cloud)),
 		slog.Int("recommendations", len(report.Recommendations)))
 
@@ -180,7 +149,9 @@ func (t *RecommendTool) Handle(ctx context.Context, req mcp.CallToolRequest) (*m
 // recommend validates the request, resolves the requested provider and runs the
 // neutral engine. The registry lookup happens before acquisition, so a disabled
 // cloud costs no I/O and never falls back to another provider.
-func (t *RecommendTool) recommend(ctx context.Context, request *cloud.RecommendRequest) (*cloud.RecommendReport, error) {
+func (t *RecommendTool) recommend(ctx context.Context,
+	request *cloud.RecommendRequest, policy cloud.FetchPolicy,
+) (*cloud.RecommendReport, error) {
 	// Every bound is checked before the provider is resolved. The other way
 	// round, a malformed request aimed at a disabled cloud reports
 	// DATA_UNAVAILABLE and hides the argument the caller got wrong — and the
@@ -190,11 +161,7 @@ func (t *RecommendTool) recommend(ctx context.Context, request *cloud.RecommendR
 		return nil, err
 	}
 
-	if t.providers == nil {
-		return nil, fmt.Errorf("%w: no provider registry is configured", cloud.ErrDataUnavailable)
-	}
-
-	provider, err := t.providers.Get(request.Cloud)
+	provider, err := providerFor(t.providers, request.Cloud, policy)
 	if err != nil {
 		return nil, err
 	}
@@ -206,16 +173,11 @@ func (t *RecommendTool) recommend(ctx context.Context, request *cloud.RecommendR
 // every documented default. It rejects values outside the neutral vocabulary;
 // bounds and combinations are the request's own job to validate.
 func parseRecommendRequest(args map[string]any) (*cloud.RecommendRequest, error) {
-	if err := rejectUnknownArgs(args); err != nil {
+	if err := rejectUnknownArgs(args, recommendArgs); err != nil {
 		return nil, err
 	}
 
-	cloudName, err := stringArg(args, argCloud, string(cloud.ProviderAWS))
-	if err != nil {
-		return nil, err
-	}
-
-	provider, err := cloud.ParseProviderID(cloudName)
+	provider, err := requestedCloud(args)
 	if err != nil {
 		return nil, err
 	}
@@ -309,224 +271,4 @@ func recommendConstraints(args map[string]any, request *cloud.RecommendRequest) 
 	request.Top = top
 
 	return request, nil
-}
-
-// rejectUnknownArgs fails a request carrying an argument the contract does not
-// declare. Dropping one silently answers a different question than the caller
-// asked: `budget` in place of `max_price` returns recommendations with
-// no ceiling applied and status ok, and only a client that diffs the echoed
-// request against what it sent would ever notice.
-func rejectUnknownArgs(args map[string]any) error {
-	unknown := make([]string, 0, len(args))
-
-	for key := range args {
-		if _, declared := recommendArgs[key]; !declared {
-			unknown = append(unknown, key)
-		}
-	}
-
-	if len(unknown) == 0 {
-		return nil
-	}
-
-	// Map iteration order is random; a caller comparing two failures needs the
-	// same message for the same request.
-	slices.Sort(unknown)
-
-	return fmt.Errorf("%w: unknown argument: %s", cloud.ErrInvalidArgument, strings.Join(unknown, ", "))
-}
-
-// requestedRegions defaults to every region the provider publishes, matching
-// the documented input contract. Only an absent argument takes that default:
-// the schema declares an array of at least one non-empty string, and folding an
-// explicit `[]` into every region would answer a broader question than the
-// caller asked.
-//
-// The shape is checked here because the host does not check it for us, and cast
-// is too permissive to do it: ToStringSlice splits a bare "us-east-1 us-west-2"
-// on whitespace into two regions the caller never named, and turns a number or
-// a boolean element into a region name.
-func requestedRegions(args map[string]any) ([]cloud.Region, error) {
-	value, present := args[argRegions]
-	if !present || value == nil {
-		return []cloud.Region{allRegions}, nil
-	}
-
-	elements, err := regionElements(value)
-	if err != nil {
-		return nil, err
-	}
-	if len(elements) == 0 {
-		return nil, fmt.Errorf("%w: %s must name at least one region", cloud.ErrInvalidArgument, argRegions)
-	}
-
-	regions := make([]cloud.Region, 0, len(elements))
-
-	for _, element := range elements {
-		name, isString := element.(string)
-		if !isString || strings.TrimSpace(name) == "" {
-			return nil, fmt.Errorf("%w: every %s element must be a non-empty region name",
-				cloud.ErrInvalidArgument, argRegions)
-		}
-
-		regions = append(regions, cloud.Region(name))
-	}
-
-	return regions, nil
-}
-
-// regionElements accepts the two shapes the argument reaches the handler in:
-// []any from a decoded JSON request, and []string from an in-process caller.
-// Anything else is not the array the contract declares.
-func regionElements(value any) ([]any, error) {
-	switch typed := value.(type) {
-	case []any:
-		return typed, nil
-	case []string:
-		elements := make([]any, 0, len(typed))
-		for _, name := range typed {
-			elements = append(elements, name)
-		}
-
-		return elements, nil
-	default:
-		return nil, fmt.Errorf("%w: %s must be an array of region names", cloud.ErrInvalidArgument, argRegions)
-	}
-}
-
-// stringArg reads a string argument. The MCP server does not check a request
-// against the advertised schema, so a caller that wraps a value in an array or
-// sends a number reaches the handler; coercing that to "" would answer a
-// question the caller did not ask — silently, and with status ok.
-//
-// Only an absent or null argument takes the documented default. An explicit ""
-// is a value none of the enums list, so it is passed on to the vocabulary
-// parser and refused there: folding it into the default would answer
-// `cloud: ""` as AWS and `workload: ""` as cost. `machine` is the one argument
-// whose contract gives "" a meaning — no machine-name filter — and its
-// documented default is "" already.
-func stringArg(args map[string]any, key, defaultValue string) (string, error) {
-	value, present := args[key]
-	if !present || value == nil {
-		return defaultValue, nil
-	}
-
-	text, isString := value.(string)
-	if !isString {
-		return "", fmt.Errorf("%w: %s must be a string", cloud.ErrInvalidArgument, key)
-	}
-
-	return text, nil
-}
-
-// numberArg reads a numeric argument, reporting whether it was present. A
-// number quoted as a string is accepted because callers routinely send one;
-// everything else is refused rather than coerced. cast would turn true into 1
-// and a misspelled number into the zero that means "argument omitted", so the
-// caller would be answered against a default it never asked for.
-func numberArg(args map[string]any, key string) (float64, bool, error) {
-	value, present := args[key]
-	if !present || value == nil {
-		return 0, false, nil
-	}
-
-	switch number := value.(type) {
-	case float64:
-		return number, true, nil
-	case int:
-		return float64(number), true, nil
-	case json.Number:
-		if amount, err := number.Float64(); err == nil {
-			return amount, true, nil
-		}
-	case string:
-		if amount, err := strconv.ParseFloat(number, 64); err == nil {
-			return amount, true, nil
-		}
-	}
-
-	return 0, false, fmt.Errorf("%w: %s must be a number", cloud.ErrInvalidArgument, key)
-}
-
-// intArg reads a whole-number argument. An absent argument takes the documented
-// default; a present one must be an integer, so an unusable value is reported
-// rather than replaced by that default.
-func intArg(args map[string]any, key string, defaultValue int) (int, error) {
-	number, present, err := numberArg(args, key)
-	if err != nil {
-		return 0, err
-	}
-	if !present {
-		return defaultValue, nil
-	}
-
-	whole := int(number)
-	if float64(whole) != number {
-		return 0, fmt.Errorf("%w: %s must be a whole number", cloud.ErrInvalidArgument, key)
-	}
-
-	return whole, nil
-}
-
-// optionalPrice converts a price ceiling. An absent argument means no ceiling;
-// a present one must be a positive amount.
-//
-// A ceiling is truncated to the fixed-point scale rather than rejected for
-// precision: a client that divides a monthly budget by 720 sends
-// 0.041666666666666664, which find_spot_instances already filters on, so
-// failing it here would make the v2 tool reject a budget v1 accepts. NaN and
-// out-of-range amounts still fail — those are not ceilings.
-func optionalPrice(args map[string]any, key string) (*cloud.Money, error) {
-	amount, present, err := numberArg(args, key)
-	if err != nil {
-		return nil, err
-	}
-	if !present {
-		return nil, nil //nolint:nilnil // absence is the mapping for "no ceiling"
-	}
-
-	if amount <= 0 {
-		return nil, fmt.Errorf("%w: %s must be positive", cloud.ErrInvalidArgument, argMaxPrice)
-	}
-
-	price, err := cloud.MoneyCeilingFromFloat(amount)
-	if err != nil {
-		return nil, err
-	}
-
-	return &price, nil
-}
-
-// rawCloud echoes the cloud the caller named. A non-string argument cannot be
-// echoed, so the error reports a null cloud rather than inventing one.
-func rawCloud(args map[string]any) string {
-	value, ok := args[argCloud]
-	if !ok {
-		return string(cloud.ProviderAWS)
-	}
-
-	name, isString := value.(string)
-	if !isString {
-		return ""
-	}
-
-	return name
-}
-
-// recommendError renders a failure as the published error payload.
-//
-// The message is the error's own text. Most are domain errors written for a
-// caller, but an acquisition failure wraps whatever the provider returned — for
-// AWS that can be SDK text carrying an operation name, endpoint and request ID.
-// That matches what find_spot_instances has always returned, and the detail is
-// what makes a failure actionable; the stable machine-readable part is the code.
-func recommendError(code cloud.ErrorCode, err error, cloudValue string) *mcp.CallToolResult {
-	report := cloud.NewErrorReport(code, err.Error(), cloudValue)
-
-	encoded, marshalErr := json.Marshal(report)
-	if marshalErr != nil {
-		return mcp.NewToolResultError(err.Error())
-	}
-
-	return mcp.NewToolResultError(string(encoded))
 }

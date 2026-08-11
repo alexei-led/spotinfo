@@ -3,7 +3,9 @@ package cloud
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -129,6 +131,44 @@ const (
 	SortByPlacementScore SortKey = "placement_score"
 )
 
+// sortWordScore is the single exception to "the word is the field's own name":
+// the field is placement_score, and a caller writes score.
+const sortWordScore = "score"
+
+// sortVocabulary maps the word a caller writes onto the neutral key it selects.
+// It lives beside the keys rather than on either surface because `--sort` and
+// the `sort` tool argument must accept the same words: a second table is how
+// "score" comes to mean two things depending on which surface was asked. Every
+// other word is spelled from its key rather than beside it, so the two cannot
+// drift.
+var sortVocabulary = map[string]SortKey{
+	string(SortByMachine): SortByMachine,
+	string(SortByPrice):   SortByPrice,
+	string(SortByRegion):  SortByRegion,
+	string(SortByRisk):    SortByRisk,
+	string(SortBySavings): SortBySavings,
+	sortWordScore:         SortByPlacementScore,
+}
+
+// SortKeyNames lists the sort vocabulary in stable order, for help text, the
+// published enum and error messages.
+func SortKeyNames() []string { return slices.Sorted(maps.Keys(sortVocabulary)) }
+
+// ParseSortKey resolves one word of the sort vocabulary. An empty value is not
+// an error: it leaves the order to the provider, which is the only honest
+// default across clouds that publish different observations.
+func ParseSortKey(value string) (SortKey, error) {
+	if value == "" {
+		return "", nil
+	}
+	if key, known := sortVocabulary[value]; known {
+		return key, nil
+	}
+
+	return "", fmt.Errorf("%w: unknown sort %q, want one of %s",
+		ErrInvalidArgument, value, strings.Join(SortKeyNames(), "|"))
+}
+
 // SortOrder asks a provider to return candidates in a given order. The zero
 // value leaves ordering to the provider. Ordering is part of the query rather
 // than a consumer-side step because a provider that already sorts its own data
@@ -137,6 +177,20 @@ type SortOrder struct {
 	Key        SortKey
 	Descending bool
 }
+
+// The placement bounds both surfaces advertise. They are declared here, in the
+// neutral domain that owns PlacementRequest, so the CLI flag and the MCP
+// argument cannot publish two different limits for the same request.
+const (
+	// MaxPlacementScore is the top of the placement-score scale a request may
+	// filter on.
+	MaxPlacementScore = 10
+	// DefaultScoreTimeoutSeconds bounds a placement-score lookup when the caller
+	// names no timeout.
+	DefaultScoreTimeoutSeconds = 30
+	// MaxScoreTimeoutSeconds is the largest lookup budget either surface accepts.
+	MaxScoreTimeoutSeconds = 300
+)
 
 // PlacementRequest asks a provider for capacity placement scores. The zero
 // value requests none; a provider that does not declare CapabilityPlacementScore
@@ -183,6 +237,20 @@ func (q *Query) CapabilityNeeds() CapabilityRequest {
 	}
 
 	return CapabilityRequest{OS: q.OS, Architecture: q.Architecture, Needed: needed}
+}
+
+// FetchPolicy asks for data of a given freshness. It is a property of the
+// acquisition client rather than of a Query: it decides which documents are
+// read, not which candidates are selected. The zero value is the default —
+// live data, with the committed snapshot as the fallback.
+//
+// A provider with no live path honours it by construction: there is nothing to
+// skip and nothing to re-fetch.
+type FetchPolicy struct {
+	// Offline answers from the committed snapshots and makes no request at all.
+	Offline bool
+	// Refresh ignores any cached copy for this call.
+	Refresh bool
 }
 
 // DataMode reports whether a result was built from a committed snapshot or from
@@ -238,4 +306,51 @@ type Provider interface {
 	ID() ProviderID
 	Capabilities() Capabilities
 	Query(ctx context.Context, query *Query) (Result, error)
+}
+
+// RegionsOf lists every region a provider publishes candidates for, together
+// with the result they were derived from so a caller can publish the
+// provenance without acquiring twice.
+//
+// It is a helper and deliberately not a Regions() method on Provider: a query
+// over every region already yields the answer, so a method would oblige all
+// three providers and every test stub to implement what one query derives,
+// for no capability the seam does not already have.
+//
+// The capability check runs here, before acquisition, so every caller gets it.
+// The OS is Linux because every provider declares it — an empty OS would take
+// an untested path through three different catalogues to answer a question
+// that is not about an operating system at all.
+func RegionsOf(ctx context.Context, provider Provider) ([]Region, Result, error) {
+	query := &Query{
+		OS:      OSLinux,
+		Regions: []Region{RegionAll},
+		Sort:    SortOrder{Key: SortByRegion},
+	}
+
+	if err := provider.Capabilities().Require(query.CapabilityNeeds()); err != nil {
+		return nil, Result{}, err
+	}
+
+	result, err := provider.Query(ctx, query)
+	if err != nil {
+		return nil, Result{}, err
+	}
+
+	seen := make(map[Region]struct{}, len(result.Candidates))
+	// Always allocated, so an empty answer publishes [] rather than null.
+	regions := make([]Region, 0, len(result.Candidates))
+
+	for i := range result.Candidates {
+		region := result.Candidates[i].Location.Region
+		if _, duplicate := seen[region]; duplicate {
+			continue
+		}
+		seen[region] = struct{}{}
+		regions = append(regions, region)
+	}
+
+	slices.Sort(regions)
+
+	return regions, result, nil
 }

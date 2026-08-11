@@ -448,9 +448,9 @@ func intPtr(value int) *int { return &value }
 //
 // getSpotSavingsConfig is unexported, so reflection is the only way to assert
 // the mapping from outside internal/spot — and it is worth asserting: every
-// find_spot_instances call now reaches the legacy client through legacyOptions,
-// where a dropped placement flag or a swapped sort key changes the answer
-// without failing anything.
+// list_spot_machines and `spotinfo list` call reaches the legacy client through
+// legacyOptions, where a dropped placement flag or a swapped sort key changes
+// the answer without failing anything.
 func appliedOptions(t *testing.T, opts []spot.GetSpotSavingsOption) map[string]any {
 	t.Helper()
 

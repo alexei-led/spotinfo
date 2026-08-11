@@ -1,8 +1,8 @@
 {
   "annotations": {
-    "readOnlyHint": false,
-    "destructiveHint": true,
-    "idempotentHint": false,
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
     "openWorldHint": true
   },
   "description": "Recommend Spot machines from committed multi-cloud price data. Returns a spotinfo.recommend/v3 payload with explicit risk availability per cloud.",
@@ -47,6 +47,11 @@
         "minimum": 1,
         "type": "integer"
       },
+      "offline": {
+        "default": false,
+        "description": "Answer from the committed snapshots and make no request at all",
+        "type": "boolean"
+      },
       "os": {
         "default": "linux",
         "description": "Machine operating system",
@@ -55,6 +60,11 @@
           "windows"
         ],
         "type": "string"
+      },
+      "refresh": {
+        "default": false,
+        "description": "Ignore any locally cached provider document for this call",
+        "type": "boolean"
       },
       "regions": {
         "default": [
@@ -95,5 +105,5 @@
     ],
     "type": "object"
   },
-  "name": "recommend_spot_instances"
+  "name": "recommend_spot_machines"
 }

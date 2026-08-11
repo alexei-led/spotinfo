@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"runtime"
@@ -1351,15 +1350,8 @@ func TestRunMCPServer(t *testing.T) {
 				ctx = timeoutCtx
 			}
 
-			// runMCPServer reads --offline from the flag lineage, so the context
-			// needs a real flag set; a nil one panics on LocalFlagNames.
-			app := &cli.App{}
-			flags := flag.NewFlagSet(appName, flag.ContinueOnError)
-			flags.Bool(flagOffline, false, "")
-			cliCtx := cli.NewContext(app, flags, nil)
-
 			// Test the function
-			err := runMCPServer(cliCtx, ctx)
+			err := runMCPServer(ctx)
 
 			if tt.expectedError != "" {
 				require.Error(t, err)
@@ -1712,7 +1704,7 @@ func TestMainCmd_ErrorHandling(t *testing.T) {
 					defer cancel()
 
 					if isMCPMode(ctx) {
-						return runMCPServer(ctx, execCtx)
+						return runMCPServer(execCtx)
 					}
 					return nil
 				},
@@ -1757,4 +1749,47 @@ func TestOfflineClientAnswersWithoutTheNetwork(t *testing.T) {
 		func(*cli.Context) error { return nil },
 	)
 	require.NoError(t, app.Run([]string{appName, listCommandName, "--offline", "--machine", "t3.micro"}))
+}
+
+// mcpProviders is what decides whether the offline and refresh tool arguments
+// act at all. The MCP tests drive a stub registry, which proves the policy
+// reaches Get and stops there; this is the other half — that a policy selects a
+// different acquisition client, and that a refresh replaces the memoised one.
+//
+// It is network-free: providers.Registry builds on first use and spot.Client
+// fetches on first query, so nothing here reads a feed.
+func TestTheMCPProviderCacheHonoursTheDataPolicy(t *testing.T) {
+	t.Parallel()
+
+	registries, err := newMCPProviders()
+	require.NoError(t, err)
+
+	live, err := registries.registry(cloud.FetchPolicy{})
+	require.NoError(t, err)
+
+	again, err := registries.registry(cloud.FetchPolicy{})
+	require.NoError(t, err)
+	assert.Same(t, live, again,
+		"a second call under the same policy must reuse the client whose cached feeds make it fast")
+
+	offline, err := registries.registry(cloud.FetchPolicy{Offline: true})
+	require.NoError(t, err)
+	assert.NotSame(t, live, offline, "a snapshot-only request must not be answered from the live client")
+
+	refreshed, err := registries.registry(cloud.FetchPolicy{Refresh: true})
+	require.NoError(t, err)
+	assert.NotSame(t, live, refreshed,
+		"\"ignore the cache\" cannot be answered from a client that already read it")
+
+	// The refreshing build replaces the memoised entry, so the next caller
+	// answers from what refresh fetched rather than from the copy it superseded.
+	next, err := registries.registry(cloud.FetchPolicy{})
+	require.NoError(t, err)
+	assert.Same(t, refreshed, next, "a refresh must supersede the client it replaced")
+
+	// The two policies are keyed apart, so refreshing the live client leaves the
+	// snapshot-only one alone.
+	stillOffline, err := registries.registry(cloud.FetchPolicy{Offline: true})
+	require.NoError(t, err)
+	assert.Same(t, offline, stillOffline)
 }

@@ -84,7 +84,7 @@ func TestServerToolRegistration(t *testing.T) {
 	assert.NotNil(t, server.mcpServer)
 }
 
-func testProviderRegistry(t *testing.T, ids ...cloud.ProviderID) *providers.Registry {
+func testProviderRegistry(t *testing.T, ids ...cloud.ProviderID) compiledRegistry {
 	t.Helper()
 
 	registrations := make([]providers.Registration, 0, len(ids))
@@ -98,12 +98,12 @@ func testProviderRegistry(t *testing.T, ids ...cloud.ProviderID) *providers.Regi
 	registry, err := providers.New(registrations...)
 	require.NoError(t, err)
 
-	return registry
+	return compiledRegistry{registry: registry}
 }
 
-// Every tool is served from the registry now. The AWS v1 names must survive
-// alongside the neutral recommendation tool.
-func TestServerAcceptsAProviderRegistryWithoutChangingAWSToolNames(t *testing.T) {
+// The published tool names are exactly the three the plan names, and none of
+// them bakes a cloud in: the cloud is an argument on every one.
+func TestServerPublishesTheThreeCloudNeutralTools(t *testing.T) {
 	t.Parallel()
 
 	server, err := NewServer(Config{
@@ -113,13 +113,53 @@ func TestServerAcceptsAProviderRegistryWithoutChangingAWSToolNames(t *testing.T)
 	})
 	require.NoError(t, err)
 
-	tools := server.mcpServer.ListTools()
-	assert.Contains(t, tools, "find_spot_instances")
-	assert.Contains(t, tools, "list_spot_regions")
-	assert.Len(t, tools, totalMCPTools)
+	tools := server.Tools()
+	require.Len(t, tools, totalMCPTools)
+
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		names = append(names, tool.Name)
+		assert.NotEmpty(t, tool.Description, "%s has no description", tool.Name)
+		assert.Contains(t, tool.InputSchema.Properties, argCloud,
+			"%s must take the cloud as an argument rather than implying one", tool.Name)
+	}
+
+	assert.Equal(t, []string{regionsToolName, listToolName, recommendToolName}, names,
+		"the tool names are the plan's; renaming one is a client-visible contract change")
 
 	assert.Equal(t, []cloud.ProviderID{cloud.ProviderAWS, cloud.ProviderGCP}, server.registeredProviders(),
 		"available providers are reported in stable lexical order")
+}
+
+// Every tool is read-only, idempotent, non-destructive and open-world. A host
+// decides whether to auto-approve a call from these hints, so an unset one is
+// read as the mcp-go default — destructive and not idempotent — for a tool that
+// only ever reads published price data.
+func TestEveryToolDeclaresTheReadOnlyAnnotations(t *testing.T) {
+	t.Parallel()
+
+	server, err := NewServer(Config{Version: "1.0.0", Logger: slog.Default(), Providers: newEmbeddedRegistry()})
+	require.NoError(t, err)
+
+	tools := server.Tools()
+	require.Len(t, tools, totalMCPTools)
+
+	for _, tool := range tools {
+		t.Run(tool.Name, func(t *testing.T) {
+			t.Parallel()
+
+			annotations := tool.Annotations
+			require.NotNil(t, annotations.ReadOnlyHint, "readOnlyHint must be declared, not left to the default")
+			require.NotNil(t, annotations.IdempotentHint, "idempotentHint must be declared")
+			require.NotNil(t, annotations.DestructiveHint, "destructiveHint must be declared")
+			require.NotNil(t, annotations.OpenWorldHint, "openWorldHint must be declared")
+
+			assert.True(t, *annotations.ReadOnlyHint)
+			assert.True(t, *annotations.IdempotentHint)
+			assert.False(t, *annotations.DestructiveHint)
+			assert.True(t, *annotations.OpenWorldHint)
+		})
+	}
 }
 
 // A binary composed without a registry still serves the AWS tools rather than
@@ -152,7 +192,7 @@ func TestRegisteredProvidersAreNamedBeforeTheyAreBuilt(t *testing.T) {
 	server, err := NewServer(Config{
 		Version:   "1.0.0",
 		Logger:    slog.Default(),
-		Providers: registry,
+		Providers: compiledRegistry{registry: registry},
 	})
 	require.NoError(t, err)
 

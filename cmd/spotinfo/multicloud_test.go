@@ -288,10 +288,10 @@ func callRecommendTool(t *testing.T, args map[string]any) *mcpgo.CallToolResult 
 func callRecommendToolWith(t *testing.T, registry *providers.Registry, args map[string]any) *mcpgo.CallToolResult {
 	t.Helper()
 
-	tool := mcp.NewRecommendTool(registry, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	tool := mcp.NewRecommendTool(fixedProviders{registry: registry}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	result, err := tool.Handle(context.Background(), mcpgo.CallToolRequest{
-		Params: mcpgo.CallToolParams{Name: "recommend_spot_instances", Arguments: args},
+		Params: mcpgo.CallToolParams{Name: "recommend_spot_machines", Arguments: args},
 	})
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -464,3 +464,15 @@ func TestMCPRecommendReportsAnUnregisteredCloud(t *testing.T) {
 	assert.Equal(t, "DATA_UNAVAILABLE", payload["code"])
 	assert.Equal(t, "azure", payload["cloud"])
 }
+
+// fixedProviders serves one compiled registry whatever data policy a tool call
+// asks for. The policy decides which acquisition client the server builds, and
+// these tests hand it a client they already made — see mcpProviders in main.go
+// for the production wiring, and TestTheMCPToolsPassTheDataPolicyToAcquisition
+// for the assertion that the policy is not merely accepted.
+type fixedProviders struct{ registry *providers.Registry }
+
+func (f fixedProviders) Get(id cloud.ProviderID, _ cloud.FetchPolicy) (cloud.Provider, error) {
+	return f.registry.Get(id)
+}
+func (f fixedProviders) Registered() []cloud.ProviderID { return f.registry.Registered() }

@@ -237,3 +237,53 @@ func scopeOf(t *testing.T, result *Result, url string) SourceScope {
 
 	return SourceScope{}
 }
+
+// The regions payload is the other half of the trimming: `list` and `recommend`
+// scope their provenance to the rows they carry and count what they left out,
+// and this is where a consumer recovers the entries that count refers to.
+// Nothing may be trimmed here — the answer describes a cloud, not a row set.
+func TestTheRegionsReportPublishesEverySourceUntrimmed(t *testing.T) {
+	t.Parallel()
+
+	result := azureShapedResult()
+
+	// The same result, trimmed against its one published row.
+	listed, err := NewListReport(&Query{Regions: []Region{RegionAll}, OS: OSLinux}, &result)
+	require.NoError(t, err)
+	require.Positive(t, listed.DataSource.SourcesOmitted, "the fixture must have something to omit")
+
+	report, err := NewRegionsReport(&result, []Region{"eastus", "westeurope"})
+	require.NoError(t, err)
+
+	assert.Equal(t, SchemaVersionRegionsV1, report.SchemaVersion)
+	assert.Equal(t, ProviderAzure, report.Cloud)
+	assert.Equal(t, []Region{"eastus", "westeurope"}, report.Regions)
+	assert.Len(t, report.DataSource.Sources, len(result.Sources), "every source the cloud was read from")
+	assert.Equal(t, 0, report.DataSource.SourcesOmitted, "nothing can be trimmed against no rows")
+	assert.Equal(t, len(listed.DataSource.Sources)+listed.DataSource.SourcesOmitted,
+		len(report.DataSource.Sources), "the omitted count must be resolvable here")
+}
+
+// A provider that cannot say where its data came from cannot answer, here as
+// anywhere else: an empty source list fails rather than publishing a payload
+// with invented provenance.
+func TestTheRegionsReportRefusesAResultWithNoProvenance(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewRegionsReport(&Result{Provider: ProviderGCP}, []Region{"us-central1"})
+	require.ErrorIs(t, err, ErrDataUnavailable)
+}
+
+// An empty region list serialises as [], never null.
+func TestTheRegionsReportPublishesAnEmptyListRatherThanNull(t *testing.T) {
+	t.Parallel()
+
+	result := azureShapedResult()
+
+	report, err := NewRegionsReport(&result, nil)
+	require.NoError(t, err)
+
+	encoded, err := json.Marshal(report)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"regions":[]`)
+}
