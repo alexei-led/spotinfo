@@ -74,7 +74,7 @@ func runRecommendWith(t *testing.T, registry *providers.Registry, args ...string
 	app := newSpotinfoApp(
 		func(*cli.Context) error { return nil },
 		func(ctx *cli.Context) error {
-			return execRecommendCmd(ctx, context.Background(), registry, newMockspotClient(t), &output)
+			return execRecommendCmd(ctx, context.Background(), registry, newQueryClient(t), &output)
 		},
 	)
 	err := app.Run(append([]string{"spotinfo", "recommend"}, args...))

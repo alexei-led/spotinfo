@@ -35,7 +35,7 @@ func recommendArgs(extra ...string) []string {
 }
 
 func TestExecRecommendCmd_DefaultTableOutput(t *testing.T) {
-	client := newMockspotClient(t)
+	client := newQueryClient(t)
 	client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return([]spot.Advice{{
 		Region: "us-east-1", Instance: "m6i.large", Price: 0.04, Savings: 72,
 		Info: spot.TypeInfo{Cores: 2, RAM: 8}, Range: spot.Range{Label: "<5%", Max: 5},
@@ -50,7 +50,7 @@ func TestExecRecommendCmd_DefaultTableOutput(t *testing.T) {
 }
 
 func TestExecRecommendCmd_ProducesVersionedJSONReport(t *testing.T) {
-	client := newMockspotClient(t)
+	client := newQueryClient(t)
 	client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return([]spot.Advice{{
 		Region: "us-east-1", Instance: "m6i.large", Price: 0.04, Savings: 72,
 		Info: spot.TypeInfo{Cores: 2, RAM: 8}, Range: spot.Range{Label: "<5%", Max: 5},
@@ -108,7 +108,7 @@ func TestNormalizeRecommendationRegions(t *testing.T) {
 }
 
 func TestExecRecommendCmd_NormalizesDuplicateRegionsAndAppliesInstancePattern(t *testing.T) {
-	client := newMockspotClient(t)
+	client := newQueryClient(t)
 	client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Run(func(_ context.Context, opts ...spot.GetSpotSavingsOption) {
 		assert.Len(t, opts, 5, "instance filter must be included in candidate acquisition")
 	}).Return([]spot.Advice{{
@@ -152,7 +152,7 @@ func TestRecommendCommandResolvesSharedFlagsAcrossContextLineage(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			client := newMockspotClient(t)
+			client := newQueryClient(t)
 			client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return([]spot.Advice{{
 				Region: "us-west-2", Instance: "m6i.xlarge", Price: 0.04, Savings: 72,
 				Info: spot.TypeInfo{Cores: 4, RAM: 16}, Range: spot.Range{Label: "<5%", Max: 5},
@@ -199,7 +199,7 @@ func TestRecommendCommandRejectsInvalidInputsBeforeFetching(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			client := newMockspotClient(t)
+			client := newQueryClient(t)
 			var output bytes.Buffer
 			err := recommendTestApp(client, &output).Run(test.args)
 			require.Error(t, err)
@@ -212,7 +212,7 @@ func TestRecommendCommandRejectsInvalidInputsBeforeFetching(t *testing.T) {
 }
 
 func TestRecommendCommandNoCandidatesReturnsSentinelWithoutOutput(t *testing.T) {
-	client := newMockspotClient(t)
+	client := newQueryClient(t)
 	client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return([]spot.Advice{}, nil).Once()
 	var output bytes.Buffer
 
@@ -224,7 +224,7 @@ func TestRecommendCommandNoCandidatesReturnsSentinelWithoutOutput(t *testing.T) 
 
 func TestRecommendCommandClientFailureWrapsWithoutOutput(t *testing.T) {
 	fetchErr := errors.New("candidate fetch failed")
-	client := newMockspotClient(t)
+	client := newQueryClient(t)
 	client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return(nil, fetchErr).Once()
 	var output bytes.Buffer
 
@@ -249,7 +249,7 @@ func TestRecommendationOutputWriteFailuresAreReturned(t *testing.T) {
 	})
 
 	t.Run("json", func(t *testing.T) {
-		client := newMockspotClient(t)
+		client := newQueryClient(t)
 		client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return([]spot.Advice{{
 			Region: "us-east-1", Instance: "m6i.large", Price: 0.04, Savings: 72,
 			Info: spot.TypeInfo{Cores: 2, RAM: 8}, Range: spot.Range{Label: "<5%", Max: 5},
@@ -262,7 +262,7 @@ func TestRecommendationOutputWriteFailuresAreReturned(t *testing.T) {
 }
 
 func TestSpotinfoAppAssemblyPreservesRootInvocationAndRegistersRecommend(t *testing.T) {
-	rootClient := newMockspotClient(t)
+	rootClient := newQueryClient(t)
 	rootClient.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return([]spot.Advice{{
 		Region: "us-east-1", Instance: "m6i.large", Price: 0.04, Savings: 72,
 		Info: spot.TypeInfo{Cores: 2, RAM: 8}, Range: spot.Range{Label: "<5%", Max: 5},
@@ -343,7 +343,7 @@ func TestRecommendServesANonAWSCloudWithTheV2Schema(t *testing.T) {
 	app := newSpotinfoApp(
 		func(*cli.Context) error { return nil },
 		func(ctx *cli.Context) error {
-			return execRecommendCmd(ctx, context.Background(), registry, newMockspotClient(t), &output)
+			return execRecommendCmd(ctx, context.Background(), registry, newQueryClient(t), &output)
 		},
 	)
 	require.NoError(t, app.Run(recommendArgs("--cloud", "gcp", "--region", "all", "--output", "json")))
@@ -375,7 +375,7 @@ func TestRecommendServesTheCostPolicyOnAWSWithTheV2Schema(t *testing.T) {
 	app := newSpotinfoApp(
 		func(*cli.Context) error { return nil },
 		func(ctx *cli.Context) error {
-			return execRecommendCmd(ctx, context.Background(), registry, newMockspotClient(t), &output)
+			return execRecommendCmd(ctx, context.Background(), registry, newQueryClient(t), &output)
 		},
 	)
 	require.NoError(t, app.Run(recommendArgs("--workload", "cost", "--output", "json")))
@@ -399,7 +399,7 @@ func TestNeutralRecommendationTableNamesUnavailableRisk(t *testing.T) {
 	app := newSpotinfoApp(
 		func(*cli.Context) error { return nil },
 		func(ctx *cli.Context) error {
-			return execRecommendCmd(ctx, context.Background(), registry, newMockspotClient(t), &output)
+			return execRecommendCmd(ctx, context.Background(), registry, newQueryClient(t), &output)
 		},
 	)
 	require.NoError(t, app.Run(recommendArgs("--cloud", "gcp", "--region", "all")))
@@ -412,7 +412,7 @@ func TestNeutralRecommendationTableNamesUnavailableRisk(t *testing.T) {
 
 // An AWS request under a v1 workload still produces the v1 schema.
 func TestRecommendKeepsTheV1SchemaForAWSWorkloads(t *testing.T) {
-	client := newMockspotClient(t)
+	client := newQueryClient(t)
 	client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return([]spot.Advice{{
 		Region: "us-east-1", Instance: "m6i.large", Price: 0.04, Savings: 72,
 		Info: spot.TypeInfo{Cores: 2, RAM: 8}, Range: spot.Range{Label: "<5%", Max: 5},
@@ -435,7 +435,7 @@ func TestNeutralRecommendReportsNoCandidates(t *testing.T) {
 	app := newSpotinfoApp(
 		func(*cli.Context) error { return nil },
 		func(ctx *cli.Context) error {
-			return execRecommendCmd(ctx, context.Background(), registry, newMockspotClient(t), &output)
+			return execRecommendCmd(ctx, context.Background(), registry, newQueryClient(t), &output)
 		},
 	)
 

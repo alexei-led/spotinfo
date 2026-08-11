@@ -105,18 +105,19 @@ func recommendCapabilityRequest(ctx *cli.Context) cloud.CapabilityRequest {
 }
 
 // resolveAWSProvider is the provider gate for the root query command, which
-// still acquires candidates through the legacy AWS client. Selecting any other
-// provider fails here rather than being answered with AWS data.
+// acquires candidates from the AWS provider it builds over its own client.
+// Selecting any other provider fails here rather than being answered with AWS
+// data.
 //
-// The AWS path deliberately does not build a provider. This command never
-// queries one — it holds the legacy client — so what AWS can answer is
-// answerable from the static declaration. Building it made the command inherit
-// every input the AWS provider needs, so an unreadable architecture manifest or
-// sidecar — neither of which this command reads — failed
-// `spotinfo --type t3.micro` with SNAPSHOT_UNAVAILABLE while the advisor and
-// price data it does read were intact. A genuinely broken advisor or price
-// snapshot still fails at acquisition, where the legacy client verifies its own
-// payloads against their manifests.
+// The AWS path deliberately does not resolve through the registry. What AWS can
+// answer is a property of the feeds, so the static declaration answers the gate,
+// and awsQueryProvider then builds the provider from the client alone. Resolving
+// through the registry made the command inherit every input that factory reads,
+// so an unreadable architecture manifest or sidecar — neither of which this
+// command renders — failed `spotinfo --type t3.micro` with SNAPSHOT_UNAVAILABLE
+// while the advisor and price data it does read were intact. A genuinely broken
+// advisor or price snapshot still fails at acquisition, where the legacy client
+// verifies its own payloads against their manifests.
 //
 // Every other cloud still resolves through the registry, so a disabled provider
 // keeps reporting DATA_UNAVAILABLE with its reason code and a shortfall keeps

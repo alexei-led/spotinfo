@@ -461,31 +461,105 @@ whole app through `execMainCmd` with a mocked `spotClient`, and
 the AWS provider over the existing mock and keep `cmd/spotinfo/testdata/aws-root-v1.*` green,
 unchanged, for all five formats. That is a stronger gate than any hand-written parity test.
 
-- [ ] make the AWS provider serve everything the query command renders today: interruption
+- [x] make the AWS provider serve everything the query command renders today: interruption
       range, savings, price source, zone prices and placement scores
-- [ ] rewrite `printAdvicesText`, `printAdvicesNumber`, `buildTableRow`, `printAdvicesTable`,
+- [x] rewrite `printAdvicesText`, `printAdvicesNumber`, `buildTableRow`, `printAdvicesTable`,
       `expandAZ`, `getScoreDataValue`, `analyzeScoreTypes` and `sortByNames` against
       `cloud.Candidate` instead of `spot.Advice`
-- [ ] route the command through `cloud.Provider`, replacing the legacy-client path
-- [ ] **preserve the failure mode the legacy path exists to prevent.**
+- [x] route the command through `cloud.Provider`, replacing the legacy-client path
+- [x] **preserve the failure mode the legacy path exists to prevent.**
       `cmd/spotinfo/provider_flags.go:117-128` records it: building an AWS provider for this
       command made it inherit every input the provider needs, so an unreadable architecture
       manifest or sidecar — neither of which this command reads — failed
       `spotinfo --type t3.micro` with `SNAPSHOT_UNAVAILABLE` while the advisor and price data
       it _does_ read were intact. Keep construction cheap and let **acquisition** verify
       payloads, so a snapshot this command never reads cannot fail it
-- [ ] write a test that makes the architecture manifest unreadable and asserts
+- [x] write a test that makes the architecture manifest unreadable and asserts
       `spotinfo list --machine "t3.micro"` still answers — this is the regression guard for the
       bullet above, and without it the bug re-ships silently
-- [ ] handle `Candidate.SavingsPercent` being `*int` where `spot.Advice.Savings` is a plain
+- [x] handle `Candidate.SavingsPercent` being `*int` where `spot.Advice.Savings` is a plain
       `int`: a zero savings prints `0` today and must keep printing `0`, not blank.
       `aws-root-v1.number.txt` is a savings percent, so this is load-bearing
-- [ ] handle the price type change: `spot.Advice.Price` is `float64` and
+- [x] handle the price type change: `spot.Advice.Price` is `float64` and
       `PriceObservation.Amount` is fixed-point `cloud.Money`; assert the last digit does not
       move for every golden price
-- [ ] keep `cmd/spotinfo/testdata/aws-root-v1.*` byte-identical and passing, with no
+- [x] keep `cmd/spotinfo/testdata/aws-root-v1.*` byte-identical and passing, with no
       `UPDATE_GOLDEN` run in this task
-- [ ] run `go test ./... -skip 'E2E'` — must pass before Task 4
+- [x] run `go test ./... -skip 'E2E'` — must pass before Task 4
+
+➕ **The provider is built from the acquisition client, not resolved from the registry, and
+that is what preserves the failure mode.** `awsQueryProvider` in `cmd/spotinfo/main.go` calls
+`awsprovider.New(client, nil)`; `resolveAWSProvider` still answers the capability gate from the
+package-level declaration and still routes every non-AWS cloud through the registry. The
+architecture snapshot is the input the registry factory adds, so passing no lookup is what keeps
+it out — and `TestTheQueryProviderDeclaresNoArchitecture` pins that the provider then declares
+no architecture rather than classifying machines from their names.
+
+➕ **The regression test drives the registry, not a corrupted embedded file.** The architecture
+snapshot is `//go:embed`-ed and cannot be made unreadable at run time, so
+`TestQueryAnswersWhenTheArchitectureSnapshotIsUnreadable` registers an AWS factory that fails
+the way an unparsable manifest makes it fail, and asserts the query still answers. That is the
+condition that re-introduces the bug: a future `registry.Get(aws)` in `execMainCmd` turns it
+red. It drives the root query command with `--machine t3.micro`, because `spotinfo list` does
+not exist until Task 4.
+
+➕ **`spotClient` gained `DataSource() string` and `mocks_test.go` was regenerated.** It is now
+exactly `internal/providers/aws`'s own input, so the command builds its provider over the same
+client the golden test already mocks — which is what makes the unchanged goldens the proof. The
+CLI tests take it through `newQueryClient`, which declares the expectation `.Maybe()`: a request
+refused before acquisition never reads it.
+
+➕ **`awsprovider.New` no longer warns about a nil architecture lookup.** Only the caller knows
+whether it failed to load one or deliberately passed none, and `newProviderRegistry` already
+logs the real failure. Left in place, every single query invocation printed "aws architecture
+snapshot is unavailable" for a capability it never asked for.
+
+➕ **An `--os` outside the neutral vocabulary is now refused before acquisition**, by the
+provider's own capability check, rather than reported by the legacy client after a fetch.
+`TestExecMainCmd_ErrorConditions` carries no client expectation for that case, so the test also
+pins that no I/O happens — Invariant 3, checked. The wording moved from
+`invalid instance OS: invalid-os` to `aws does not support os "invalid-os"`.
+
+➕ **Verified against the shipped binary, not only against the goldens.** The goldens are three
+fixed rows with no zone prices, no zone scores, no unpriced instance and no zero savings, so
+they cannot see the two type changes this task is really about. Building the binary at this
+commit and at its parent and diffing real embedded answers closes that: `json` record sets
+(order-insensitive, because `--region all` was already nondeterministic before this change —
+`sort.Sort` is unstable over map iteration) and sorted `text`, `csv`, `number` and `table`
+output are identical for `us-east-1` and for `me-south-1`, across `--sort price|savings`,
+`--cpu/--memory/--price` and an empty match. That covers **254 unpriced rows** in `me-south-1`,
+which exercise the absent `PriceObservation`, and **6 zero-savings rows** in `us-east-1`, which
+exercise the absent `SavingsPercent`. Every field matches except the one below.
+
+The score flags are **not** covered by that comparison: `--offline` clears the live-price and
+score providers, so `--with-score`, `--az`, `--min-score` and `--score-timeout` produce no
+observations to differ over. `expandAZ` in particular changed from map order to the provider's
+sorted zone order, and is covered only by `TestExpandAZSplitsZonalScoresAndPrices` and
+`TestScoreValueReadsPlacementObservations`. Two other mappings are likewise unreachable in the
+committed snapshot, and both are pre-existing provider behaviour the MCP path already had: a
+savings figure above 100 now renders as `0` rather than raw, and a price needing more than nine
+fractional digits drops the candidate rather than rendering it.
+
+➕ **The `--region all` answer was already nondeterministic before this task, and Task 17's
+checkbox names the wrong cause.** Running the pre-change binary twice over
+`--offline --type m6g --region all` produces different output: `internal/spot/client.go:277`
+iterates a map of instances and `sortAdvices` at `internal/spot/types.go:142` is `sort.Sort`,
+which is not stable, so ties in the sort key keep whatever order the map gave. Task 17 asserts
+byte-identical stdout across two identical `--offline` runs and attributes a failure to "a
+non-deterministic map iteration in a renderer" — the renderers are deterministic; the
+acquisition path is not. Fixing it means `sort.SliceStable` (or `slices.SortStableFunc`) in
+`internal/spot`, not a renderer change. Out of scope here: it is unchanged behaviour, and this
+task's own comparison worked around it by comparing record sets rather than order.
+
+⚠️ **The v1 root JSON's `info.emr` is now always `false`.** `cloud.Candidate` carries no EMR
+classification — it is a Spot Advisor flag with no meaning on another cloud — and 731 of the
+1,192 instance types in the committed advisor snapshot publish it as `true`, which is **13,505
+rows** of a full `--region all` answer. It is the only field that does not survive the seam, it
+is not a golden change (`contractAdvices` sets no EMR flag), and the MCP v1 surface — answering
+from `cloud.Candidate` since the seam was added — never published it either.
+`cmd/spotinfo/v1json.go` says so at the field. **Task 5 must delete the field with the schema**,
+which it already does by replacing the whole document with `spotinfo.list/v1`. Do not
+reintroduce it into the neutral domain to close this.
 
 ### Task 4: Rename the command to `spotinfo list` and make it cloud-neutral
 

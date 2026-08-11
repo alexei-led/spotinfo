@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -323,8 +324,16 @@ func getMCPPort() string {
 	return defaultMCPPort
 }
 
+// spotClient is the AWS acquisition client an invocation opens. It is exactly
+// the input internal/providers/aws needs, so the query command can build its
+// provider over the same client the legacy recommend path still uses, without a
+// second adapter in between.
 type spotClient interface {
 	GetSpotSavings(ctx context.Context, opts ...spot.GetSpotSavingsOption) ([]spot.Advice, error)
+	// DataSource reports whether the advice came from the live feeds, the local
+	// cache, or the embedded snapshot. The query command renders none of it; the
+	// provider publishes it as Result.Mode.
+	DataSource() string
 }
 
 // flagLineageContext returns the nearest context that explicitly set one of
@@ -388,18 +397,11 @@ func execMainCmd(ctx *cli.Context, execCtx context.Context, registry providerReg
 	}
 
 	regions := ctx.StringSlice(flagRegion)
-	instanceOS := ctx.String(flagOS)
-	instance := ctx.String(flagType)
 	cpu := ctx.Int(flagCPU)
 	memory := ctx.Int(flagMemory)
 	maxPrice := ctx.Float64(flagPrice)
-	sortBy := ctx.String(flagSort)
-	order := ctx.String(flagOrder)
-	sortDesc := strings.EqualFold(order, orderDesc)
 	withScore := ctx.Bool(flagWithScore)
 	minScore := ctx.Int(flagMinScore)
-	azLevel := ctx.Bool(flagAZ)
-	scoreTimeout := ctx.Int(flagScoreTimeout)
 
 	// ParseFloat accepts NaN and ±Inf, and neither is caught by the `> 0` test
 	// below that decides whether to append the filter: NaN fails every
@@ -418,43 +420,26 @@ func execMainCmd(ctx *cli.Context, execCtx context.Context, registry providerReg
 	// an unrecognised --output to the number format, both silently and both
 	// exiting 0. `--output jsonn` printed "59" and reported success, which a
 	// script reads as a valid answer in the format it asked for.
-	sortByType, err := parseSortBy(sortBy)
+	sortKey, err := parseSortBy(ctx.String(flagSort))
 	if err != nil {
 		return err
 	}
 
-	// build options
-	var opts []spot.GetSpotSavingsOption
-	opts = append(opts, spot.WithRegions(regions))
-	if instance != "" {
-		opts = append(opts, spot.WithPattern(instance))
-	}
-	opts = append(opts, spot.WithOS(instanceOS))
-	if cpu > 0 {
-		opts = append(opts, spot.WithCPU(cpu))
-	}
-	if memory > 0 {
-		opts = append(opts, spot.WithMemory(memory))
-	}
-	if maxPrice > 0 {
-		opts = append(opts, spot.WithMaxPrice(maxPrice))
-	}
-	opts = append(opts, spot.WithSort(sortByType, sortDesc))
-	if withScore {
-		opts = append(opts, spot.WithScores(true), spot.WithSingleAvailabilityZone(azLevel))
-		if scoreTimeout > 0 {
-			opts = append(opts, spot.WithScoreTimeout(time.Duration(scoreTimeout)*time.Second))
-		}
-	}
-	if minScore > 0 {
-		opts = append(opts, spot.WithMinScore(minScore))
+	query, err := rootQuery(ctx, sortKey)
+	if err != nil {
+		return err
 	}
 
-	// get spot savings
-	advices, err := client.GetSpotSavings(execCtx, opts...)
+	provider, err := awsQueryProvider(client)
+	if err != nil {
+		return err
+	}
+
+	result, err := provider.Query(execCtx, query)
 	if err != nil {
 		return fmt.Errorf("failed to get spot savings: %w", err)
 	}
+	candidates := result.Candidates
 
 	// decide if region should be printed
 	printRegion := len(regions) > 1 || (len(regions) == 1 && regions[0] == allRegions)
@@ -464,21 +449,21 @@ func execMainCmd(ctx *cli.Context, execCtx context.Context, registry providerReg
 	// "no such thing here". The formats keep rendering — an empty JSON array
 	// stays parseable — and the note goes to stderr so it never contaminates a
 	// piped result.
-	if len(advices) == 0 {
+	if len(candidates) == 0 {
 		log.Warn("no instances matched the query", slog.Any("filters", describeRootFilters(ctx)))
 	}
 
 	switch ctx.String(flagOutput) {
 	case outputNumber:
-		printAdvicesNumber(advices, printRegion, output)
+		printAdvicesNumber(candidates, printRegion, output)
 	case outputText:
-		printAdvicesText(advices, printRegion, output)
+		printAdvicesText(candidates, printRegion, output)
 	case outputJSON:
-		printAdvicesJSON(advices, output)
+		printAdvicesJSON(v1Advices(candidates), output)
 	case outputTable:
-		printAdvicesTable(advices, false, printRegion, output)
+		printAdvicesTable(candidates, false, printRegion, output)
 	case outputCSV:
-		printAdvicesTable(advices, true, printRegion, output)
+		printAdvicesTable(candidates, true, printRegion, output)
 	default:
 		// Unreachable: validateRootFlags rejects an unknown format before any
 		// acquisition. Kept so a new format added to the flag but not here
@@ -493,25 +478,103 @@ func execMainCmd(ctx *cli.Context, execCtx context.Context, registry providerReg
 // the renderer switch.
 var outputFormats = []string{outputNumber, outputText, outputJSON, outputTable, outputCSV}
 
-// sortByNames maps the --sort vocabulary onto the client's sort keys.
-var sortByNames = map[string]spot.SortBy{
-	sortType:         spot.SortByInstance,
-	sortInterruption: spot.SortByRange,
-	sortSavings:      spot.SortBySavings,
-	sortPrice:        spot.SortByPrice,
-	sortRegion:       spot.SortByRegion,
-	sortScore:        spot.SortByScore,
+// sortByNames maps the --sort vocabulary onto the neutral sort keys. The
+// provider translates them back into its own ordering, so a cloud that already
+// sorts its own data keeps deciding what each key means for it.
+var sortByNames = map[string]cloud.SortKey{
+	sortType:         cloud.SortByMachine,
+	sortInterruption: cloud.SortByRisk,
+	sortSavings:      cloud.SortBySavings,
+	sortPrice:        cloud.SortByPrice,
+	sortRegion:       cloud.SortByRegion,
+	sortScore:        cloud.SortByPlacementScore,
 }
 
-func parseSortBy(value string) (spot.SortBy, error) {
+func parseSortBy(value string) (cloud.SortKey, error) {
 	if sortBy, ok := sortByNames[value]; ok {
 		return sortBy, nil
 	}
 
 	names := slices.Sorted(maps.Keys(sortByNames))
 
-	return 0, fmt.Errorf("%w: unknown sort %q, want one of %s",
+	return "", fmt.Errorf("%w: unknown sort %q, want one of %s",
 		cloud.ErrInvalidArgument, value, strings.Join(names, "|"))
+}
+
+// awsQueryProvider builds the neutral provider the query command acquires
+// through.
+//
+// It is built here from the acquisition client, not fetched from the registry,
+// and it is given no architecture lookup. Both are deliberate. The registry's
+// AWS factory also parses the architecture snapshot, and this command neither
+// filters nor renders an architecture — resolving through it made the command
+// inherit an input it never reads, so an unparsable architecture manifest failed
+// `spotinfo --machine t3.micro` with SNAPSHOT_UNAVAILABLE while the advisor and
+// price data it does read were intact. Construction stays cheap; the legacy
+// client still verifies the advisor and price payloads against their manifests
+// at acquisition, which is where a genuinely broken snapshot must fail.
+//
+// Without the lookup the provider stops declaring any architecture, so a request
+// that filtered on one would be refused rather than answered from an
+// unclassified catalogue. This command has no such flag.
+func awsQueryProvider(client spotClient) (cloud.Provider, error) {
+	provider, err := awsprovider.New(client, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build aws provider: %w", err)
+	}
+
+	return provider, nil
+}
+
+// rootQuery maps the query command's flags onto the neutral query. Every filter
+// here is the one the legacy options carried; the AWS provider re-applies each
+// exactly against the mapped candidate.
+func rootQuery(ctx *cli.Context, sortKey cloud.SortKey) (*cloud.Query, error) {
+	requested := ctx.StringSlice(flagRegion)
+	regions := make([]cloud.Region, 0, len(requested))
+	for _, region := range requested {
+		regions = append(regions, cloud.Region(region))
+	}
+
+	query := &cloud.Query{
+		Regions: regions,
+		// Passed through unparsed: an operating system outside the neutral
+		// vocabulary is the provider's error to report, in its own wording.
+		OS:             cloud.OperatingSystem(ctx.String(flagOS)),
+		MachinePattern: ctx.String(flagType),
+		MinVCPU:        ctx.Int(flagCPU),
+		MinMemoryGiB:   float64(ctx.Int(flagMemory)),
+		Sort: cloud.SortOrder{
+			Key:        sortKey,
+			Descending: strings.EqualFold(ctx.String(flagOrder), orderDesc),
+		},
+	}
+
+	if maxPrice := ctx.Float64(flagPrice); maxPrice > 0 {
+		// A ceiling, not a measured price. Truncating to the fixed-point scale can
+		// only tighten it, where MoneyFromFloat would reject a value the float
+		// comparison this replaces accepted.
+		ceiling, err := cloud.MoneyCeilingFromFloat(maxPrice)
+		if err != nil {
+			return nil, err
+		}
+		query.MaxPrice = &ceiling
+	}
+
+	// Scores are fetched under --with-score; --min-score filters whatever scores
+	// are present. validateRootFlags already rejects the second without the first.
+	if ctx.Bool(flagWithScore) {
+		query.Placement.Enabled = true
+		query.Placement.SingleZone = ctx.Bool(flagAZ)
+		if timeout := ctx.Int(flagScoreTimeout); timeout > 0 {
+			query.Placement.Timeout = time.Duration(timeout) * time.Second
+		}
+	}
+	if minScore := ctx.Int(flagMinScore); minScore > 0 {
+		query.Placement.MinScore = minScore
+	}
+
+	return query, nil
 }
 
 // validateRootFlags rejects input the query would otherwise answer wrongly and
@@ -576,21 +639,54 @@ func lineageContextValue(ctx *cli.Context, name string) string {
 	return resolved.String(name)
 }
 
-func printAdvicesText(advices []spot.Advice, region bool, output io.Writer) {
-	for _, advice := range advices {
+// candidateSavings renders the savings column. SavingsPercent is absent when the
+// advisor published no usable figure, where this command has always printed 0 —
+// the neutral absence must not become a blank cell in a rendering whose contract
+// is recorded.
+func candidateSavings(candidate *cloud.Candidate) int {
+	if candidate.SavingsPercent == nil {
+		return 0
+	}
+
+	return *candidate.SavingsPercent
+}
+
+// candidatePrice converts the fixed-point amount back to the float the price
+// formats take. An absent observation is an instance the feed does not price,
+// which this command renders as 0.0000.
+func candidatePrice(candidate *cloud.Candidate) float64 {
+	if candidate.Spot == nil {
+		return 0
+	}
+
+	return candidate.Spot.Amount.Float64()
+}
+
+// candidateLivePrice reports whether the price came from the EC2 API rather than
+// the static feed.
+func candidateLivePrice(candidate *cloud.Candidate) bool {
+	return candidate.Spot != nil && candidate.Spot.Live
+}
+
+func printAdvicesText(candidates []cloud.Candidate, region bool, output io.Writer) {
+	for i := range candidates {
+		candidate := &candidates[i]
+
 		scoreStr := ""
-		if advice.RegionScore != nil || len(advice.ZoneScores) > 0 {
-			scoreStr = fmt.Sprintf(", score=%s", getScoreDisplayValue(&advice))
+		if len(candidate.Placements) > 0 {
+			scoreStr = fmt.Sprintf(", score=%s", getScoreDisplayValue(candidate))
 		}
 
-		priceStr := formatPrice(advice.Price, advice.LivePrice)
+		priceStr := formatPrice(candidatePrice(candidate), candidateLivePrice(candidate))
 
 		if region {
 			fmt.Fprintf(output, "region=%s, type=%s, vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s', price=%s%s\n", //nolint:errcheck
-				advice.Region, advice.Instance, advice.Info.Cores, advice.Info.RAM, advice.Savings, advice.Range.Label, priceStr, scoreStr)
+				candidate.Location.Region, candidate.Machine.ID, candidate.Machine.VCPU, candidate.Machine.MemoryGiB,
+				candidateSavings(candidate), candidate.Risk.Label, priceStr, scoreStr)
 		} else {
 			fmt.Fprintf(output, "type=%s, vCPU=%d, memory=%vGiB, saving=%d%%, interruption='%s', price=%s%s\n", //nolint:errcheck
-				advice.Instance, advice.Info.Cores, advice.Info.RAM, advice.Savings, advice.Range.Label, priceStr, scoreStr)
+				candidate.Machine.ID, candidate.Machine.VCPU, candidate.Machine.MemoryGiB,
+				candidateSavings(candidate), candidate.Risk.Label, priceStr, scoreStr)
 		}
 	}
 }
@@ -604,17 +700,19 @@ func formatPrice(price float64, live bool) string {
 	return s
 }
 
-func printAdvicesNumber(advices []spot.Advice, region bool, output io.Writer) {
-	if len(advices) == 1 {
-		fmt.Fprintln(output, advices[0].Savings) //nolint:errcheck,gosec // G602: false positive, length checked above
+func printAdvicesNumber(candidates []cloud.Candidate, region bool, output io.Writer) {
+	if len(candidates) == 1 {
+		fmt.Fprintln(output, candidateSavings(&candidates[0])) //nolint:errcheck,gosec // G602: false positive, length checked above
 		return
 	}
 
-	for _, advice := range advices {
+	for i := range candidates {
+		candidate := &candidates[i]
 		if region {
-			fmt.Fprintf(output, "%s/%s: %d\n", advice.Region, advice.Instance, advice.Savings) //nolint:errcheck
+			fmt.Fprintf(output, "%s/%s: %d\n", //nolint:errcheck
+				candidate.Location.Region, candidate.Machine.ID, candidateSavings(candidate))
 		} else {
-			fmt.Fprintf(output, "%s: %d\n", advice.Instance, advice.Savings) //nolint:errcheck
+			fmt.Fprintf(output, "%s: %d\n", candidate.Machine.ID, candidateSavings(candidate)) //nolint:errcheck
 		}
 	}
 }
@@ -638,40 +736,61 @@ func formatScoreWithIndicator(score int) string {
 	return fmt.Sprintf("%s %d", getScoreIndicator(score), score)
 }
 
-// getScoreDataValue returns raw score data without visual formatting.
-func getScoreDataValue(advice *spot.Advice) string {
-	if advice.RegionScore != nil {
-		score := fmt.Sprintf("%d", *advice.RegionScore)
-		return addFreshnessInfo(score, advice.ScoreFetchedAt)
-	}
-	if len(advice.ZoneScores) > 0 {
-		var scores []string
-		for zone, score := range advice.ZoneScores {
-			scoreStr := fmt.Sprintf("%d", score)
-			scoreWithFreshness := addFreshnessInfo(scoreStr, advice.ScoreFetchedAt)
-			scores = append(scores, fmt.Sprintf("%s:%s", zone, scoreWithFreshness))
+// regionalPlacement returns the score measured for the whole region, if the
+// provider published one. A regional observation carries no zone.
+func regionalPlacement(candidate *cloud.Candidate) *cloud.PlacementObservation {
+	for i := range candidate.Placements {
+		if candidate.Placements[i].Location.Zone == "" {
+			return &candidate.Placements[i]
 		}
-		return strings.Join(scores, ",")
 	}
-	return "-"
+
+	return nil
+}
+
+// zonalPlacements returns the per-zone scores in the order the provider
+// published them, which is sorted by zone.
+func zonalPlacements(candidate *cloud.Candidate) []cloud.PlacementObservation {
+	zonal := make([]cloud.PlacementObservation, 0, len(candidate.Placements))
+	for _, placement := range candidate.Placements {
+		if placement.Location.Zone != "" {
+			zonal = append(zonal, placement)
+		}
+	}
+
+	return zonal
+}
+
+// scoreValue renders the placement scores of one candidate, formatting each with
+// the given renderer. The regional score wins when both are present, matching
+// what the score column has always shown.
+func scoreValue(candidate *cloud.Candidate, render func(int) string) string {
+	if regional := regionalPlacement(candidate); regional != nil {
+		return addFreshnessInfo(render(regional.Score), regional.FetchedAt)
+	}
+
+	zonal := zonalPlacements(candidate)
+	if len(zonal) == 0 {
+		return "-"
+	}
+
+	scores := make([]string, 0, len(zonal))
+	for _, placement := range zonal {
+		scores = append(scores, fmt.Sprintf("%s:%s",
+			placement.Location.Zone, addFreshnessInfo(render(placement.Score), placement.FetchedAt)))
+	}
+
+	return strings.Join(scores, ",")
+}
+
+// getScoreDataValue returns raw score data without visual formatting.
+func getScoreDataValue(candidate *cloud.Candidate) string {
+	return scoreValue(candidate, strconv.Itoa)
 }
 
 // getScoreDisplayValue returns formatted score with visual indicators for table display.
-func getScoreDisplayValue(advice *spot.Advice) string {
-	if advice.RegionScore != nil {
-		scoreStr := formatScoreWithIndicator(*advice.RegionScore)
-		return addFreshnessInfo(scoreStr, advice.ScoreFetchedAt)
-	}
-	if len(advice.ZoneScores) > 0 {
-		var scores []string
-		for zone, score := range advice.ZoneScores {
-			scoreStr := formatScoreWithIndicator(score)
-			scoreWithFreshness := addFreshnessInfo(scoreStr, advice.ScoreFetchedAt)
-			scores = append(scores, fmt.Sprintf("%s:%s", zone, scoreWithFreshness))
-		}
-		return strings.Join(scores, ",")
-	}
-	return "-"
+func getScoreDisplayValue(candidate *cloud.Candidate) string {
+	return scoreValue(candidate, formatScoreWithIndicator)
 }
 
 // addFreshnessInfo adds subtle freshness indicator to score display.
@@ -713,15 +832,15 @@ type scoreTypeInfo struct {
 	hasAZScores       bool
 }
 
-// analyzeScoreTypes checks what types of scores are present in the advices.
-func analyzeScoreTypes(advices []spot.Advice) scoreTypeInfo {
+// analyzeScoreTypes checks what types of scores are present in the candidates.
+func analyzeScoreTypes(candidates []cloud.Candidate) scoreTypeInfo {
 	info := scoreTypeInfo{}
-	for _, advice := range advices {
-		if advice.RegionScore != nil {
+	for i := range candidates {
+		if regionalPlacement(&candidates[i]) != nil {
 			info.hasScores = true
 			info.hasRegionalScores = true
 		}
-		if len(advice.ZoneScores) > 0 {
+		if len(zonalPlacements(&candidates[i])) > 0 {
 			info.hasScores = true
 			info.hasAZScores = true
 		}
@@ -773,34 +892,39 @@ func WithVisualFormatting() TableRowOption {
 	}
 }
 
-// buildTableRow creates a table row for an advice with configurable formatting.
-func buildTableRow(advice *spot.Advice, scoreInfo scoreTypeInfo, region, csv bool, options ...TableRowOption) table.Row {
+// buildTableRow creates a table row for a candidate with configurable formatting.
+func buildTableRow(candidate *cloud.Candidate, scoreInfo scoreTypeInfo, region, csv bool, options ...TableRowOption) table.Row {
 	opts := &tableRowOptions{}
 	for _, opt := range options {
 		opt(opts)
 	}
 
+	live := candidateLivePrice(candidate)
+
 	var priceValue any
 	if csv {
-		priceValue = advice.Price
+		priceValue = candidatePrice(candidate)
 	} else {
-		priceValue = formatPrice(advice.Price, advice.LivePrice)
+		priceValue = formatPrice(candidatePrice(candidate), live)
 	}
-	row := table.Row{advice.Instance, advice.Info.Cores, advice.Info.RAM, advice.Savings, advice.Range.Label, priceValue}
+	row := table.Row{
+		string(candidate.Machine.ID), candidate.Machine.VCPU, candidate.Machine.MemoryGiB,
+		candidateSavings(candidate), candidate.Risk.Label, priceValue,
+	}
 	if csv {
-		row = append(row, priceSource(advice.LivePrice))
+		row = append(row, priceSource(live))
 	}
 	if scoreInfo.hasScores {
-		var scoreValue string
+		var score string
 		if opts.includeVisualFormatting {
-			scoreValue = getScoreDisplayValue(advice)
+			score = getScoreDisplayValue(candidate)
 		} else {
-			scoreValue = getScoreDataValue(advice)
+			score = getScoreDataValue(candidate)
 		}
-		row = append(row, scoreValue)
+		row = append(row, score)
 	}
 	if region {
-		row = append(table.Row{advice.Region}, row...)
+		row = append(table.Row{string(candidate.Location.Region)}, row...)
 	}
 	return row
 }
@@ -813,57 +937,72 @@ func priceSource(live bool) string {
 	return "static"
 }
 
-// expandAZ converts advices with multiple zone scores into separate rows per AZ.
-func expandAZ(advices []spot.Advice) []spot.Advice {
-	var result []spot.Advice
+// zonePriceAt returns the price observed for one zone of a candidate's region.
+func zonePriceAt(candidate *cloud.Candidate, zone string) *cloud.PriceObservation {
+	for i := range candidate.ZonePrices {
+		if candidate.ZonePrices[i].Location.Zone == zone {
+			return &candidate.ZonePrices[i]
+		}
+	}
 
-	for _, advice := range advices {
-		if len(advice.ZoneScores) <= 1 {
+	return nil
+}
+
+// expandAZ converts candidates with multiple zone scores into separate rows per
+// AZ, each carrying that zone's own price when the provider published one.
+func expandAZ(candidates []cloud.Candidate) []cloud.Candidate {
+	var result []cloud.Candidate
+
+	for i := range candidates {
+		candidate := candidates[i]
+
+		zonal := zonalPlacements(&candidate)
+		if len(zonal) <= 1 {
 			// No expansion needed - keep as-is
-			result = append(result, advice)
+			result = append(result, candidate)
 			continue
 		}
 
-		for zone, score := range advice.ZoneScores {
-			azAdvice := advice
-			azAdvice.ZoneScores = map[string]int{zone: score}
-			azAdvice.RegionScore = nil
+		for _, placement := range zonal {
+			// One zone's score replaces the whole placement set, so the regional
+			// score does not shadow it in the score column.
+			zoneRow := candidate
+			zoneRow.Placements = []cloud.PlacementObservation{placement}
 
-			if advice.ZonePrice != nil {
-				if zonePrice, exists := advice.ZonePrice[zone]; exists {
-					azAdvice.Price = zonePrice
-					azAdvice.ZonePrice = map[string]float64{zone: zonePrice}
-				}
+			if price := zonePriceAt(&candidate, placement.Location.Zone); price != nil {
+				zonePrice := *price
+				zoneRow.Spot = &zonePrice
+				zoneRow.ZonePrices = []cloud.PriceObservation{zonePrice}
 			}
 
-			result = append(result, azAdvice)
+			result = append(result, zoneRow)
 		}
 	}
 
 	return result
 }
 
-func printAdvicesTable(advices []spot.Advice, csv, region bool, output io.Writer) {
+func printAdvicesTable(candidates []cloud.Candidate, csv, region bool, output io.Writer) {
 	tbl := table.NewWriter()
 	tbl.SetOutputMirror(output)
 
 	// Expand AZ scores to separate rows for better display
-	advices = expandAZ(advices)
+	candidates = expandAZ(candidates)
 
 	// Analyze score types and build header
-	scoreInfo := analyzeScoreTypes(advices)
+	scoreInfo := analyzeScoreTypes(candidates)
 	header := buildTableHeader(scoreInfo, region, csv)
 	tbl.AppendHeader(header)
 
 	// Build rows with appropriate formatting
-	for _, advice := range advices {
+	for i := range candidates {
 		var row table.Row
 		if csv {
 			// CSV output: data only, no visual formatting, with price source column
-			row = buildTableRow(&advice, scoreInfo, region, csv)
+			row = buildTableRow(&candidates[i], scoreInfo, region, csv)
 		} else {
 			// Table output: include visual formatting
-			row = buildTableRow(&advice, scoreInfo, region, csv, WithVisualFormatting())
+			row = buildTableRow(&candidates[i], scoreInfo, region, csv, WithVisualFormatting())
 		}
 		tbl.AppendRow(row)
 	}

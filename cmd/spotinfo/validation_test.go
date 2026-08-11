@@ -73,7 +73,7 @@ func TestRootAcceptsEveryDocumentedSortAndFormat(t *testing.T) {
 	run := func(t *testing.T, args ...string) {
 		t.Helper()
 
-		client := newMockspotClient(t)
+		client := newQueryClient(t)
 		client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return(contractAdvices(), nil).Once()
 
 		var output bytes.Buffer

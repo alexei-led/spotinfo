@@ -70,6 +70,12 @@ type Provider struct {
 // instead of being answered from instance names; without provenance the v2
 // report is refused by the recommender, whose contract requires at least one
 // source, rather than published with an invented one.
+//
+// A nil lookup is not reported here. Only the caller knows whether it failed to
+// load one or deliberately passed none — the query command renders no
+// architecture and asks for none — so the caller that tried and failed logs it,
+// and this constructor stays silent rather than warning on every invocation
+// about a capability nobody asked for.
 func New(client savingsClient, architectures architectureLookup) (*Provider, error) {
 	if client == nil {
 		return nil, errors.New("aws provider requires a spot client")
@@ -81,10 +87,6 @@ func New(client savingsClient, architectures architectureLookup) (*Provider, err
 			slog.Any("error", err))
 
 		sources = nil
-	}
-
-	if architectures == nil {
-		slog.Warn("aws architecture snapshot is unavailable; architecture filtering is disabled")
 	}
 
 	return &Provider{client: client, architectures: architectures, sources: sources}, nil

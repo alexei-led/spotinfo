@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v2"
 
@@ -148,6 +149,58 @@ func TestRootQueryDoesNotBuildTheAWSProvider(t *testing.T) {
 	require.NoError(t, resolveAWSProvider(captured, failingRegistry{t: t}, rootCapabilityRequest(captured)))
 }
 
+// errArchitectureSnapshotUnreadable is what the registry's AWS factory reports
+// when the file the query command never reads cannot be parsed.
+var errArchitectureSnapshotUnreadable = errors.New("read embedded architecture snapshot: unexpected EOF")
+
+// The query command renders no architecture and publishes no provenance, so
+// neither may gate it. Resolving its provider through the registry made it
+// inherit both, and an unparsable architecture manifest failed
+// `spotinfo --machine t3.micro` with SNAPSHOT_UNAVAILABLE while the advisor and
+// price data it does read were intact.
+//
+// The registry here fails exactly that way for AWS. The command must still
+// answer, because it builds its provider from the acquisition client instead —
+// and a genuinely broken advisor or price snapshot still fails where the legacy
+// client verifies its own payloads, at acquisition.
+func TestQueryAnswersWhenTheArchitectureSnapshotIsUnreadable(t *testing.T) {
+	registry := mustRegistry(providers.Registration{
+		ID:    cloud.ProviderAWS,
+		Build: func() (cloud.Provider, error) { return nil, errArchitectureSnapshotUnreadable },
+	})
+
+	client := newQueryClient(t)
+	client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return([]spot.Advice{{
+		Region: "us-east-1", Instance: "t3.micro", InstanceType: "t3.micro",
+		Range: spot.Range{Label: "<5%", Min: 0, Max: 5}, Savings: 70,
+		Info: spot.TypeInfo{Cores: 2, RAM: 1}, Price: 0.0031,
+	}}, nil).Once()
+
+	var output bytes.Buffer
+	app := newSpotinfoApp(
+		func(ctx *cli.Context) error {
+			return execMainCmd(ctx, context.Background(), registry, client, &output)
+		},
+		func(*cli.Context) error { return nil },
+	)
+
+	require.NoError(t, app.Run([]string{appName, "--machine", "t3.micro", "--output", outputJSON}))
+	assert.Contains(t, output.String(), "t3.micro")
+}
+
+// The other half of the same rule: the provider the query command builds carries
+// no architecture lookup, so it declares no architecture rather than classifying
+// machines from their names. Nothing on this command filters by one.
+func TestTheQueryProviderDeclaresNoArchitecture(t *testing.T) {
+	t.Parallel()
+
+	provider, err := awsQueryProvider(stubSavingsClient{})
+	require.NoError(t, err)
+	assert.Nil(t, provider.Capabilities().Architectures)
+	assert.True(t, provider.Capabilities().Has(cloud.CapabilityRisk),
+		"everything the query command does render must still be declared")
+}
+
 // runRoot and runRecommend drive the production app assembly. The mock client
 // fails the test if it is called, so every assertion below also proves the
 // failure happened before acquisition.
@@ -157,7 +210,7 @@ func runRoot(t *testing.T, registry providerRegistry, args ...string) error {
 	var output bytes.Buffer
 	app := newSpotinfoApp(
 		func(ctx *cli.Context) error {
-			return execMainCmd(ctx, context.Background(), registry, newMockspotClient(t), &output)
+			return execMainCmd(ctx, context.Background(), registry, newQueryClient(t), &output)
 		},
 		func(*cli.Context) error { return nil },
 	)
@@ -182,7 +235,7 @@ func runRecommendCapturing(t *testing.T, registry providerRegistry, args ...stri
 	app := newSpotinfoApp(
 		func(*cli.Context) error { return nil },
 		func(ctx *cli.Context) error {
-			return execRecommendCmd(ctx, context.Background(), registry, newMockspotClient(t), &output)
+			return execRecommendCmd(ctx, context.Background(), registry, newQueryClient(t), &output)
 		},
 	)
 	err := app.Run(append([]string{appName}, args...))

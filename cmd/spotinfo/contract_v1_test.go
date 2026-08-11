@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/jedib0t/go-pretty/v6/text"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v2"
 
+	"spotinfo/internal/cloud"
 	"spotinfo/internal/spot"
 )
 
@@ -59,7 +61,7 @@ func TestAWSRootOutputMatchesRecordedV1Contract(t *testing.T) {
 		"number": "aws-root-v1.number.txt",
 	} {
 		t.Run(format, func(t *testing.T) {
-			client := newMockspotClient(t)
+			client := newQueryClient(t)
 			client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return(contractAdvices(), nil).Once()
 
 			var output bytes.Buffer
@@ -77,7 +79,7 @@ func TestAWSRootOutputMatchesRecordedV1Contract(t *testing.T) {
 }
 
 func TestAWSRecommendJSONMatchesRecordedV1Contract(t *testing.T) {
-	client := newMockspotClient(t)
+	client := newQueryClient(t)
 	client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return(contractAdvices(), nil).Once()
 
 	var output bytes.Buffer
@@ -93,6 +95,24 @@ func TestAWSRecommendJSONMatchesRecordedV1Contract(t *testing.T) {
 		"--region", "us-east-1", "--region", "us-west-2", "--workload", "ci", "--output", "json",
 	}))
 	assertGolden(t, "aws-recommend-v1.json", output.Bytes())
+}
+
+// spot.Advice.Price is a float64 and cloud.PriceObservation.Amount is
+// fixed-point Money, so every golden price now makes a round trip the recorded
+// contract has to survive digit for digit. The rendered formats would not catch
+// a drift below their fourth decimal, and the JSON form prints the shortest
+// representation that round-trips — which is exactly what is compared here.
+func TestGoldenPricesSurviveTheFixedPointRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	shortest := func(value float64) string { return strconv.FormatFloat(value, 'f', -1, 64) }
+
+	for _, advice := range contractAdvices() {
+		money, err := cloud.MoneyFromFloat(advice.Price)
+		require.NoError(t, err, "%s: the golden price must be representable", advice.Instance)
+		assert.Equal(t, shortest(advice.Price), shortest(money.Float64()),
+			"%s: the price moved crossing the fixed-point seam", advice.Instance)
+	}
 }
 
 // assertGolden compares against a recorded contract file. A regeneration always

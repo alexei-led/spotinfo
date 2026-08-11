@@ -24,9 +24,44 @@ import (
 
 // Helper functions for mock setup (following spot package patterns)
 
+// newQueryClient is the acquisition client the query command builds its AWS
+// provider over. DataSource is optional: the provider reads it to report how
+// fresh the answer is, which this command renders nowhere, and a request refused
+// before acquisition never reaches it at all.
+func newQueryClient(t *testing.T) *mockspotClient {
+	t.Helper()
+
+	client := newMockspotClient(t)
+	client.EXPECT().DataSource().Return(spot.DataSourceEmbedded).Maybe()
+
+	return client
+}
+
+// candidatesFrom maps fixture advice through the production AWS adapter, so a
+// rendering test and the command it stands in for see the same candidates.
+func candidatesFrom(t *testing.T, advices []spot.Advice) []cloud.Candidate {
+	t.Helper()
+
+	provider, err := awsQueryProvider(&fixedSpotClient{advices: advices})
+	require.NoError(t, err)
+
+	result, err := provider.Query(context.Background(), &cloud.Query{OS: cloud.OSLinux})
+	require.NoError(t, err)
+
+	return result.Candidates
+}
+
+// fixedSpotClient answers with the advice it was built with and nothing else.
+type fixedSpotClient struct{ advices []spot.Advice }
+
+func (c *fixedSpotClient) GetSpotSavings(context.Context, ...spot.GetSpotSavingsOption) ([]spot.Advice, error) {
+	return c.advices, nil
+}
+func (*fixedSpotClient) DataSource() string { return spot.DataSourceEmbedded }
+
 // setupSuccessfulSpotClient creates a mock client with successful single instance response
 func setupSuccessfulSpotClient(t *testing.T, region, instanceType string, savings int) *mockspotClient {
-	mockClient := newMockspotClient(t)
+	mockClient := newQueryClient(t)
 
 	advice := []spot.Advice{
 		{
@@ -50,7 +85,7 @@ func setupSuccessfulSpotClient(t *testing.T, region, instanceType string, saving
 
 // setupMultipleInstancesSpotClient creates a mock client with multiple instances response
 func setupMultipleInstancesSpotClient(t *testing.T, region string, sortBy spot.SortBy, sortDesc bool) *mockspotClient {
-	mockClient := newMockspotClient(t)
+	mockClient := newQueryClient(t)
 
 	// Create base data
 	advice1 := spot.Advice{
@@ -105,7 +140,7 @@ func setupMultipleInstancesSpotClient(t *testing.T, region string, sortBy spot.S
 
 // setupErrorSpotClient creates a mock client that returns an error
 func setupErrorSpotClient(t *testing.T, expectedError error) *mockspotClient {
-	mockClient := newMockspotClient(t)
+	mockClient := newQueryClient(t)
 
 	// Mock expects functional options, so we match any options
 	mockClient.EXPECT().GetSpotSavings(
@@ -118,7 +153,7 @@ func setupErrorSpotClient(t *testing.T, expectedError error) *mockspotClient {
 
 // setupFilteredSpotClient creates a mock client with filtered results
 func setupFilteredSpotClient(t *testing.T, expectedAdvices []spot.Advice) *mockspotClient {
-	mockClient := newMockspotClient(t)
+	mockClient := newQueryClient(t)
 
 	// Mock expects functional options, so we match any options
 	mockClient.EXPECT().GetSpotSavings(
@@ -479,7 +514,7 @@ func TestExecMainCmdRejectsOnlyAnUnusablePriceCeiling(t *testing.T) {
 		{name: "unset", args: nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			client := newMockspotClient(t)
+			client := newQueryClient(t)
 			if !test.wantErr {
 				client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).
 					Return([]spot.Advice{}, nil).Once()
@@ -507,32 +542,29 @@ func TestExecMainCmdRejectsOnlyAnUnusablePriceCeiling(t *testing.T) {
 func TestExecMainCmd_ErrorConditions(t *testing.T) {
 	tests := []struct {
 		name        string
-		setupFlags  func(*cli.Context)
-		expectedErr error
+		args        []string
+		clientErr   error
 		errorSubstr string
 	}{
 		{
-			name: "client returns region error",
-			setupFlags: func(ctx *cli.Context) {
-				ctx.Set("region", "invalid-region")
-			},
-			expectedErr: errors.New("region not found: invalid-region"),
+			name:        "client returns region error",
+			args:        []string{"--region", "invalid-region"},
+			clientErr:   errors.New("region not found: invalid-region"),
 			errorSubstr: "region not found",
 		},
+		// An operating system outside the neutral vocabulary is now refused by
+		// the capability check the provider runs before acquisition, so the
+		// client carries no expectation here: reaching it would fail the mock.
+		// It used to be reported by the client after a fetch.
 		{
-			name: "client returns OS error",
-			setupFlags: func(ctx *cli.Context) {
-				ctx.Set("os", "invalid-os")
-			},
-			expectedErr: errors.New("invalid instance OS: invalid-os"),
-			errorSubstr: "invalid instance OS",
+			name:        "unsupported OS is refused before acquisition",
+			args:        []string{"--os", "invalid-os"},
+			errorSubstr: `aws does not support os "invalid-os"`,
 		},
 		{
-			name: "client returns regex error",
-			setupFlags: func(ctx *cli.Context) {
-				ctx.Set("type", "[invalid-regex")
-			},
-			expectedErr: errors.New("failed to match instance type: [invalid-regex"),
+			name:        "client returns regex error",
+			args:        []string{"--type", "[invalid-regex"},
+			clientErr:   errors.New("failed to match instance type: [invalid-regex"),
 			errorSubstr: "failed to match instance type",
 		},
 	}
@@ -541,7 +573,10 @@ func TestExecMainCmd_ErrorConditions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var output bytes.Buffer
 
-			mockClient := setupErrorSpotClient(t, tt.expectedErr)
+			mockClient := newQueryClient(t)
+			if tt.clientErr != nil {
+				mockClient.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return(nil, tt.clientErr).Once()
+			}
 
 			testCtx := context.Background()
 
@@ -550,17 +585,7 @@ func TestExecMainCmd_ErrorConditions(t *testing.T) {
 				return execMainCmd(ctx, testCtx, awsOnlyRegistry(), mockClient, &output)
 			})
 
-			// Build command line arguments based on test case
-			args := []string{"spotinfo"}
-			if tt.name == "client returns region error" {
-				args = append(args, "--region", "invalid-region")
-			} else if tt.name == "client returns OS error" {
-				args = append(args, "--os", "invalid-os")
-			} else if tt.name == "client returns regex error" {
-				args = append(args, "--type", "[invalid-regex")
-			}
-
-			err := app.Run(args)
+			err := app.Run(append([]string{"spotinfo"}, tt.args...))
 
 			require.Error(t, err, "Should return error for invalid input")
 			assert.Contains(t, err.Error(), tt.errorSubstr,
@@ -588,7 +613,7 @@ func TestExecMainCmd_RegionHandling(t *testing.T) {
 			name:    "multiple regions",
 			regions: []string{"us-east-1", "us-west-2"},
 			setup: func(t *testing.T) *mockspotClient {
-				mockClient := newMockspotClient(t)
+				mockClient := newQueryClient(t)
 
 				advices := []spot.Advice{
 					{Region: "us-east-1", Instance: "t2.micro", Savings: 50},
@@ -789,14 +814,14 @@ func TestCLIApp_BeforeHook(t *testing.T) {
 func TestPrintFunctions_EdgeCases(t *testing.T) {
 	t.Run("printAdvicesNumber with empty list", func(t *testing.T) {
 		var output bytes.Buffer
-		printAdvicesNumber([]spot.Advice{}, false, &output)
-		assert.Empty(t, output.String(), "Empty advice list should produce no output")
+		printAdvicesNumber([]cloud.Candidate{}, false, &output)
+		assert.Empty(t, output.String(), "Empty candidate list should produce no output")
 	})
 
 	t.Run("printAdvicesText with empty list", func(t *testing.T) {
 		var output bytes.Buffer
-		printAdvicesText([]spot.Advice{}, false, &output)
-		assert.Empty(t, output.String(), "Empty advice list should produce no output")
+		printAdvicesText([]cloud.Candidate{}, false, &output)
+		assert.Empty(t, output.String(), "Empty candidate list should produce no output")
 	})
 
 	t.Run("printAdvicesJSON with nil", func(t *testing.T) {
@@ -805,41 +830,51 @@ func TestPrintFunctions_EdgeCases(t *testing.T) {
 		assert.Equal(t, "null\n", output.String(), "nil should produce 'null'")
 	})
 
+	// An unmatched query still has to be parseable by whatever is reading the
+	// pipe, so the empty answer is an empty array rather than null.
+	t.Run("printAdvicesJSON with no candidates", func(t *testing.T) {
+		var output bytes.Buffer
+		printAdvicesJSON(v1Advices(nil), &output)
+		assert.Equal(t, "[]\n", output.String())
+	})
+
 	t.Run("printAdvicesTable with empty list", func(t *testing.T) {
 		var output bytes.Buffer
-		printAdvicesTable([]spot.Advice{}, false, false, &output)
+		printAdvicesTable([]cloud.Candidate{}, false, false, &output)
 		// Should produce at least headers
 		outputStr := output.String()
 		assert.Contains(t, outputStr, "INSTANCE INFO", "Should contain headers even with empty data")
 	})
 
 	t.Run("printAdvicesNumber single vs multiple results", func(t *testing.T) {
-		advice := spot.Advice{Instance: "t2.micro", Savings: 75, Region: "us-east-1"}
+		candidates := candidatesFrom(t, []spot.Advice{
+			{Instance: "t2.micro", Savings: 75, Region: "us-east-1"},
+		})
 
 		// Test single result
 		var output1 bytes.Buffer
-		printAdvicesNumber([]spot.Advice{advice}, false, &output1)
+		printAdvicesNumber(candidates, false, &output1)
 		assert.Equal(t, "75\n", output1.String(), "Single result should show just the number")
 
 		// Test multiple results
 		var output2 bytes.Buffer
-		printAdvicesNumber([]spot.Advice{advice, advice}, false, &output2)
+		printAdvicesNumber(append(candidates, candidates...), false, &output2)
 		expected := "t2.micro: 75\nt2.micro: 75\n"
 		assert.Equal(t, expected, output2.String(), "Multiple results should show instance: number format")
 	})
 
 	t.Run("printAdvicesText with region flag", func(t *testing.T) {
-		advice := spot.Advice{
+		candidates := candidatesFrom(t, []spot.Advice{{
 			Instance: "t2.micro",
 			Savings:  75,
 			Region:   "us-west-2",
 			Info:     spot.TypeInfo{Cores: 1, RAM: 1.0},
 			Range:    spot.Range{Label: "<5%"},
 			Price:    0.0116,
-		}
+		}})
 
 		var output bytes.Buffer
-		printAdvicesText([]spot.Advice{advice}, true, &output)
+		printAdvicesText(candidates, true, &output)
 		result := output.String()
 
 		assert.Contains(t, result, "region=us-west-2", "Should include region when flag is true")
@@ -848,28 +883,54 @@ func TestPrintFunctions_EdgeCases(t *testing.T) {
 	})
 }
 
+// A candidate carries no savings percentage when the advisor published none,
+// where every format has always printed 0. A blank cell would read as "this
+// build stopped reporting savings" rather than "the feed has no figure".
+func TestAnAbsentSavingsStillPrintsZero(t *testing.T) {
+	candidates := candidatesFrom(t, []spot.Advice{{
+		Region: "us-east-1", Instance: "t3.nano", InstanceType: "t3.nano",
+		Range: spot.Range{Label: "<5%", Min: 0, Max: 5},
+		Info:  spot.TypeInfo{Cores: 2, RAM: 0.5}, Price: 0.0016,
+	}})
+	require.Len(t, candidates, 1)
+	require.Nil(t, candidates[0].SavingsPercent, "the fixture must reach the renderer as an absence")
+
+	var number, text, csv bytes.Buffer
+	printAdvicesNumber(candidates, false, &number)
+	printAdvicesText(candidates, false, &text)
+	printAdvicesTable(candidates, true, false, &csv)
+
+	assert.Equal(t, "0\n", number.String())
+	assert.Contains(t, text.String(), "saving=0%")
+	assert.Contains(t, csv.String(), "t3.nano,2,0.5,0,<5%")
+	assert.Equal(t, 0, v1AdviceOf(&candidates[0]).Savings)
+}
+
 func TestLivePriceIndicator(t *testing.T) {
-	staticAdvice := spot.Advice{
-		Region:   "us-east-1",
-		Instance: "t2.micro",
-		Savings:  50,
-		Info:     spot.TypeInfo{Cores: 1, RAM: 1.0},
-		Range:    spot.Range{Label: "<5%", Min: 0, Max: 5},
-		Price:    0.0116,
-	}
-	liveAdvice := spot.Advice{
-		Region:    "us-east-1",
-		Instance:  "m8g.xlarge",
-		Savings:   70,
-		Info:      spot.TypeInfo{Cores: 4, RAM: 16.0},
-		Range:     spot.Range{Label: "5-10%", Min: 5, Max: 10},
-		Price:     0.1567,
-		LivePrice: true,
-	}
+	candidates := candidatesFrom(t, []spot.Advice{
+		{
+			Region:   "us-east-1",
+			Instance: "t2.micro",
+			Savings:  50,
+			Info:     spot.TypeInfo{Cores: 1, RAM: 1.0},
+			Range:    spot.Range{Label: "<5%", Min: 0, Max: 5},
+			Price:    0.0116,
+		},
+		{
+			Region:    "us-east-1",
+			Instance:  "m8g.xlarge",
+			Savings:   70,
+			Info:      spot.TypeInfo{Cores: 4, RAM: 16.0},
+			Range:     spot.Range{Label: "5-10%", Min: 5, Max: 10},
+			Price:     0.1567,
+			LivePrice: true,
+		},
+	})
+	require.Len(t, candidates, 2)
 
 	t.Run("text output marks live prices with asterisk", func(t *testing.T) {
 		var output bytes.Buffer
-		printAdvicesText([]spot.Advice{staticAdvice, liveAdvice}, false, &output)
+		printAdvicesText(candidates, false, &output)
 		result := output.String()
 		assert.Contains(t, result, "price=0.0116\n", "Static price should not have asterisk")
 		assert.Contains(t, result, "price=0.1567*\n", "Live price should have asterisk")
@@ -877,7 +938,7 @@ func TestLivePriceIndicator(t *testing.T) {
 
 	t.Run("table output marks live prices with asterisk", func(t *testing.T) {
 		var output bytes.Buffer
-		printAdvicesTable([]spot.Advice{staticAdvice, liveAdvice}, false, false, &output)
+		printAdvicesTable(candidates, false, false, &output)
 		result := output.String()
 		assert.Contains(t, result, "0.0116 ", "Static price without asterisk in table")
 		assert.Contains(t, result, "0.1567*", "Live price with asterisk in table")
@@ -885,7 +946,7 @@ func TestLivePriceIndicator(t *testing.T) {
 
 	t.Run("CSV output includes price source column", func(t *testing.T) {
 		var output bytes.Buffer
-		printAdvicesTable([]spot.Advice{staticAdvice, liveAdvice}, true, false, &output)
+		printAdvicesTable(candidates, true, false, &output)
 		result := output.String()
 		assert.Contains(t, result, "Price Source", "CSV should have Price Source header")
 		assert.Contains(t, result, "static", "Static price should have 'static' source")
@@ -894,7 +955,7 @@ func TestLivePriceIndicator(t *testing.T) {
 
 	t.Run("JSON output includes live_price field", func(t *testing.T) {
 		var output bytes.Buffer
-		printAdvicesJSON([]spot.Advice{staticAdvice, liveAdvice}, &output)
+		printAdvicesJSON(v1Advices(candidates), &output)
 
 		var advices []spot.Advice
 		err := json.Unmarshal(output.Bytes(), &advices)
@@ -1475,7 +1536,7 @@ func TestExecMainCmd_VisualFormattingBehavior(t *testing.T) {
 				}
 			}
 
-			mockClient := newMockspotClient(t)
+			mockClient := newQueryClient(t)
 			mockClient.EXPECT().GetSpotSavings(
 				mock.Anything, // context
 				mock.Anything, // variadic options
