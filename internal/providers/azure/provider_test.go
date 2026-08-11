@@ -81,7 +81,8 @@ func TestCapabilitiesNeverClaimRisk(t *testing.T) {
 		"Azure publishes eviction rates only behind a subscription, so this provider has none")
 	assert.False(t, capabilities.PlacementScore)
 	assert.False(t, capabilities.ZoneDetail)
-	assert.False(t, capabilities.LiveEnrichment)
+	assert.True(t, capabilities.LiveEnrichment,
+		"the Retail Prices API is anonymous, so a named region's prices can be refreshed without a credential")
 	assert.True(t, capabilities.SupportsOS(cloud.OSLinux))
 	assert.True(t, capabilities.SupportsOS(cloud.OSWindows),
 		"the Retail API prices a licence-bundled meter for most sizes, and the catalogue carries it")

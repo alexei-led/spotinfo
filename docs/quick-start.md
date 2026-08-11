@@ -120,7 +120,9 @@ spotinfo recommend --architecture x86_64 --cpu 2 --memory 8 --offline
 ```
 
 `--offline` answers from the snapshot inside the binary and makes no request at all. It
-applies to AWS. GCP and Azure are always offline.
+applies to AWS, and to Azure when you name one or two regions — those refresh their prices
+from Azure's anonymous Retail Prices API, and `--offline` skips that. GCP has no live price
+path, so the flag changes nothing there.
 
 ## Next
 

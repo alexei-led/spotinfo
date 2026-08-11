@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"slices"
 	"strings"
@@ -11,13 +12,27 @@ import (
 	"spotinfo/internal/cloud"
 )
 
-// Provider answers neutral queries from the committed Azure catalogue. It makes
-// no network request and needs no credentials, subscription, or tenant:
-// everything it serves is in the binary.
+// Provider answers neutral queries from the committed Azure catalogue, and
+// refreshes the prices of a named region from the anonymous Retail Prices API
+// when a caller has not asked for a snapshot-only answer.
+//
+// It still needs no credentials, subscription, or tenant. The live path reads
+// the same contracted endpoint the snapshot was built from — see liveprice.go —
+// and any failure there falls back to the committed catalogue rather than
+// failing the query.
+//
+//nolint:govet // grouped by role: the snapshot, then how it is refreshed.
 type Provider struct {
 	catalog *Catalog
 	specs   map[cloud.MachineID]*CatalogMachine
+	regions map[cloud.Region]struct{}
 	sources []cloud.SourceRef
+	live    LivePriceConfig
+	// retailBase is the contracted price endpoint, empty when the contract
+	// names none; minMachines is the reviewed per-region floor a live sweep is
+	// held to, the same one verifyRegions holds the snapshot to.
+	retailBase  string
+	minMachines int
 }
 
 // New builds the Azure provider from the committed snapshot. A snapshot that
@@ -35,10 +50,26 @@ func New() (*Provider, error) {
 		specs[machine.ID] = machine
 	}
 
+	regions := make(map[cloud.Region]struct{}, len(loaded.Catalog.Regions))
+	for i := range loaded.Catalog.Regions {
+		regions[loaded.Catalog.Regions[i].ID] = struct{}{}
+	}
+
+	// A contract that names no price endpoint disables live enrichment rather
+	// than failing the provider: the committed catalogue still answers
+	// everything it answered before.
+	base, err := RetailPriceBase(loaded.Contract)
+	if err != nil {
+		slog.Debug("azure contract names no live price endpoint", slog.Any("error", err))
+	}
+
 	return &Provider{
-		catalog: loaded.Catalog,
-		specs:   specs,
-		sources: scopedSources(loaded.Manifest.SourceRefs(), loaded.Catalog.Machines),
+		catalog:     loaded.Catalog,
+		specs:       specs,
+		regions:     regions,
+		sources:     scopedSources(loaded.Manifest.SourceRefs(), loaded.Catalog.Machines),
+		retailBase:  base,
+		minMachines: loaded.Contract.Thresholds.MinMachines,
 	}, nil
 }
 
@@ -55,8 +86,13 @@ func (p *Provider) ID() cloud.ProviderID { return cloud.ProviderAzure }
 // Risk is false and stays false: Azure publishes eviction rates through Resource
 // Graph and Resource SKUs, both of which require a subscription, so this
 // provider has nothing to report and must not let silence be ranked as low
-// interruption. Placement scores, zone detail and live enrichment would all
-// require an authenticated API, which the offline contract rules out.
+// interruption. Placement scores and zone detail are the same shape — both are
+// published, and both need a subscription to read.
+//
+// Live enrichment is the one that is not, and that is why it is declared. The
+// Retail Prices API is anonymous, so refreshing a named region's prices costs a
+// request and no credential. Declaring the capability is also what tells the
+// CLI that --offline and --refresh mean something here.
 func (p *Provider) Capabilities() cloud.Capabilities {
 	return cloud.Capabilities{
 		OperatingSystems: slices.Clone(p.catalog.OperatingSystems),
@@ -64,6 +100,7 @@ func (p *Provider) Capabilities() cloud.Capabilities {
 		SpotPrice:        true,
 		OnDemandPrice:    true,
 		MachineSpec:      true,
+		LiveEnrichment:   p.liveEnabled(),
 	}
 }
 
@@ -71,7 +108,7 @@ func (p *Provider) Capabilities() cloud.Capabilities {
 // yields no candidates rather than an error: "spotinfo has no Azure data for
 // francecentral" is an empty result, not a malformed request, and the caller
 // reports it as NO_CANDIDATES.
-func (p *Provider) Query(_ context.Context, query *cloud.Query) (cloud.Result, error) {
+func (p *Provider) Query(ctx context.Context, query *cloud.Query) (cloud.Result, error) {
 	if query == nil {
 		return cloud.Result{}, fmt.Errorf("%w: query is required", cloud.ErrInvalidArgument)
 	}
@@ -101,6 +138,10 @@ func (p *Provider) Query(_ context.Context, query *cloud.Query) (cloud.Result, e
 		return cloud.Result{}, err
 	}
 
+	// Acquisition, after every capability check above: a request this provider
+	// cannot answer must cost no request at all.
+	overlay := p.livePrices(ctx, query)
+
 	var candidates []cloud.Candidate
 
 	for i := range p.catalog.Regions {
@@ -109,8 +150,9 @@ func (p *Provider) Query(_ context.Context, query *cloud.Query) (cloud.Result, e
 			continue
 		}
 
-		for j := range region.Prices {
-			price := &region.Prices[j]
+		prices := overlay.pricesFor(region)
+		for j := range prices {
+			price := &prices[j]
 
 			machine := p.specs[price.Machine]
 			if machine == nil || !accepts(machine, price, query, pattern) {
@@ -124,8 +166,8 @@ func (p *Provider) Query(_ context.Context, query *cloud.Query) (cloud.Result, e
 
 	return cloud.Result{
 		Provider:   cloud.ProviderAzure,
-		Mode:       cloud.DataModeEmbeddedSnapshot,
-		Sources:    slices.Clone(p.sources),
+		Mode:       overlay.dataMode(),
+		Sources:    overlay.sources(p.sources),
 		Candidates: candidates,
 	}, nil
 }

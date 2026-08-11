@@ -23,7 +23,7 @@ move without a code change.
 | Workloads accepted       | cost, web, ci, batch      | cost                             | cost                     |
 | On-Demand price in v2    | no                        | yes                              | yes                      |
 | Placement scores         | yes                       | no                               | no                       |
-| Live price fallback      | yes                       | no                               | no                       |
+| Live price fallback      | yes                       | no                               | yes, 1-2 named regions   |
 | Credentials              | optional                  | optional, for `--live-risk` only | none                     |
 
 Every limit on this page is either a vendor limit or a reviewed decision.
@@ -151,6 +151,15 @@ binaries.
 
 **Risk.** Azure publishes eviction rates only through Resource Graph and Resource SKUs, and
 both need a subscription. Every candidate reports `risk.status: "unavailable"`.
+
+**Live prices.** Naming one or two regions refreshes their prices from the same anonymous
+Retail Prices API before answering — no credential, and no source the contract does not
+already name. `data_source.mode` then reads `live`, or `cached` when a copy inside the
+24-hour window answered. Everything else is the committed catalogue: `--offline`,
+`--region all` (the default), three or more regions, and any region outside the 55. A sweep
+that fails for any reason is discarded whole and the snapshot answers, never an error. The
+cost is what bounds it — one region is 10 pages and 5.5 MB. See
+[data-sources.md](data-sources.md#7-azure-retail-prices-api-and-microsoft-learn-vm-size-pages).
 
 ## Refreshing a snapshot
 

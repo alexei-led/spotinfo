@@ -230,10 +230,18 @@ func undefinedFlagName(err error) (string, bool) {
 // The default is unchanged: without the flag, live data is still fetched and the
 // snapshot remains a fallback.
 func newSpotClient(ctx *cli.Context) *spot.Client {
-	return newSpotClientFor(cloud.FetchPolicy{
+	return newSpotClientFor(fetchPolicy(ctx))
+}
+
+// fetchPolicy reads --offline and --refresh from the nearest context that set
+// them. It is one function because two consumers need the same answer: the AWS
+// acquisition client, and the provider registry, whose Azure provider carries
+// its own live path.
+func fetchPolicy(ctx *cli.Context) cloud.FetchPolicy {
+	return cloud.FetchPolicy{
 		Offline: lineageBool(ctx, flagOffline),
 		Refresh: lineageBool(ctx, flagRefresh),
-	})
+	}
 }
 
 // newSpotClientFor builds the client for one data policy. It is split from the
@@ -294,6 +302,16 @@ func newAWSProvider(client spotClient) (cloud.Provider, error) {
 // opens one client. A provider whose snapshot fails its gates is reported
 // disabled with its reason, never substituted by another cloud.
 func newProviderRegistry(client *spot.Client) (*providers.Registry, error) {
+	return newProviderRegistryFor(client, cloud.FetchPolicy{})
+}
+
+// newProviderRegistryFor is the same composition under an explicit data policy.
+//
+// The AWS client already carries its own policy, which is why the zero-policy
+// spelling above is still the honest one for callers that only hold a client.
+// Azure needs the policy as a value: its live price path is inside the provider,
+// not inside an acquisition client, so --offline and --refresh reach it here.
+func newProviderRegistryFor(client *spot.Client, policy cloud.FetchPolicy) (*providers.Registry, error) {
 	registry, err := providers.New(
 		providers.Registration{
 			ID:    cloud.ProviderAWS,
@@ -304,8 +322,15 @@ func newProviderRegistry(client *spot.Client) (*providers.Registry, error) {
 			Build: func() (cloud.Provider, error) { return gcpprovider.New() },
 		},
 		providers.Registration{
-			ID:    cloud.ProviderAzure,
-			Build: func() (cloud.Provider, error) { return azureprovider.New() },
+			ID: cloud.ProviderAzure,
+			Build: func() (cloud.Provider, error) {
+				provider, buildErr := azureprovider.New()
+				if buildErr != nil {
+					return nil, buildErr
+				}
+
+				return provider.WithLivePrices(azureprovider.LivePriceConfig{Policy: policy}), nil
+			},
 		},
 	)
 	if err != nil {
@@ -387,7 +412,7 @@ func (m *mcpProviders) registry(policy cloud.FetchPolicy) (*providers.Registry, 
 		return built, nil
 	}
 
-	registry, err := newProviderRegistry(newSpotClientFor(policy))
+	registry, err := newProviderRegistryFor(newSpotClientFor(policy), policy)
 	if err != nil {
 		return nil, err
 	}
@@ -988,7 +1013,7 @@ func handleSignals() context.Context {
 func defaultRecommendAction(ctx *cli.Context) error {
 	client := newSpotClient(ctx)
 
-	registry, err := newProviderRegistry(client)
+	registry, err := newProviderRegistryFor(client, fetchPolicy(ctx))
 	if err != nil {
 		return err
 	}

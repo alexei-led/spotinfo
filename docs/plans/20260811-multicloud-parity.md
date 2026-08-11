@@ -1384,17 +1384,96 @@ only the set of sentences the commit made false.
 - Create: `internal/providers/azure/liveprice.go`, `internal/providers/azure/liveprice_test.go`
 - Modify: `internal/providers/azure/provider.go`
 
-- [ ] fetch current prices from the anonymous Retail Prices API for the queried regions only
-- [ ] reuse the existing feed cache, with a reviewed TTL recorded in `docs/data-sources.md`
-- [ ] report the result as `live`, `cached` or `embedded-snapshot` through the existing
+- [x] fetch current prices from the anonymous Retail Prices API for the queried regions only
+- [x] reuse the existing feed cache, with a reviewed TTL recorded in `docs/data-sources.md`
+- [x] report the result as `live`, `cached` or `embedded-snapshot` through the existing
       `data_source.mode`, never claiming a recency nothing established
-- [ ] set `CapabilityLiveEnrichment` true for Azure, which retires the Task 8 refusal for
+- [x] set `CapabilityLiveEnrichment` true for Azure, which retires the Task 8 refusal for
       `--offline` and `--refresh` on Azure without editing that test
-- [ ] fail soft: any live failure falls back to the snapshot and never turns into an error
-- [ ] write tests against a stub transport covering success, a 500, a timeout and a malformed
+- [x] fail soft: any live failure falls back to the snapshot and never turns into an error
+- [x] write tests against a stub transport covering success, a 500, a timeout and a malformed
       body
-- [ ] write a test asserting `--offline` makes no request on Azure
-- [ ] run `make test` — must pass before Task 11
+- [x] write a test asserting `--offline` makes no request on Azure
+- [x] run `make test` — must pass before Task 11
+
+➕ **"The queried regions only" needed a bound, and the bound is measured.** Sweeping one
+region against the live API on 2026-08-11 is **9,022 meters over 10 pages and 5.5 MB, in 6.9
+seconds**; `--region all`, which is the default, is 55 of those — roughly six minutes and 300
+MB. The whole enrichment therefore gets the 20-second budget the GCP live-risk path already
+spends on an optional extra, and at ~7 s a region that admits **two**. A query naming more, or
+naming `all`, or naming none, is answered from the committed snapshot with one Debug line.
+Regions are swept **sequentially**: the API advertises a rate-limit policy header
+(`x-ms-ratelimit-retailprices-retry-after: 60`), and forty concurrent requests would make
+fail-soft the normal case rather than the exception. A queried region the contract does not
+cover is skipped rather than fetched — the live path refreshes approved coverage and must never
+widen it, which also keeps the cache file name out of a caller's hands.
+
+➕ **The overlay is all-or-nothing, and that is what keeps `mode` honest.** A region that
+fails for any reason discards the whole overlay, not its own share of it: a half-live answer
+has no single freshness to report. `mode` is `live` only when **every** queried region was
+fetched this run and `cached` as soon as one came from an unrevalidated entry — verified
+against the real API, where a second region fetched beside a cached one reports `cached`.
+
+➕ **There is no 304 path here, and the TTL follows from that.** The Retail API serves
+`cache-control: no-cache` with **neither an `ETag` nor a `Last-Modified`**, so
+`CLAUDE.md`'s "a copy the origin confirmed with a 304 _is_ `live`" cannot apply — an expired
+entry is re-downloaded in full, and a cached one was never confirmed. The window is **24 h**,
+reasoned the way the AWS advisor feed's is: of the 9,022 rows in that sweep, **8,896 carry an
+`effectiveStartDate` on the first of a month and 126 do not**, so the API publishes price
+_intervals_ whose boundaries land on a monthly cadence. A document that turns over monthly,
+costs 5.5 MB and ten round trips to read, and cannot be cheaply asked whether it moved, gets one
+day of staleness against a roughly thirty-day cadence. Cached entries are ~580 KB per region.
+
+➕ **The feed cache moved to `internal/feedcache`, which is what "reuse" had to mean.** It was
+unexported inside `internal/spot`, and an Azure provider importing the legacy AWS package for a
+generic on-disk cache is the wrong dependency even though the import policy permits it. The
+mechanics moved verbatim with exported names; `internal/spot/cache.go` keeps only the two AWS
+time-to-live values and the reasoning for why they differ, and the generic cache tests moved
+with the code. The operator contract is unchanged and now shared: same
+`os.UserCacheDir()/spotinfo`, same `SPOTINFO_CACHE_DIR`, same `SPOTINFO_CACHE=off`, every
+failure still best-effort. `.archfit.yaml` gained the module at the `domain` layer;
+`make verify-architecture` passes with no new Critical or High finding.
+
+➕ **The live sweep reuses the snapshot's own parser and gates rather than a second copy.**
+`RetailRequestURL`, `AcceptRows`, `SelectCurrent` and `buildRegions` are the build-time
+functions; the rows are narrowed to the reviewed sizes **before** they are parsed, for the
+reason `RetainSpecified`'s comment already gives — a region prices a few thousand sizes and an
+anomaly in one this binary never publishes must not cost a caller the sizes it does. The one
+threshold the sweep is held to is the contract's own per-region `min_machines`, reused, not
+re-invented: a sweep that comes back thinner is refused whole. `cmd/update-azure-data`'s
+`priceAPIBase` moved to `azure.RetailPriceBase` so the weekly refresh and the live path cannot
+read two different "contracted" endpoints.
+
+➕ **A live region republishes its own provenance.** Same URL — a sweep issues the exact
+request the manifest recorded — with the `content_sha256` and `fetched_at` of the document
+actually read. Publishing the snapshot's hash beside a price fetched this run would have made
+`content_sha256` unverifiable, which Invariant 7 forbids.
+
+➕ **Verified against the shipped binary, not only against the stub.**
+`spotinfo list --cloud azure --region westeurope --machine '^Standard_D2s_v5$' --output json`
+answers `mode: live` in 4.4 s with a fresh hash and `sources_omitted: 79`; the same query again
+is `cached`; `--offline` is `embedded-snapshot` with no request; `--refresh` is `live` again;
+`--region all` and three regions are both `embedded-snapshot`.
+
+➕ **Files this task's list omits.** `internal/feedcache/{cache,cache_test}.go` (new),
+`internal/spot/{cache,cache_test,data,cache_flow_test}.go`, `.archfit.yaml`,
+`internal/providers/azure/{prices,provider_test}.go`, `cmd/update-azure-data/{main,main_test}.go`,
+`cmd/spotinfo/{main,list}.go` (`newProviderRegistryFor` and `fetchPolicy` — the delegating
+overload keeps Task 8's `refusals_test.go` byte-identical), and `docs/{data-sources,clouds,
+quick-start}.md`.
+
+➕ **One `internal/providers/azure/provider_test.go` assertion changed, and it is not the Task
+8 test.** `TestCapabilitiesNeverClaimRisk` asserted `LiveEnrichment` was false, which is the
+capability this task lands. Task 8's registry-driven
+`TestOfflineAndRefreshAreRefusedExactlyWhereThereIsNoLiveFeed` was **not** edited and goes green
+on its own, which is exactly the design it was written for.
+
+⚠️ **`CLAUDE.md:433` is now wrong and Task 16 owns it.** It reads "AWS runs with `--offline`,
+GCP and Azure have no live path" in the e2e testing note. Azure now has one. The suite is still
+network-free — every Azure invocation in `cmd/spotinfo/e2e_test.go` uses the default
+`--region all`, which never sweeps, and `e2eEnv` pins a dead proxy on top — but the sentence
+must be corrected, and a future e2e test that names an explicit Azure region needs
+`e2eOfflineFor` extended to Azure.
 
 ---
 

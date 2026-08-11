@@ -63,6 +63,19 @@ modules:
     # medium: the manifest and source-contract shapes are still settling as GCP
     # and Azure snapshots land. Revisit once both providers have shipped.
     volatility: medium
+  feedcache:
+    paths:
+      - internal/feedcache/**
+    public:
+      - internal/feedcache
+    layer: domain
+    owner: spotinfo
+    role: core
+    subdomain: generic
+    # low: an on-disk cache of fetched documents. Its shape changes only when
+    # the operator contract does — the directory, the two environment
+    # variables, and the best-effort rule.
+    volatility: low
   spot:
     paths:
       - internal/spot/**

@@ -8,6 +8,11 @@
 // internal/providers/azure/data/source-contract.json. A region outside that list
 // yields no candidates rather than a substituted answer.
 //
+// The same Retail Prices API is read at run time to refresh a named region's
+// prices — see liveprice.go. It is anonymous there too: the live path needs no
+// credential, cannot reach a source the contract does not name, and falls back
+// to the committed catalogue on any failure.
+//
 // Risk is deliberately absent. Azure publishes eviction rates only through
 // Resource Graph and Resource SKUs, both of which need a subscription, so this
 // provider has nothing to report and must not let silence be ranked as low

@@ -146,7 +146,7 @@ func listCommand(action cli.ActionFunc) *cli.Command {
 func listCmd(ctx *cli.Context) error {
 	client := newSpotClient(ctx)
 
-	registry, err := newProviderRegistry(client)
+	registry, err := newProviderRegistryFor(client, fetchPolicy(ctx))
 	if err != nil {
 		return err
 	}

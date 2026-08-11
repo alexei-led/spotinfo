@@ -375,7 +375,7 @@ func TestPriceAPIBaseIsTheContractedRESTSource(t *testing.T) {
 	contract, err := loadContract(dataDir)
 	require.NoError(t, err)
 
-	base, err := priceAPIBase(contract)
+	base, err := azure.RetailPriceBase(contract)
 	require.NoError(t, err)
 	assert.Equal(t, "https://prices.azure.com/api/retail/prices", base)
 }

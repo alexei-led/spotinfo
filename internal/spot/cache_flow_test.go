@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"spotinfo/internal/feedcache"
 )
 
 // advisorBody is the smallest document parseAdvisorResponse accepts.
@@ -56,7 +58,7 @@ func advisorFeed(url string, ttl time.Duration) feed[advisorData] {
 // A cached document inside its window is served without touching the origin.
 // That is the whole point: the advisor feed takes over a second to transfer.
 func TestFreshCacheSkipsTheOriginEntirely(t *testing.T) {
-	t.Setenv(cacheDirEnv, t.TempDir())
+	t.Setenv(feedcache.DirEnv, t.TempDir())
 
 	server := &feedServer{}
 	url := server.start(t).URL
@@ -75,7 +77,7 @@ func TestFreshCacheSkipsTheOriginEntirely(t *testing.T) {
 // An expired entry is revalidated, not re-downloaded. A 304 costs one round trip
 // and no payload, and restarts the window.
 func TestExpiredCacheRevalidatesAndIsReportedLive(t *testing.T) {
-	t.Setenv(cacheDirEnv, t.TempDir())
+	t.Setenv(feedcache.DirEnv, t.TempDir())
 
 	server := &feedServer{}
 	url := server.start(t).URL
@@ -99,7 +101,7 @@ func TestExpiredCacheRevalidatesAndIsReportedLive(t *testing.T) {
 
 // --refresh ignores a fresh entry and fetches unconditionally.
 func TestRefreshIgnoresAFreshEntry(t *testing.T) {
-	t.Setenv(cacheDirEnv, t.TempDir())
+	t.Setenv(feedcache.DirEnv, t.TempDir())
 
 	server := &feedServer{}
 	url := server.start(t).URL
@@ -118,7 +120,7 @@ func TestRefreshIgnoresAFreshEntry(t *testing.T) {
 // snapshot compiled into the binary: it is AWS data that is merely old, rather
 // than AWS data that is old and frozen at build time.
 func TestUnreachableOriginPrefersAnExpiredEntryOverTheSnapshot(t *testing.T) {
-	t.Setenv(cacheDirEnv, t.TempDir())
+	t.Setenv(feedcache.DirEnv, t.TempDir())
 
 	server := &feedServer{}
 	live := server.start(t)
@@ -137,7 +139,7 @@ func TestUnreachableOriginPrefersAnExpiredEntryOverTheSnapshot(t *testing.T) {
 
 // With nothing cached and no origin, the committed snapshot answers.
 func TestNoCacheAndNoOriginFallsBackToTheSnapshot(t *testing.T) {
-	t.Setenv(cacheDirEnv, t.TempDir())
+	t.Setenv(feedcache.DirEnv, t.TempDir())
 
 	data, origin, err := fetchFeed(context.Background(), fetchOptions{},
 		advisorFeed("http://127.0.0.1:1/nothing", time.Hour))
@@ -149,7 +151,7 @@ func TestNoCacheAndNoOriginFallsBackToTheSnapshot(t *testing.T) {
 
 // --offline makes no request at all, even with an empty cache.
 func TestOfflineNeverReachesTheOrigin(t *testing.T) {
-	t.Setenv(cacheDirEnv, t.TempDir())
+	t.Setenv(feedcache.DirEnv, t.TempDir())
 
 	server := &feedServer{}
 	url := server.start(t).URL

@@ -230,7 +230,7 @@ func fetchSeries(ctx context.Context, client *http.Client, contract *snapshot.So
 // NextPageLink until the region is exhausted.
 func fetchPrices(ctx context.Context, client *http.Client, contract *snapshot.SourceContract,
 ) ([]azure.RetailItem, []snapshot.Source, error) {
-	base, err := priceAPIBase(contract)
+	base, err := azure.RetailPriceBase(contract)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -334,19 +334,6 @@ func sameHost(first, next string) error {
 	}
 
 	return nil
-}
-
-// priceAPIBase is the one contracted source that supplies amounts.
-func priceAPIBase(contract *snapshot.SourceContract) (string, error) {
-	for i := range contract.Sources {
-		source := &contract.Sources[i]
-		if source.SourceType == snapshot.SourceTypeDocumentedRESTAPI &&
-			slices.Contains(source.DataKinds, snapshot.DataKindSpotPrice) {
-			return source.URL, nil
-		}
-	}
-
-	return "", fmt.Errorf("%w: no contracted rest api supplies spot prices", snapshot.ErrInvalidSourceContract)
 }
 
 func fetch(ctx context.Context, client *http.Client, target string) ([]byte, error) {

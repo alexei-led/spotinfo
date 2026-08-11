@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"spotinfo/internal/feedcache"
 )
 
 // The two large feeds are embedded gzipped, as the GCP and Azure catalogues
@@ -154,11 +156,11 @@ func fetchFeed[T any](ctx context.Context, options fetchOptions, source feed[T])
 		return result, originEmbedded, err
 	}
 
-	cache := openFeedCache()
+	cache := feedcache.Open()
 	now := time.Now()
 
-	cached, entry, hit := cache.load(source.name)
-	if hit && !options.refresh && entry.fresh(source.url, source.ttl, now) {
+	cached, entry, hit := cache.Load(source.name)
+	if hit && !options.refresh && entry.Fresh(source.url, source.ttl, now) {
 		if result, err := source.parse(cached); err == nil && source.validate(result) == nil {
 			slog.Debug("serving a cached feed",
 				slog.String("feed", source.name),
@@ -207,8 +209,8 @@ var errFeedUnusable = errors.New("feed unusable")
 // in months.
 //
 //nolint:cyclop // one linear request path; each branch is a distinct HTTP outcome
-func fetchFromOrigin[T any](ctx context.Context, cache *feedCache, options fetchOptions,
-	source feed[T], cached []byte, entry *cacheEntry, hit bool, now time.Time,
+func fetchFromOrigin[T any](ctx context.Context, cache *feedcache.Cache, options fetchOptions,
+	source feed[T], cached []byte, entry *feedcache.Entry, hit bool, now time.Time,
 ) (*T, error) {
 	ctx, cancel := withDefaultTimeout(ctx)
 	defer cancel()
@@ -221,7 +223,7 @@ func fetchFromOrigin[T any](ctx context.Context, cache *feedCache, options fetch
 	}
 
 	if hit && !options.refresh {
-		applyValidators(req, entry)
+		feedcache.ApplyValidators(req, entry)
 	}
 
 	resp, err := client.Do(req) //nolint:gosec // G704: every url is a package-level constant, not user input
@@ -237,7 +239,7 @@ func fetchFromOrigin[T any](ctx context.Context, cache *feedCache, options fetch
 	if resp.StatusCode == http.StatusNotModified && hit {
 		result, parseErr := source.parse(cached)
 		if parseErr == nil && source.validate(result) == nil {
-			cache.touch(source.name, entry, now)
+			cache.Touch(source.name, entry, now)
 			slog.Debug("origin confirmed the cached feed is current", slog.String("feed", source.name))
 
 			return result, nil
@@ -271,7 +273,7 @@ func fetchFromOrigin[T any](ctx context.Context, cache *feedCache, options fetch
 		return nil, errFeedUnusable
 	}
 
-	cache.save(source.name, body, &cacheEntry{
+	cache.Save(source.name, body, &feedcache.Entry{
 		FetchedAt:    now,
 		URL:          source.url,
 		ETag:         resp.Header.Get("ETag"),

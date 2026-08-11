@@ -244,7 +244,41 @@ The committed snapshot predates both defects, carries the correct 32 GiB for
   Resource SKUs, both of which require a subscription, so every Azure candidate reports
   `risk.status = "unavailable"` rather than a low number. Consequently Azure serves only the
   risk-free `cost` workload.
-- **Runtime**: entirely offline. No credential, token, subscription, tenant, or network request.
+- **Runtime**: still credential-free — no token, subscription or tenant — but no longer
+  request-free. A query naming **one or two** covered regions refreshes their prices from the
+  same anonymous Retail Prices API before answering. Everything else answers from the committed
+  snapshot: `--offline`, `--region all` (the default), an unset region, three or more regions,
+  and a region the contract does not cover. See **Live Azure prices** below.
+
+**Live Azure prices.**
+
+A live sweep reads the exact contracted request above — same endpoint, same OData filter, same
+parser — so it can refresh approved coverage and cannot widen it. Measured against the live API
+on 2026-08-11, one region (`westeurope`) is **9,022 meters over 10 pages and 5.5 MB, in 6.9
+seconds**. That cost is what bounds the feature:
+
+- **Two regions at most.** The whole enrichment gets a 20-second budget, the same one the GCP
+  live-risk path spends on an optional extra; at ~7 s a region that admits two with room for a
+  slower link. A query naming more is answered from the snapshot rather than half-fetched,
+  because a half-fetched answer cannot report one honest mode.
+- **Cached for 24 hours.** Of the 9,022 rows in that sweep, **8,896 carry an
+  `effectiveStartDate` on the first of a month and 126 do not**: the API publishes price
+  *intervals*, and their boundaries land on a monthly cadence. The response also carries
+  `cache-control: no-cache` with **neither an `ETag` nor a `Last-Modified`**, so an expired
+  entry cannot be revalidated with a conditional request the way both AWS feeds are — it is
+  re-downloaded in full. A document that turns over monthly, costs 5.5 MB and ten round trips
+  to read, and offers no cheap way to ask whether it moved, gets the same window as the AWS
+  advisor feed: one day of staleness against a roughly thirty-day cadence. The entries live in
+  the shared feed cache, so `SPOTINFO_CACHE_DIR` and `SPOTINFO_CACHE=off` apply.
+- **Reported honestly.** `data_source.mode` is `live` when every queried region was fetched
+  this run, `cached` when any of them came from an unrevalidated cache entry, and
+  `embedded-snapshot` otherwise. There is no third state here: with no validator to send, a
+  cached copy was never confirmed current, so it can never be reported as `live`.
+- **Fail soft, always.** A refused request, a non-200, a body that no longer parses, a sweep
+  that prices fewer machines than the reviewed per-region floor — each discards the whole
+  overlay and the answer falls back to the committed catalogue. None of them is an error.
+- **Provenance follows the prices.** A live region republishes its own source: the same URL the
+  manifest records, with the `content_sha256` and `fetched_at` of the document actually read.
 
 **Three source quirks the parser handles deliberately:**
 
@@ -340,8 +374,13 @@ Beyond the feeds:
 - **Live Pricing**: For instance types with $0 in the static feed, fetch current prices via EC2 `DescribeSpotPriceHistory` API (requires AWS credentials)
 - **Recommendation architecture**: Use only the committed reviewed family snapshot; unknown families fail closed rather than being inferred from AWS naming.
 - **Placement Scores**: No degradation — `--with-score` fails with an explicit error if AWS is unreachable. A synthesised score is indistinguishable from a real one, so none is produced.
-- **GCP and Azure**: no fallback exists, because no live path exists. Both answer from their
-  committed catalogue and make no request at run time.
+- **Azure**: one fallback, and it is the whole strategy. A live sweep of a named region either
+  succeeds completely or is discarded completely, in which case the committed catalogue answers
+  and the result says `embedded-snapshot`. See **Live Azure prices** under source 7 for what
+  triggers a sweep and what it costs.
+- **GCP**: no fallback exists, because no live price path exists. It answers from its committed
+  catalogue and makes no request at run time; `--live-risk` is a separate, opt-in,
+  authenticated path that adds a risk figure and never a price.
 
 ## Data Processing Pipeline
 
