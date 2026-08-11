@@ -15,14 +15,35 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"spotinfo/internal/cloud"
+	"spotinfo/internal/providers"
+	awsprovider "spotinfo/internal/providers/aws"
 	"spotinfo/internal/spot"
 )
 
+// recommendTestApp drives `spotinfo recommend` against the production AWS
+// provider built over a mocked acquisition client.
+//
+// The command reaches AWS through the registry like every other cloud now: the
+// v1 path that held the client itself, and picked itself by workload, is gone.
+// A stub provider would prove nothing about the mapping, so the real adapter is
+// registered over the mock.
 func recommendTestApp(client spotClient, output io.Writer) *cli.App {
+	registry := mustRegistry(providers.Registration{
+		ID: cloud.ProviderAWS,
+		Build: func() (cloud.Provider, error) {
+			lookup, err := spot.LoadEmbeddedArchitectureLookup()
+			if err != nil {
+				return nil, err
+			}
+
+			return awsprovider.New(client, lookup)
+		},
+	})
+
 	return newSpotinfoApp(
 		func(*cli.Context) error { return nil },
 		func(ctx *cli.Context) error {
-			return execRecommendCmd(ctx, context.Background(), awsOnlyRegistry(), client, output)
+			return execRecommendCmd(ctx, context.Background(), registry, output)
 		},
 	)
 }
@@ -64,45 +85,39 @@ func TestExecRecommendCmd_ProducesVersionedJSONReport(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	var report recommendationReport
+	var report cloud.RecommendReport
 	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
-	assert.Equal(t, recommendationSchemaVersion, report.SchemaVersion)
-	assert.Equal(t, []string{"us-east-1", "us-west-2"}, report.Request.Regions)
-	assert.Equal(t, "windows", report.Request.OS)
-	assert.Equal(t, 2, report.Request.MinimumVCPU)
-	assert.Equal(t, 8, report.Request.MinimumMemoryGiB)
-	assert.Equal(t, spot.WorkloadCI, report.Request.Workload)
-	require.NotNil(t, report.Request.MaximumUSDPerInstanceHour)
-	assert.Equal(t, 0.04, *report.Request.MaximumUSDPerInstanceHour)
-	assert.Equal(t, spot.RecommendationRankingPolicy(), report.RankingPolicy)
+	assert.Equal(t, cloud.SchemaVersionRecommendV3, report.SchemaVersion)
+	assert.Equal(t, []cloud.Region{"us-east-1", "us-west-2"}, report.Request.Regions)
+	assert.Equal(t, cloud.OSWindows, report.Request.OS)
+	assert.Equal(t, 2, report.Request.MinVCPU)
+	assert.InDelta(t, 8.0, report.Request.MinMemoryGiB, 0)
+	assert.Equal(t, cloud.WorkloadCI, report.Request.Workload)
+	require.NotNil(t, report.Request.MaxPrice)
+	assert.InDelta(t, 0.04, *report.Request.MaxPrice, 1e-9)
+	assert.Equal(t, cloud.RankingPolicy(), report.RankingPolicy)
 	require.Len(t, report.Recommendations, 1)
 	assert.NotNil(t, report.Recommendations[0].RationaleCodes)
 }
 
-func TestNormalizeRecommendationRegions(t *testing.T) {
+// The command deduplicates and orders the regions it was given; refusing an
+// empty region, or "all" mixed with an explicit one, is the neutral request
+// validator's job and is covered by the rejection table below.
+func TestNeutralRegionsDeduplicatesAndOrders(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		regions []string
-		want    []string
-		wantErr bool
+		want    []cloud.Region
 	}{
-		{name: "duplicate explicit regions", regions: []string{"us-west-2", "us-east-1", "us-east-1"}, want: []string{"us-east-1", "us-west-2"}},
-		{name: "duplicate all", regions: []string{"all", "all"}, want: []string{"all"}},
-		{name: "trimmed all", regions: []string{" all "}, want: []string{"all"}},
-		{name: "trimmed duplicate explicit region", regions: []string{" us-east-1 ", "us-east-1"}, want: []string{"us-east-1"}},
-		{name: "trimmed all mixed with explicit region", regions: []string{" all ", "us-east-1"}, wantErr: true},
-		{name: "all mixed with explicit region", regions: []string{"all", "us-east-1"}, wantErr: true},
-		{name: "empty region", regions: []string{""}, wantErr: true},
+		{name: "duplicate explicit regions", regions: []string{"us-west-2", "us-east-1", "us-east-1"}, want: []cloud.Region{"us-east-1", "us-west-2"}},
+		{name: "duplicate all", regions: []string{"all", "all"}, want: []cloud.Region{"all"}},
+		{name: "trimmed all", regions: []string{" all "}, want: []cloud.Region{"all"}},
+		{name: "trimmed duplicate explicit region", regions: []string{" us-east-1 ", "us-east-1"}, want: []cloud.Region{"us-east-1"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := normalizeRecommendationRegions(test.regions)
-			if test.wantErr {
-				require.Error(t, err)
-				assert.True(t, errors.Is(err, spot.ErrInvalidRecommendationInput))
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, test.want, got)
+			t.Parallel()
+
+			assert.Equal(t, test.want, neutralRegions(test.regions))
 		})
 	}
 }
@@ -110,7 +125,7 @@ func TestNormalizeRecommendationRegions(t *testing.T) {
 func TestExecRecommendCmd_NormalizesDuplicateRegionsAndAppliesInstancePattern(t *testing.T) {
 	client := newQueryClient(t)
 	client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Run(func(_ context.Context, opts ...spot.GetSpotSavingsOption) {
-		assert.Len(t, opts, 5, "instance filter must be included in candidate acquisition")
+		assert.Len(t, opts, 6, "machine filter must be included in candidate acquisition")
 	}).Return([]spot.Advice{{
 		Region: "us-east-1", Instance: "m6i.large", Price: 0.04, Savings: 72,
 		Info: spot.TypeInfo{Cores: 2, RAM: 8}, Range: spot.Range{Label: "<5%", Max: 5},
@@ -123,9 +138,9 @@ func TestExecRecommendCmd_NormalizesDuplicateRegionsAndAppliesInstancePattern(t 
 	))
 	require.NoError(t, err)
 
-	var report recommendationReport
+	var report cloud.RecommendReport
 	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
-	assert.Equal(t, []string{"us-east-1", "us-west-2"}, report.Request.Regions)
+	assert.Equal(t, []cloud.Region{"us-east-1", "us-west-2"}, report.Request.Regions)
 	assert.Len(t, report.Recommendations, 1, "duplicate regions cannot duplicate recommendations")
 }
 
@@ -136,7 +151,7 @@ func TestRecommendCommandEchoesTheFlagsItWasGiven(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		args []string
-		want recommendationRequest
+		want cloud.RequestDTO
 	}{
 		{
 			name: "trimmed region",
@@ -145,7 +160,7 @@ func TestRecommendCommandEchoesTheFlagsItWasGiven(t *testing.T) {
 				"--region", " us-west-2 ", "--os", "windows", "--min-vcpu", "2", "--min-memory-gib", "8",
 				"--workload", "ci",
 			},
-			want: recommendationRequest{Regions: []string{"us-west-2"}, OS: "windows", MinimumVCPU: 2, MinimumMemoryGiB: 8},
+			want: cloud.RequestDTO{Regions: []cloud.Region{"us-west-2"}, OS: cloud.OSWindows, MinVCPU: 2, MinMemoryGiB: 8},
 		},
 		{
 			name: "larger floors",
@@ -154,7 +169,7 @@ func TestRecommendCommandEchoesTheFlagsItWasGiven(t *testing.T) {
 				"--region", "us-west-2", "--os", "windows", "--min-vcpu", "4", "--min-memory-gib", "16",
 				"--workload", "ci",
 			},
-			want: recommendationRequest{Regions: []string{"us-west-2"}, OS: "windows", MinimumVCPU: 4, MinimumMemoryGiB: 16},
+			want: cloud.RequestDTO{Regions: []cloud.Region{"us-west-2"}, OS: cloud.OSWindows, MinVCPU: 4, MinMemoryGiB: 16},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -168,12 +183,12 @@ func TestRecommendCommandEchoesTheFlagsItWasGiven(t *testing.T) {
 			err := recommendTestApp(client, &output).Run(test.args)
 			require.NoError(t, err)
 
-			var report recommendationReport
+			var report cloud.RecommendReport
 			require.NoError(t, json.Unmarshal(output.Bytes(), &report))
 			assert.Equal(t, test.want.Regions, report.Request.Regions)
 			assert.Equal(t, test.want.OS, report.Request.OS)
-			assert.Equal(t, test.want.MinimumVCPU, report.Request.MinimumVCPU)
-			assert.Equal(t, test.want.MinimumMemoryGiB, report.Request.MinimumMemoryGiB)
+			assert.Equal(t, test.want.MinVCPU, report.Request.MinVCPU)
+			assert.InDelta(t, test.want.MinMemoryGiB, report.Request.MinMemoryGiB, 0)
 		})
 	}
 }
@@ -223,7 +238,7 @@ func TestRecommendCommandNoCandidatesReturnsSentinelWithoutOutput(t *testing.T) 
 
 	err := recommendTestApp(client, &output).Run(recommendArgs("--workload", "ci"))
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, spot.ErrNoRecommendationCandidates))
+	assert.True(t, errors.Is(err, cloud.ErrNoCandidates))
 	assert.Empty(t, output.String())
 }
 
@@ -236,7 +251,7 @@ func TestRecommendCommandClientFailureWrapsWithoutOutput(t *testing.T) {
 	err := recommendTestApp(client, &output).Run(recommendArgs("--workload", "ci"))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, fetchErr)
-	assert.Contains(t, err.Error(), "failed to get recommendation candidates")
+	assert.Contains(t, err.Error(), "aws candidate acquisition")
 	assert.Empty(t, output.String())
 }
 
@@ -248,7 +263,7 @@ func TestRecommendationOutputWriteFailuresAreReturned(t *testing.T) {
 	writeErr := errors.New("write failed")
 
 	t.Run("table", func(t *testing.T) {
-		err := writeRecommendationTable(nil, failingRecommendationWriter{err: writeErr})
+		err := writeNeutralRecommendationTable(nil, failingRecommendationWriter{err: writeErr})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, writeErr)
 	})
@@ -332,8 +347,8 @@ func neutralResult(id cloud.ProviderID, candidates ...cloud.Candidate) cloud.Res
 	}
 }
 
-// A cloud other than AWS is answered by the neutral engine and the v2 schema.
-func TestRecommendServesANonAWSCloudWithTheV2Schema(t *testing.T) {
+// A cloud other than AWS is answered by the neutral engine and the v3 schema.
+func TestRecommendServesANonAWSCloud(t *testing.T) {
 	registry := listRegistry(cloud.ProviderGCP, offlineLinuxCapabilities(),
 		neutralCandidate(cloud.ProviderGCP, "europe-west1", "n2-standard-2", "0.021", 2, 8),
 		neutralCandidate(cloud.ProviderGCP, "us-central1", "n2-standard-4", "0.011", 4, 16),
@@ -343,7 +358,7 @@ func TestRecommendServesANonAWSCloudWithTheV2Schema(t *testing.T) {
 	app := newSpotinfoApp(
 		func(*cli.Context) error { return nil },
 		func(ctx *cli.Context) error {
-			return execRecommendCmd(ctx, context.Background(), registry, newQueryClient(t), &output)
+			return execRecommendCmd(ctx, context.Background(), registry, &output)
 		},
 	)
 	require.NoError(t, app.Run(recommendArgs("--cloud", "gcp", "--region", "all", "--output", "json")))
@@ -351,7 +366,7 @@ func TestRecommendServesANonAWSCloudWithTheV2Schema(t *testing.T) {
 	var report cloud.RecommendReport
 	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
 
-	assert.Equal(t, cloud.SchemaVersionRecommendV2, report.SchemaVersion)
+	assert.Equal(t, cloud.SchemaVersionRecommendV3, report.SchemaVersion)
 	assert.Equal(t, cloud.ProviderGCP, report.Request.Cloud)
 	assert.Equal(t, cloud.WorkloadCost, report.Request.Workload,
 		"a cloud without risk data defaults to the risk-free cost policy")
@@ -362,8 +377,8 @@ func TestRecommendServesANonAWSCloudWithTheV2Schema(t *testing.T) {
 }
 
 // The cost policy is served by the neutral engine on every cloud, including
-// AWS, which the v1 schema never offered.
-func TestRecommendServesTheCostPolicyOnAWSWithTheV2Schema(t *testing.T) {
+// AWS, which the retired v1 schema never offered.
+func TestRecommendServesTheCostPolicyOnAWS(t *testing.T) {
 	registry := mustRegistry(registrationOf(stubProvider{
 		id:           cloud.ProviderAWS,
 		capabilities: awsCapabilities(),
@@ -375,21 +390,21 @@ func TestRecommendServesTheCostPolicyOnAWSWithTheV2Schema(t *testing.T) {
 	app := newSpotinfoApp(
 		func(*cli.Context) error { return nil },
 		func(ctx *cli.Context) error {
-			return execRecommendCmd(ctx, context.Background(), registry, newQueryClient(t), &output)
+			return execRecommendCmd(ctx, context.Background(), registry, &output)
 		},
 	)
 	require.NoError(t, app.Run(recommendArgs("--workload", "cost", "--output", "json")))
 
 	var report cloud.RecommendReport
 	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
-	assert.Equal(t, cloud.SchemaVersionRecommendV2, report.SchemaVersion)
+	assert.Equal(t, cloud.SchemaVersionRecommendV3, report.SchemaVersion)
 	assert.Equal(t, cloud.ProviderAWS, report.Request.Cloud)
 	assert.Equal(t, cloud.WorkloadCost, report.Request.Workload)
 	require.Len(t, report.Recommendations, 1)
 	assert.Equal(t, "0.041600000", report.Recommendations[0].SpotUSDPerHour)
 }
 
-// The v2 table names the risk status rather than leaving a blank column that
+// The table names the risk status rather than leaving a blank column that
 // could read as "no interruptions".
 func TestNeutralRecommendationTableNamesUnavailableRisk(t *testing.T) {
 	registry := listRegistry(cloud.ProviderGCP, offlineLinuxCapabilities(),
@@ -399,7 +414,7 @@ func TestNeutralRecommendationTableNamesUnavailableRisk(t *testing.T) {
 	app := newSpotinfoApp(
 		func(*cli.Context) error { return nil },
 		func(ctx *cli.Context) error {
-			return execRecommendCmd(ctx, context.Background(), registry, newQueryClient(t), &output)
+			return execRecommendCmd(ctx, context.Background(), registry, &output)
 		},
 	)
 	require.NoError(t, app.Run(recommendArgs("--cloud", "gcp", "--region", "all")))
@@ -410,21 +425,49 @@ func TestNeutralRecommendationTableNamesUnavailableRisk(t *testing.T) {
 	assert.Contains(t, output.String(), "COST_POLICY")
 }
 
-// An AWS request under a v1 workload still produces the v1 schema.
-func TestRecommendKeepsTheV1SchemaForAWSWorkloads(t *testing.T) {
-	client := newQueryClient(t)
-	client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return([]spot.Advice{{
-		Region: "us-east-1", Instance: "m6i.large", Price: 0.04, Savings: 72,
-		Info: spot.TypeInfo{Cores: 2, RAM: 8}, Range: spot.Range{Label: "<5%", Max: 5},
-	}}, nil).Once()
+// AWS under a risk-capped workload was the one combination answered by
+// spotinfo.recommend/v1. It is answered by v3 like everything else now, and the
+// risk it filtered on is published in the same block every other cloud uses.
+func TestRecommendServesEveryAWSWorkloadWithOneSchema(t *testing.T) {
+	for _, workload := range []cloud.Workload{cloud.WorkloadCost, cloud.WorkloadWeb, cloud.WorkloadCI, cloud.WorkloadBatch} {
+		t.Run(string(workload), func(t *testing.T) {
+			client := newQueryClient(t)
+			client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return([]spot.Advice{{
+				Region: "us-east-1", Instance: "m6i.large", Price: 0.04, Savings: 72,
+				Info: spot.TypeInfo{Cores: 2, RAM: 8}, Range: spot.Range{Label: "<5%", Max: 5},
+			}}, nil).Once()
+
+			var output bytes.Buffer
+			require.NoError(t, recommendTestApp(client, &output).
+				Run(recommendArgs("--workload", string(workload), "--output", "json")))
+
+			var report cloud.RecommendReport
+			require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+			assert.Equal(t, cloud.SchemaVersionRecommendV3, report.SchemaVersion)
+			assert.Equal(t, workload, report.Request.Workload)
+			require.Len(t, report.Recommendations, 1)
+			assert.Equal(t, cloud.RiskStatusAvailable, report.Recommendations[0].Risk.Status)
+		})
+	}
+}
+
+// A risk-capped workload still needs a cloud that publishes risk, and that
+// refusal happens before acquisition.
+func TestRecommendRefusesARiskCappedWorkloadOnACloudWithoutRisk(t *testing.T) {
+	registry := listRegistry(cloud.ProviderGCP, offlineLinuxCapabilities(),
+		neutralCandidate(cloud.ProviderGCP, "us-central1", "n2-standard-4", "0.011", 4, 16))
 
 	var output bytes.Buffer
-	require.NoError(t, recommendTestApp(client, &output).Run(recommendArgs("--workload", "web", "--output", "json")))
+	app := newSpotinfoApp(
+		func(*cli.Context) error { return nil },
+		func(ctx *cli.Context) error {
+			return execRecommendCmd(ctx, context.Background(), registry, &output)
+		},
+	)
 
-	var report recommendationReport
-	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
-	assert.Equal(t, recommendationSchemaVersion, report.SchemaVersion)
-	assert.Equal(t, spot.WorkloadWeb, report.Request.Workload)
+	err := app.Run(recommendArgs("--cloud", "gcp", "--region", "all", "--workload", "web"))
+	require.ErrorIs(t, err, cloud.ErrUnsupportedCapability)
+	assert.Empty(t, output.String())
 }
 
 // The default workload is cost on every cloud, including AWS. It used to be web
@@ -442,14 +485,14 @@ func TestRecommendDefaultsToTheCostPolicyOnAWS(t *testing.T) {
 	app := newSpotinfoApp(
 		func(*cli.Context) error { return nil },
 		func(ctx *cli.Context) error {
-			return execRecommendCmd(ctx, context.Background(), registry, newQueryClient(t), &output)
+			return execRecommendCmd(ctx, context.Background(), registry, &output)
 		},
 	)
 	require.NoError(t, app.Run(recommendArgs("--output", "json")))
 
 	var report cloud.RecommendReport
 	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
-	assert.Equal(t, cloud.SchemaVersionRecommendV2, report.SchemaVersion)
+	assert.Equal(t, cloud.SchemaVersionRecommendV3, report.SchemaVersion)
 	assert.Equal(t, cloud.WorkloadCost, report.Request.Workload)
 }
 
@@ -484,7 +527,7 @@ func TestRecommendSortsTheRankedPageWithoutReselectingIt(t *testing.T) {
 			app := newSpotinfoApp(
 				func(*cli.Context) error { return nil },
 				func(ctx *cli.Context) error {
-					return execRecommendCmd(ctx, context.Background(), registry, newQueryClient(t), &output)
+					return execRecommendCmd(ctx, context.Background(), registry, &output)
 				},
 			)
 			args := append([]string{"--cloud", "gcp", "--region", "all", "--output", "json"}, test.args...)
@@ -510,7 +553,7 @@ func TestRecommendRefusesASortKeyItDoesNotPublish(t *testing.T) {
 	app := newSpotinfoApp(
 		func(*cli.Context) error { return nil },
 		func(ctx *cli.Context) error {
-			return execRecommendCmd(ctx, context.Background(), registry, newQueryClient(t), &output)
+			return execRecommendCmd(ctx, context.Background(), registry, &output)
 		},
 	)
 
@@ -519,23 +562,51 @@ func TestRecommendRefusesASortKeyItDoesNotPublish(t *testing.T) {
 	assert.Empty(t, output.String())
 }
 
-// The AWS v1 report publishes a fixed ranking, so the sort flags are refused
-// there rather than accepted and ignored.
-func TestRecommendRefusesSortingTheLegacyAWSReport(t *testing.T) {
-	for _, args := range [][]string{
-		{"--workload", "ci", "--sort", sortPrice},
-		{"--workload", "ci", "--order", orderDesc},
+// --sort and --order used to be refused on AWS under a risk-capped workload,
+// because the v1 report published a fixed ranking it could not honour. With one
+// report the same flag on the same command means one thing on every cloud and
+// every workload.
+func TestRecommendSortsAnAWSRiskCappedPage(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		args    []string
+		machine cloud.MachineID
+		rank    int
+	}{
+		{name: "sort price ascending", args: []string{"--sort", sortPrice}, machine: "m6i.large", rank: 1},
+		{name: "sort price descending", args: []string{"--sort", sortPrice, "--order", orderDesc},
+			machine: "m6i.xlarge", rank: 2},
+		{name: "order alone reverses the policy", args: []string{"--order", orderDesc},
+			machine: "m6i.xlarge", rank: 2},
 	} {
-		t.Run(args[2], func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
+			client := newQueryClient(t)
+			client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return([]spot.Advice{
+				{
+					Region: "us-east-1", Instance: "m6i.large", Price: 0.04, Savings: 72,
+					Info: spot.TypeInfo{Cores: 2, RAM: 8}, Range: spot.Range{Label: "<5%", Max: 5},
+				},
+				{
+					Region: "us-east-1", Instance: "m6i.xlarge", Price: 0.08, Savings: 70,
+					Info: spot.TypeInfo{Cores: 4, RAM: 16}, Range: spot.Range{Label: "<5%", Max: 5},
+				},
+			}, nil).Once()
+
 			var output bytes.Buffer
-			err := recommendTestApp(newQueryClient(t), &output).Run(recommendArgs(args...))
-			require.ErrorIs(t, err, cloud.ErrInvalidArgument)
-			assert.Empty(t, output.String())
+			args := append([]string{"--workload", "ci", "--output", "json"}, test.args...)
+			require.NoError(t, recommendTestApp(client, &output).Run(recommendArgs(args...)))
+
+			var report cloud.RecommendReport
+			require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+			require.Len(t, report.Recommendations, 2)
+			assert.Equal(t, test.machine, report.Recommendations[0].Machine)
+			assert.Equal(t, test.rank, report.Recommendations[0].Rank,
+				"the rank is the ranking policy's position, not the print order")
 		})
 	}
 }
 
-// The v2 path reports no candidates rather than an empty recommendation list.
+// An empty answer is reported as no candidates, never as an empty page.
 func TestNeutralRecommendReportsNoCandidates(t *testing.T) {
 	registry := listRegistry(cloud.ProviderGCP, offlineLinuxCapabilities())
 
@@ -543,7 +614,7 @@ func TestNeutralRecommendReportsNoCandidates(t *testing.T) {
 	app := newSpotinfoApp(
 		func(*cli.Context) error { return nil },
 		func(ctx *cli.Context) error {
-			return execRecommendCmd(ctx, context.Background(), registry, newQueryClient(t), &output)
+			return execRecommendCmd(ctx, context.Background(), registry, &output)
 		},
 	)
 

@@ -35,7 +35,11 @@ func New() (*Provider, error) {
 		specs[machine.ID] = machine
 	}
 
-	return &Provider{catalog: loaded.Catalog, specs: specs, sources: loaded.Manifest.SourceRefs()}, nil
+	return &Provider{
+		catalog: loaded.Catalog,
+		specs:   specs,
+		sources: scopedSources(loaded.Manifest.SourceRefs(), loaded.Catalog.Machines),
+	}, nil
 }
 
 // ID identifies this provider.

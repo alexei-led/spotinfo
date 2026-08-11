@@ -14,38 +14,43 @@ import (
 	"spotinfo/internal/cloud"
 )
 
-// recommend_spot_instances argument keys. They match
-// docs/plans/contracts/recommend-spot-instances-v2-input.schema.json, which is
-// the normative input contract.
+// Recommendation argument keys. They match
+// docs/plans/contracts/recommend-v3-input.schema.json, which is the normative
+// input contract.
+//
+// argMaxPrice is spelled apart from the v1 tool's argMaxPricePerHour on
+// purpose: the vocabulary names the concept --max-price, and the v1 name stays
+// where it is until the tool that declares it is retired.
 const (
 	argCloud        = "cloud"
 	argMachine      = "machine"
 	argArchitecture = "architecture"
 	argOS           = "os"
 	argMinMemoryGiB = "min_memory_gib"
+	argMaxPrice     = "max_price"
 	argWorkload     = "workload"
 	argTop          = "top"
 )
 
 const recommendToolName = "recommend_spot_instances"
 
-// recommendArgs is the closed set of arguments the v2 input contract declares.
+// recommendArgs is the closed set of arguments the v3 input contract declares.
 // mcp-go checks a request against the advertised schema only under
 // server.WithInputSchemaValidation, which this server cannot adopt: the v1
 // find_spot_instances handler clamps the limit and score bounds its own schema
 // declares, so switching validation on would turn every clamp into an error and
 // break a golden-pinned surface. This tool therefore enforces its own object.
 var recommendArgs = map[string]struct{}{
-	argCloud:           {},
-	argRegions:         {},
-	argMachine:         {},
-	argArchitecture:    {},
-	argOS:              {},
-	argMinVCPU:         {},
-	argMinMemoryGiB:    {},
-	argMaxPricePerHour: {},
-	argWorkload:        {},
-	argTop:             {},
+	argCloud:        {},
+	argRegions:      {},
+	argMachine:      {},
+	argArchitecture: {},
+	argOS:           {},
+	argMinVCPU:      {},
+	argMinMemoryGiB: {},
+	argMaxPrice:     {},
+	argWorkload:     {},
+	argTop:          {},
 }
 
 // exclusiveMinimum declares the contract's exclusive lower bound, which mcp-go
@@ -56,12 +61,12 @@ func exclusiveMinimum(bound float64) mcp.PropertyOption {
 }
 
 // registerRecommendTool advertises the provider-neutral recommendation tool.
-// The schema mirrors the published v2 input contract; the MCP host rejects
+// The schema mirrors the published v3 input contract; the MCP host rejects
 // values outside each enum before a request reaches the handler.
 func (s *Server) registerRecommendTool() {
 	tool := mcp.NewTool(recommendToolName,
 		mcp.WithDescription("Recommend Spot machines from committed multi-cloud price data. "+
-			"Returns a spotinfo.recommend/v2 payload with explicit risk availability per cloud."),
+			"Returns a spotinfo.recommend/v3 payload with explicit risk availability per cloud."),
 		mcp.WithString(argCloud,
 			mcp.Description("Cloud provider to query"),
 			mcp.Enum(providerEnum()...),
@@ -91,7 +96,7 @@ func (s *Server) registerRecommendTool() {
 			mcp.Description("Required minimum memory in GiB"),
 			exclusiveMinimum(0),
 			mcp.Required()),
-		mcp.WithNumber(argMaxPricePerHour,
+		mcp.WithNumber(argMaxPrice,
 			mcp.Description("Maximum USD per machine-hour. Omit for no price ceiling"),
 			exclusiveMinimum(0)),
 		mcp.WithString(argWorkload,
@@ -269,7 +274,7 @@ func parseRecommendRequest(args map[string]any) (*cloud.RecommendRequest, error)
 // vocabulary so an argument of the wrong type is reported before a value that
 // is merely out of range.
 func recommendConstraints(args map[string]any, request *cloud.RecommendRequest) (*cloud.RecommendRequest, error) {
-	maxPrice, err := optionalPrice(args, argMaxPricePerHour)
+	maxPrice, err := optionalPrice(args, argMaxPrice)
 	if err != nil {
 		return nil, err
 	}
@@ -308,7 +313,7 @@ func recommendConstraints(args map[string]any, request *cloud.RecommendRequest) 
 
 // rejectUnknownArgs fails a request carrying an argument the contract does not
 // declare. Dropping one silently answers a different question than the caller
-// asked: `budget` in place of `max_price_per_hour` returns recommendations with
+// asked: `budget` in place of `max_price` returns recommendations with
 // no ceiling applied and status ok, and only a client that diffs the echoed
 // request against what it sent would ever notice.
 func rejectUnknownArgs(args map[string]any) error {
@@ -481,7 +486,7 @@ func optionalPrice(args map[string]any, key string) (*cloud.Money, error) {
 	}
 
 	if amount <= 0 {
-		return nil, fmt.Errorf("%w: %s must be positive", cloud.ErrInvalidArgument, argMaxPricePerHour)
+		return nil, fmt.Errorf("%w: %s must be positive", cloud.ErrInvalidArgument, argMaxPrice)
 	}
 
 	price, err := cloud.MoneyCeilingFromFloat(amount)

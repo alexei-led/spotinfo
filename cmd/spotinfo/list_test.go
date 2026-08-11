@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -163,7 +162,7 @@ func TestTheNumberFormatIsListOnly(t *testing.T) {
 	app := newSpotinfoApp(
 		func(*cli.Context) error { return nil },
 		func(ctx *cli.Context) error {
-			return execRecommendCmd(ctx, context.Background(), registry, newQueryClient(t), &recommendOutput)
+			return execRecommendCmd(ctx, context.Background(), registry, &recommendOutput)
 		},
 	)
 	err = app.Run(recommendArgs("--cloud", "gcp", "--region", "all", "--output", outputNumber))
@@ -201,10 +200,9 @@ func TestListFiltersAWSByArchitecture(t *testing.T) {
 		appName, listCommandName, "--architecture", "arm64", "--output", outputJSON,
 	}))
 
-	var advices []spot.Advice
-	require.NoError(t, json.Unmarshal(output.Bytes(), &advices))
-	require.Len(t, advices, 1, "only the Graviton machine is arm64")
-	assert.Equal(t, "m6g.large", advices[0].Instance)
+	candidates := listedCandidates(t, output.Bytes())
+	require.Len(t, candidates, 1, "only the Graviton machine is arm64")
+	assert.Equal(t, cloud.MachineID("m6g.large"), candidates[0].Machine)
 }
 
 // The unified defaults are the same value on both surfaces, so they are read

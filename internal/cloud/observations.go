@@ -1,6 +1,9 @@
 package cloud
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // Currency names the currency an amount is denominated in. It is recorded
 // explicitly so a future non-USD feed cannot be compared as if it were USD.
@@ -45,6 +48,44 @@ type SourceRef struct {
 	ContentSHA256 string
 	ParserVersion string
 	SchemaVersion string
+	// Scope narrows which candidates this source is the provenance for. The
+	// zero value covers all of them.
+	Scope SourceScope
+}
+
+// SourceScope narrows the candidates one source is the provenance for, so a
+// published answer can carry the provenance it actually used instead of every
+// document the snapshot was built from. Azure reads 81: 55 region-scoped price
+// queries and 26 machine-series pages, which is far more provenance than a
+// three-row answer has values.
+//
+// It is derived by the provider that owns the source, from the source URL. No
+// manifest declares it: ParseManifest rejects unknown fields, so a scope field
+// in the manifest format would force every committed manifest to be rebuilt
+// from the network before this code could compile.
+//
+// Each dimension is an independent filter and an empty dimension is
+// unconstrained, so a region-scoped source covers every machine in that region
+// and a size-page source covers its machines in every region. A URL whose shape
+// the provider does not recognise therefore yields the zero scope and is
+// retained: trimming can never drop the provenance of a value a candidate
+// carries, even when a vendor changes a URL shape.
+type SourceScope struct {
+	Region   Region
+	Machines []MachineID
+}
+
+// Covers reports whether this source is provenance for a candidate.
+func (s SourceScope) Covers(candidate *Candidate) bool {
+	if s.Region != "" && s.Region != candidate.Location.Region {
+		return false
+	}
+
+	if len(s.Machines) > 0 && !slices.Contains(s.Machines, candidate.Machine.ID) {
+		return false
+	}
+
+	return true
 }
 
 // PriceObservation is one price a provider published for one machine, class,

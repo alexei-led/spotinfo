@@ -11,7 +11,8 @@
         "schema_version": "aws.spot-advisor-feed/v1",
         "url": "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json"
       }
-    ]
+    ],
+    "sources_omitted": 0
   },
   "ranking_policy": [
     "spot_price_ascending",
@@ -55,7 +56,7 @@
     "architecture": "x86_64",
     "cloud": "aws",
     "machine": "",
-    "max_price_per_hour": null,
+    "max_price": null,
     "min_memory_gib": 8,
     "min_vcpu": 2,
     "os": "linux",
@@ -65,7 +66,7 @@
     "top": 3,
     "workload": "web"
   },
-  "schema_version": "spotinfo.recommend/v2",
+  "schema_version": "spotinfo.recommend/v3",
   "status": "ok",
   "warnings": []
 }

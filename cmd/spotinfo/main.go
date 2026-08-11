@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -617,24 +616,6 @@ func addFreshnessInfo(scoreStr string, fetchedAt *time.Time) string {
 	return scoreStr
 }
 
-func printAdvicesJSON(advices any, output io.Writer) {
-	bytes, err := json.MarshalIndent(advices, "", "  ")
-	if err != nil {
-		// Reachable in principle: json.Marshal rejects non-finite floats, and
-		// prices come from an upstream feed. Prices are screened at parse time,
-		// so this is a backstop — but a CLI should report it, not panic with a
-		// stack trace.
-		slog.Error("failed to render JSON output", slog.Any("error", err))
-
-		return
-	}
-
-	txt := string(bytes)
-	txt = strings.ReplaceAll(txt, "\\u003c", "<")
-	txt = strings.ReplaceAll(txt, "\\u003e", ">")
-	fmt.Fprintln(output, txt) //nolint:errcheck
-}
-
 // scoreTypeInfo holds information about score types present in advices.
 type scoreTypeInfo struct {
 	hasScores         bool
@@ -886,7 +867,7 @@ func defaultRecommendAction(ctx *cli.Context) error {
 		return err
 	}
 
-	return execRecommendCmd(ctx, mainCtx, registry, client, os.Stdout)
+	return execRecommendCmd(ctx, mainCtx, registry, os.Stdout)
 }
 
 //nolint:funlen // CLI flag declarations are intentionally kept together.

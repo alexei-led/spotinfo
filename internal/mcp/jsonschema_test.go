@@ -9,8 +9,11 @@ import (
 	"regexp"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"spotinfo/internal/cloud"
 )
 
 // A deliberately small JSON Schema checker covering exactly the keywords the
@@ -236,9 +239,9 @@ func validateNumber(schema map[string]any, value float64, path string) error {
 func TestValidatorRejectsEachWayAPayloadCanViolateAContract(t *testing.T) {
 	t.Parallel()
 
-	schema := loadContractSchema(t, "recommend-spot-instances-v2-success.schema.json")
+	schema := loadContractSchema(t, "recommend-v3-success.schema.json")
 
-	valid, err := os.ReadFile(filepath.Join("testdata", "recommend-spot-instances-v2-success.json"))
+	valid, err := os.ReadFile(filepath.Join("testdata", "recommend-v3-success.json"))
 	require.NoError(t, err)
 
 	var reference map[string]any
@@ -256,11 +259,13 @@ func TestValidatorRejectsEachWayAPayloadCanViolateAContract(t *testing.T) {
 	}
 
 	for name, corrupt := range map[string]func(map[string]any){
-		"missing required key":     func(d map[string]any) { delete(d, "schema_version") },
-		"unknown top-level key":    func(d map[string]any) { d["surprise"] = true },
-		"wrong type":               func(d map[string]any) { d["warnings"] = "none" },
-		"value outside an enum":    func(d map[string]any) { d["status"] = "partial" },
-		"const contradicted":       func(d map[string]any) { d["schema_version"] = "spotinfo.recommend/v3" },
+		"missing required key":  func(d map[string]any) { delete(d, "schema_version") },
+		"unknown top-level key": func(d map[string]any) { d["surprise"] = true },
+		"wrong type":            func(d map[string]any) { d["warnings"] = "none" },
+		"value outside an enum": func(d map[string]any) { d["status"] = "partial" },
+		// The retired version, so this also pins that a v2 document no longer
+		// validates against the published contract.
+		"const contradicted":       func(d map[string]any) { d["schema_version"] = "spotinfo.recommend/v2" },
 		"nested unknown key":       func(d map[string]any) { firstRecommendation(d)["surprise"] = true },
 		"nested missing key":       func(d map[string]any) { delete(firstRecommendation(d), "spot_usd_per_hour") },
 		"nested value below a min": func(d map[string]any) { firstRecommendation(d)["rank"] = 0.0 },
@@ -284,4 +289,102 @@ func TestValidatorRejectsEachWayAPayloadCanViolateAContract(t *testing.T) {
 			require.Error(t, validateAgainst(schema, document, "$"))
 		})
 	}
+}
+
+// spotinfo.list/v1 is the browse payload. It shares the candidate, risk, price
+// and source blocks with spotinfo.recommend/v3 and drops the ranking, so it is
+// validated here, beside them, against its own contract file. Task 6 makes it
+// the list_spot_machines payload; the document is already the one the CLI
+// publishes.
+func TestListPayloadValidatesAgainstTheContract(t *testing.T) {
+	t.Parallel()
+
+	schema := loadContractSchema(t, "list-v1.schema.json")
+	regionScore := 8
+	fetchedAt := time.Date(2026, time.August, 6, 8, 58, 27, 0, time.UTC)
+
+	for _, test := range []struct {
+		name       string
+		provider   cloud.ProviderID
+		candidates []cloud.Candidate
+		// wantKeys are the optional per-candidate keys this case must actually
+		// publish. Without them the schema check passes on a document that
+		// carries none of them, which proves nothing about the ones a flag adds.
+		wantKeys []string
+	}{
+		{
+			name:     "aws with published risk, zone prices and placement scores",
+			provider: cloud.ProviderAWS,
+			candidates: withZonePrice(buildCandidates(testCandidate{
+				Region: "us-east-1", Machine: "m6i.large", Price: 0.0416, Savings: 72, Live: true,
+				RiskLabel: "<5%", RiskMin: 0, RiskMax: 5, VCPU: 2, MemoryGiB: 8,
+				RegionScore: &regionScore, ZoneScores: map[string]int{"us-east-1a": 7},
+				ScoreFetchedAt: &fetchedAt,
+			}), "us-east-1a", "0.039"),
+			wantKeys: []string{"live_price", "zone_prices", "region_score", "zone_scores", "score_fetched_at"},
+		},
+		{
+			name:       "gcp without risk",
+			provider:   cloud.ProviderGCP,
+			candidates: gcpCandidates(),
+			wantKeys:   []string{"live_price"},
+		},
+		{
+			name:     "an answer with no candidates",
+			provider: cloud.ProviderAzure,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			for i := range test.candidates {
+				test.candidates[i].Provider = test.provider
+			}
+
+			result := cloud.Result{
+				Provider:   test.provider,
+				Mode:       cloud.DataModeEmbeddedSnapshot,
+				Sources:    testSources(),
+				Candidates: test.candidates,
+			}
+
+			report, err := cloud.NewListReport(&cloud.Query{
+				Regions: []cloud.Region{allRegions}, OS: cloud.OSLinux,
+			}, &result)
+			require.NoError(t, err)
+
+			encoded, err := json.Marshal(report)
+			require.NoError(t, err)
+			assertValidAgainstSchema(t, schema, encoded)
+
+			var document struct {
+				Candidates []map[string]any `json:"candidates"`
+			}
+			require.NoError(t, json.Unmarshal(encoded, &document))
+			require.Len(t, document.Candidates, len(test.candidates))
+
+			for _, key := range test.wantKeys {
+				require.Contains(t, document.Candidates[0], key)
+			}
+		})
+	}
+}
+
+// withZonePrice attaches a per-zone price to the first candidate. testCandidate
+// models none, and the zone-price block is one of the list-only fields the
+// schema declares.
+func withZonePrice(candidates []cloud.Candidate, zone, price string) []cloud.Candidate {
+	amount, err := cloud.ParseMoney(price)
+	if err != nil {
+		panic(err)
+	}
+	candidates[0].ZonePrices = []cloud.PriceObservation{{
+		Location: cloud.Location{Region: candidates[0].Location.Region, Zone: zone},
+		Class:    cloud.PriceClassSpot,
+		Currency: cloud.CurrencyUSD,
+		Unit:     cloud.BillingUnitInstanceHour,
+		Amount:   amount,
+	}}
+
+	return candidates
 }

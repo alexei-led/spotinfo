@@ -232,18 +232,29 @@ func execListCmd(ctx *cli.Context, execCtx context.Context,
 		log.Warn("no machines matched the query", slog.Any("filters", describeListFilters(ctx)))
 	}
 
-	return renderList(ctx.String(flagOutput), candidates, printRegion, output)
+	return renderList(ctx.String(flagOutput), query, &result, printRegion, output)
 }
 
 // renderList writes the answer in the requested format.
-func renderList(format string, candidates []cloud.Candidate, printRegion bool, output io.Writer) error {
+//
+// Only the JSON form carries the request echo and the provenance: it is the
+// document a program reads, and the four rendered formats are pages a person
+// reads. That is why it takes the whole result rather than the candidates.
+func renderList(format string, query *cloud.Query, result *cloud.Result, printRegion bool, output io.Writer) error {
+	candidates := result.Candidates
+
 	switch format {
 	case outputNumber:
 		printAdvicesNumber(candidates, printRegion, output)
 	case outputText:
 		printAdvicesText(candidates, printRegion, output)
 	case outputJSON:
-		printAdvicesJSON(v1Advices(candidates), output)
+		report, err := cloud.NewListReport(query, result)
+		if err != nil {
+			return err
+		}
+
+		return writeJSONReport(report, output)
 	case outputTable:
 		printAdvicesTable(candidates, false, printRegion, output)
 	case outputCSV:

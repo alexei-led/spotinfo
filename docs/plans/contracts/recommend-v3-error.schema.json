@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/alexei-led/spotinfo/schemas/recommend-spot-instances-v2-error.schema.json",
-  "title": "recommend_spot_instances error payload",
+  "$id": "https://github.com/alexei-led/spotinfo/schemas/recommend-v3-error.schema.json",
+  "title": "spotinfo.error/v1 payload",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "code", "message", "cloud"],

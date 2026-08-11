@@ -13,7 +13,7 @@ import (
 	"spotinfo/internal/cloud"
 )
 
-// The CLI and the MCP tool emit the same spotinfo.recommend/v2 document, but
+// The CLI and the MCP tool emit the same spotinfo.recommend/v3 document, but
 // only the MCP surface was validated against the published schema — every
 // schema check lives in internal/mcp, and cmd/spotinfo never read the contract
 // at all. `--top 999` therefore produced a payload whose request.top exceeded
@@ -26,7 +26,7 @@ func publishedTopBound(t *testing.T) float64 {
 	t.Helper()
 
 	path := filepath.Join("..", "..", "docs", "plans", "contracts",
-		"recommend-spot-instances-v2-success.schema.json")
+		"recommend-v3-success.schema.json")
 	contents, err := os.ReadFile(path) //nolint:gosec // G304: fixed repository path
 	require.NoError(t, err)
 
@@ -97,6 +97,6 @@ func TestCLIEmitsAV2RequestTopWithinTheContract(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(output), &payload))
 
-	assert.Equal(t, "spotinfo.recommend/v2", payload.SchemaVersion)
+	assert.Equal(t, "spotinfo.recommend/v3", payload.SchemaVersion)
 	assert.LessOrEqual(t, payload.Request.Top, int(publishedTopBound(t)))
 }

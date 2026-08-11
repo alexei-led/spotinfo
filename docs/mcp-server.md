@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `spotinfo` tool functions as a **Model Context Protocol (MCP) server**, so an AI assistant can query Spot data directly. Three tools are served. `find_spot_instances` and `list_spot_regions` cover AWS. `recommend_spot_instances` ranks machines on AWS, GCP and Azure and returns a `spotinfo.recommend/v2` payload.
+The `spotinfo` tool functions as a **Model Context Protocol (MCP) server**, so an AI assistant can query Spot data directly. Three tools are served. `find_spot_instances` and `list_spot_regions` cover AWS. `recommend_spot_instances` ranks machines on AWS, GCP and Azure and returns a `spotinfo.recommend/v3` payload.
 
 ## What is MCP?
 
@@ -75,7 +75,7 @@ the tool takes no arguments.
 
 ### `recommend_spot_instances`
 
-Rank Spot machines from the committed multi-cloud catalogue and return a `spotinfo.recommend/v2` payload.
+Rank Spot machines from the committed multi-cloud catalogue and return a `spotinfo.recommend/v3` payload.
 
 **Parameters:**
 
@@ -87,10 +87,10 @@ Rank Spot machines from the committed multi-cloud catalogue and return a `spotin
 - `machine` (optional): RE2 machine-type filter combined with architecture (default: no filter)
 - `os` (optional): Operating system — `linux` or `windows` (default: `linux`)
 - `workload` (optional): Ranking policy — `cost`, `web`, `ci`, or `batch` (default: `cost`)
-- `max_price_per_hour` (optional): Maximum USD per instance-hour (number > 0; no ceiling if omitted)
+- `max_price` (optional): Maximum USD per instance-hour (number > 0; no ceiling if omitted)
 - `top` (optional): Maximum candidates to return (default: 3, max: 50)
 
-**Response:** `spotinfo.recommend/v2` JSON with `schema_version`, `status`, `request`, `ranking_policy`, `data_source`, `recommendations`, and `warnings`. See [API Reference](api-reference.md) for the full schema.
+**Response:** `spotinfo.recommend/v3` JSON with `schema_version`, `status`, `request`, `ranking_policy`, `data_source`, `recommendations`, and `warnings`. See [API Reference](api-reference.md) for the full schema.
 
 **Cloud constraints:**
 

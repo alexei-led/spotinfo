@@ -704,14 +704,14 @@ GCP; Task 12 gives `list` a use for it through obtainability.
 - Modify: `internal/mcp/jsonschema_test.go`, `internal/mcp/recommend_test.go`,
   `internal/mcp/recommend.go`
 
-- [ ] delete the v1 recommendation adapter and every branch that selected a schema by workload
-- [ ] delete `internal/spot/recommend.go` and `internal/spot/diagnose.go`, now unreachable —
+- [x] delete the v1 recommendation adapter and every branch that selected a schema by workload
+- [x] delete `internal/spot/recommend.go` and `internal/spot/diagnose.go`, now unreachable —
       this also resolves the misleading empty-result diagnostic in surface review §6.5, which
       is recorded here as **resolved by deletion**, not deferred
-- [ ] emit `spotinfo.recommend/v3` for every cloud and every workload
-- [ ] add `spotinfo.list/v1`, sharing the candidate, risk, price and source DTOs with v3
-- [ ] rename request fields to the vocabulary names in both schema files
-- [ ] **derive each source's scope from its URL, in the provider that owns the source.**
+- [x] emit `spotinfo.recommend/v3` for every cloud and every workload
+- [x] add `spotinfo.list/v1`, sharing the candidate, risk, price and source DTOs with v3
+- [x] rename request fields to the vocabulary names in both schema files
+- [x] **derive each source's scope from its URL, in the provider that owns the source.**
       `cloud.SourceRef` (`internal/cloud/observations.go:41`) carries no scope field, and is
       built in exactly one place, `internal/snapshot/manifest.go:236`. Adding a `scope` field
       to the manifest format is the wrong route: `ParseManifest` uses
@@ -719,24 +719,132 @@ GCP; Task 12 gives `list` a use for it through obtainability.
       to be regenerated — dragging a network rebuild into Phase 1. Azure retail URLs carry
       `armRegionName+eq+%27<region>%27` and Learn URLs end `/sizes/<family>/<series>-series`,
       so both scopes are derivable
-- [ ] **fail closed: a source whose scope cannot be parsed is retained, never dropped.** That
+- [x] **fail closed: a source whose scope cannot be parsed is retained, never dropped.** That
       keeps Invariant 7 true by construction when a vendor changes a URL shape
-- [ ] trim `data_source.sources` **per scope**: region-scoped sources by the regions present in
+- [x] trim `data_source.sources` **per scope**: region-scoped sources by the regions present in
       the answer, size-page sources by the machine series present in the answer
-- [ ] add `sources_omitted` counting what was read but not listed, and expose the full list
+- [x] add `sources_omitted` counting what was read but not listed, and expose the full list
       through `list_cloud_regions` in Task 6, so the count is resolvable
-- [ ] write a test asserting a source with an unparseable URL is retained
-- [ ] update each renamed schema file's own `$id`, and every reference to the old filenames —
+- [x] write a test asserting a source with an unparseable URL is retained
+- [x] update each renamed schema file's own `$id`, and every reference to the old filenames —
       `cmd/spotinfo/contract_v2_test.go`, `internal/mcp/jsonschema_test.go`,
       `internal/mcp/recommend_test.go`, `internal/mcp/recommend.go`, `internal/cloud/schema.go`,
       `internal/cloud/schema_test.go` and `docs/api-reference.md`, including doc comments
-- [ ] grep for `recommend-spot-instances-v2` and confirm zero hits outside `docs/plans/`
-- [ ] write a test asserting provenance is **less than half** the serialized payload for a
+- [x] grep for `recommend-spot-instances-v2` and confirm zero hits outside `docs/plans/`
+- [x] write a test asserting provenance is **less than half** the serialized payload for a
       three-row Azure answer — a ratio, not a byte count, so it survives a change in source
       count
-- [ ] write a test asserting every retained source is referenced by at least one candidate
-- [ ] write tests asserting both schemas validate against their contract files
-- [ ] run `go test ./... -skip 'E2E'` — must pass before Task 6
+- [x] write a test asserting every retained source is referenced by at least one candidate
+- [x] write tests asserting both schemas validate against their contract files
+- [x] run `go test ./... -skip 'E2E'` — must pass before Task 6
+
+➕ **`SourceScope` names machine identifiers, not a series string.** The trimming happens in
+`internal/cloud`, over published candidates, and `internal/providers/azure/catalog.go:38` records
+why a neutral series field would not work: "an Azure size name does not carry its series in a form
+that can be parsed back out". So `cloud.SourceScope` is `{Region, Machines []MachineID}`, the Azure
+provider translates a Learn page's series into the machines it documents, and "series" stays an
+Azure word. Each dimension is an independent filter and an empty dimension is unconstrained, which
+is what makes the zero scope cover every candidate — fail-closed by construction rather than by a
+branch that could be deleted.
+
+➕ **Measured, on the committed Azure snapshot: 4 sources published, 77 omitted, provenance
+0.446 of the serialized payload.** Untrimmed it is over nine tenths. 0.446 is close to the half the
+test asserts, and deliberately so — the margin comes from trimming *both* scopes. Region-only or
+series-only trimming lands above half, which is the failure the plan's "Azure provenance
+composition" note warns about, so the ratio test is what would catch a half-done trim.
+
+➕ **An answer with no candidates publishes every source, and a trim that would publish none
+fails closed.** Nothing can be trimmed against an empty row set — "which of these describes a row"
+has no answer when there are no rows — and both schemas declare `data_source.sources` with
+`minItems: 1`, so an empty list would be a document that fails its own contract.
+
+➕ **`internal/spot/recommend.go` could not simply be deleted.** It also held the embedded
+architecture snapshot — `Architecture`, `ArchitectureLookup`, `LoadEmbeddedArchitectureLookup` and
+the `//go:embed` — which `internal/providers/aws`, `cmd/spotinfo/list.go` and the registry all
+still use. That half moved to `internal/spot/architecture.go` and its two tests to
+`internal/spot/architecture_test.go`; everything recommendation-shaped is gone, including
+`Workload`, `RecommendationOptions`, `ErrInvalidRecommendationInput` and
+`ErrNoRecommendationCandidates`.
+
+➕ **Two goldens are deleted with the documents they recorded, and none was regenerated.**
+`cmd/spotinfo/testdata/aws-recommend-v1.json` goes with the v1 report; `aws-root-v1.json` goes with
+the v1 root array, and the `json` row of `TestAWSListOutputMatchesRecordedV1Contract` with it. The
+four rendered goldens beside it stay **byte-identical and green** — `list` renders the same table,
+text, csv and number output — and remain the value-level gate until Task 7 records the new set. The
+JSON contract moved from recorded bytes to
+`docs/plans/contracts/list-v1.schema.json`, which is a stronger check of the thing Task 5 changed.
+
+➕ **The three `internal/mcp` recommend goldens were renamed and hand-edited, not
+regenerated.** No `UPDATE_GOLDEN` run happened anywhere in this task. The whole diff is four lines
+across two files: `spotinfo.recommend/v2` → `/v3`, `max_price_per_hour` → `max_price` (twice, and
+alphabetical order puts it in the same position), and `"sources_omitted": 0` after the source list.
+Each was reviewed against the schema change that caused it.
+
+➕ **`execRecommendCmd` lost its `spotClient` parameter, and that changes the test wiring.**
+The command reaches AWS through the registry like every other cloud now, so a stub provider with an
+empty result no longer stands in for the acquisition client: `recommendTestApp` registers the
+production `internal/providers/aws` adapter over the mocked client. That is a stronger arrangement
+than the v1 path had — the mapping is exercised, not bypassed.
+
+➕ **`--max-price` is the vocabulary name on the wire too.** `RequestDTO`'s tag, both schema
+files and the recommend tool's argument are now `max_price`; the v1 `find_spot_instances` tool
+keeps `max_price_per_hour` under its own constant until Task 6 retires it, so the golden-pinned v1
+input schema is untouched.
+
+➕ **`printAdvicesJSON` is deleted with the array it printed, and its `\u003c` unescaping with
+it.** Both commands now render JSON through `writeJSONReport`, so a risk label reads
+`"\u003c5%"` in `list` output exactly as it already did in `recommend` output. It decodes to
+`<5%`; one JSON writer for one schema family is worth more than the cosmetic difference.
+
+➕ **The list document carries the four flag-gated observations, not just the shared block.**
+`live_price` is always emitted and `zone_prices`, `region_score`, `zone_scores` and
+`score_fetched_at` are `omitempty` — the split `CLAUDE.md` records as a deliberate contract
+decision. Dropping them would have made `--with-score --output json` lose what `--output table`
+still shows.
+
+➕ **Files this task's list omits.** `cmd/spotinfo/list.go` (the JSON branch), `v1json.go` and
+`cmd/spotinfo/testdata/aws-root-v1.json` (deleted), `cmd/spotinfo/main.go`,
+`cmd/spotinfo/provider_flags.go` (`recommendCapabilityRequest` is dead — `cloud.Recommend` derives
+and checks the same needs), `internal/spot/architecture.go`, `internal/providers/azure/sources.go`,
+`internal/cloud/sources_test.go`, `internal/providers/azure/sources_test.go`,
+`cmd/spotinfo/{contract_v1,main,list,multicloud,provider_flags,validation}_test.go`, and the
+schema-version sentences in `README.md`, `docs/clouds.md` and `docs/mcp-server.md`, which Task 5
+makes false.
+
+➕ **Six of the Task 2 e2e tests pass at this boundary, and that is the real check on the two
+new documents.** `TestE2EJSONReportIsValidForEveryCloud`, `TestE2EListAnswersOnEveryCloud`,
+`TestE2EOneSchemaAnswersEveryCloudAndWorkload`, `TestE2ETheListCommandAlwaysPublishesPriceProvenance`,
+`TestE2EACloudWithoutRiskDataReportsUnavailableRatherThanZero` and
+`TestE2EOfflineAnswersWithEveryOutboundRequestBlocked` all pass against the shipped binary — the
+suite decodes `schema_version`, `status`, `request`, `data_source` and `candidates` by name, so a
+field this task spelled differently would have shown up here rather than inside Task 7.
+`TestE2ETheListCommandRendersEveryOutputFormat` still fails on its `machine` and `risk` column
+names, which the plan already records as a Task 7 target.
+
+➕ **The trim is O(sources x candidates) and measurably free.** `spotinfo list --cloud azure
+--output json` over every region is 11,204 rows against 81 sources and runs in 0.12 s, against
+0.12 s for the same query rendered as a table, which does no trimming; the worst shape found — 950
+rows with 37 sources omitted, so 37 full scans — is 0.06 s either way. `coversAny` short-circuits
+on the first row a source backs, and the comment on it names the ceiling and the upgrade trigger:
+collect the published regions and machine IDs into two sets first, which makes it
+O(sources + candidates).
+
+⚠️ **AWS `list` candidates publish `architecture: ""`, and Task 7 is about to freeze that into a
+golden.** `awsQueryProvider` reads the architecture snapshot only when `--architecture` asks for it
+— Task 4's ➕ above records why — so the default AWS browse answer carries an empty architecture
+where GCP and Azure carry `x86_64`. `list-v1.schema.json` therefore admits `""` in that enum where
+`recommend-v3-success.schema.json` does not, which is the one place the two schemas' shared
+candidate block is not identical. It is not a cloud reporting silence for something it does not
+publish — the classification is embedded in this binary — so Invariant 2 is not in play, and the
+fix is a decision about `awsQueryProvider`, not about the schema: loading the lookup best-effort
+when the flag is absent would populate the field and let `""` leave the enum, but it contradicts
+`TestTheQueryProviderDeclaresNoArchitecture` and the Task 4 rationale behind it. Left alone here
+rather than reversed inside a schema task. **Task 7 must decide before it records the `list`
+goldens.**
+
+⚠️ **`CLAUDE.md` still describes `spotinfo.recommend/v1` as a live contract** (lines 12,
+15, 68 and 129). Task 16 owns that file and already carries a checkbox for it; it was left alone
+rather than half-rewritten here, but it is wrong as of this commit.
 
 ### Task 6: Rebuild the MCP surface on the same vocabulary
 

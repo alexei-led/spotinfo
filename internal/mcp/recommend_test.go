@@ -54,7 +54,7 @@ func TestFinerThanScalePriceCeilingStillFiltersOnV2(t *testing.T) {
 			provider := offlineProvider(cloud.ProviderGCP, gcpCandidates())
 			result := callRecommend(t, newStubRegistry(provider), map[string]any{
 				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
-				"max_price_per_hour": test.price,
+				"max_price": test.price,
 			})
 			require.False(t, result.IsError)
 
@@ -143,7 +143,7 @@ func TestRecommendInputSchemaMatchesTheRecordedContract(t *testing.T) {
 
 	encoded, err := json.MarshalIndent(registered.Tool, "", "  ")
 	require.NoError(t, err)
-	assertGolden(t, "recommend-spot-instances-v2-input-schema.json", append(encoded, '\n'))
+	assertGolden(t, "recommend-v3-input-schema.json", append(encoded, '\n'))
 }
 
 // boundKeywords are the validation keywords the contract uses to bound an
@@ -174,7 +174,7 @@ func TestRegisteredInputSchemaAgreesWithTheNormativeContract(t *testing.T) {
 	var advertised map[string]any
 	require.NoError(t, json.Unmarshal(encoded, &advertised))
 
-	contract := loadContractSchema(t, "recommend-spot-instances-v2-input.schema.json")
+	contract := loadContractSchema(t, "recommend-v3-input.schema.json")
 
 	contractRequired, ok := contract["required"].([]any)
 	require.True(t, ok)
@@ -231,7 +231,7 @@ func TestRegisteredInputSchemaAgreesWithTheNormativeContract(t *testing.T) {
 func TestRecommendSuccessPayloadValidatesAgainstTheContract(t *testing.T) {
 	t.Parallel()
 
-	schema := loadContractSchema(t, "recommend-spot-instances-v2-success.schema.json")
+	schema := loadContractSchema(t, "recommend-v3-success.schema.json")
 
 	for _, test := range []struct {
 		name     string
@@ -250,7 +250,7 @@ func TestRecommendSuccessPayloadValidatesAgainstTheContract(t *testing.T) {
 			}(),
 			args: map[string]any{
 				"cloud": "aws", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
-				"workload": "web", "max_price_per_hour": 0.5,
+				"workload": "web", "max_price": 0.5,
 			},
 		},
 		{
@@ -288,14 +288,14 @@ func TestRecommendAppliesTheDocumentedDefaults(t *testing.T) {
 		"architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
 	}))
 
-	assert.Equal(t, cloud.SchemaVersionRecommendV2, report.SchemaVersion)
+	assert.Equal(t, cloud.SchemaVersionRecommendV3, report.SchemaVersion)
 	assert.Equal(t, cloud.ProviderAWS, report.Request.Cloud, "cloud defaults to aws")
 	assert.Equal(t, []cloud.Region{cloud.RegionAll}, report.Request.Regions, "regions default to all")
 	assert.Equal(t, cloud.OSLinux, report.Request.OS)
 	assert.Equal(t, cloud.WorkloadCost, report.Request.Workload, "workload defaults to the risk-free cost policy")
 	assert.Equal(t, cloud.DefaultTop, report.Request.Top)
 	assert.Empty(t, report.Request.Machine)
-	assert.Nil(t, report.Request.MaxPricePerHour, "an omitted ceiling is null, not zero")
+	assert.Nil(t, report.Request.MaxPrice, "an omitted ceiling is null, not zero")
 	assert.Equal(t, []string{}, report.Warnings)
 	assert.Equal(t, cloud.RankingPolicy(), report.RankingPolicy)
 }
@@ -351,7 +351,7 @@ func TestRecommendReportsUnavailableRiskExplicitly(t *testing.T) {
 func TestRecommendErrorContract(t *testing.T) {
 	t.Parallel()
 
-	schema := loadContractSchema(t, "recommend-spot-instances-v2-error.schema.json")
+	schema := loadContractSchema(t, "recommend-v3-error.schema.json")
 	riskFree := newStubRegistry(offlineProvider(cloud.ProviderGCP, gcpCandidates()))
 
 	for _, test := range []struct {
@@ -384,7 +384,7 @@ func TestRecommendErrorContract(t *testing.T) {
 			name: "negative price ceiling", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
 			args: map[string]any{
 				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
-				"max_price_per_hour": -1,
+				"max_price": -1,
 			},
 			wantCloud: stringPtr("gcp"),
 		},
@@ -427,7 +427,7 @@ func TestRecommendErrorContract(t *testing.T) {
 			name: "quoted non-finite price ceiling", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
 			args: map[string]any{
 				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
-				"max_price_per_hour": "+Inf",
+				"max_price": "+Inf",
 			},
 			wantCloud: stringPtr("gcp"),
 		},
@@ -449,7 +449,7 @@ func TestRecommendErrorContract(t *testing.T) {
 			name: "boolean price ceiling", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
 			args: map[string]any{
 				"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
-				"max_price_per_hour": true,
+				"max_price": true,
 			},
 			wantCloud: stringPtr("gcp"),
 		},
@@ -684,12 +684,12 @@ func TestRecommendGoldenPayloads(t *testing.T) {
 		"cloud": "aws", "regions": []any{"us-east-1"}, "architecture": "x86_64",
 		"min_vcpu": 2, "min_memory_gib": 8, "workload": "web", "top": 3,
 	})
-	assertGolden(t, "recommend-spot-instances-v2-success.json", indentJSON(t, payloadOf(t, success)))
+	assertGolden(t, "recommend-v3-success.json", indentJSON(t, payloadOf(t, success)))
 
 	failure := callRecommend(t, registry, map[string]any{
 		"cloud": "gcp", "architecture": "x86_64", "min_vcpu": 2, "min_memory_gib": 8,
 	})
-	assertGolden(t, "recommend-spot-instances-v2-error.json", indentJSON(t, payloadOf(t, failure)))
+	assertGolden(t, "recommend-v3-error.json", indentJSON(t, payloadOf(t, failure)))
 }
 
 func indentJSON(t *testing.T, payload []byte) []byte {

@@ -8,7 +8,7 @@ The spotinfo MCP server exposes three tools:
 
 - **`find_spot_instances`**: Search and filter AWS EC2 Spot Instances (v1 compatibility contract)
 - **`list_spot_regions`**: List available AWS regions for spot instances
-- **`recommend_spot_instances`**: Rank machines across clouds and return a `spotinfo.recommend/v2` payload
+- **`recommend_spot_instances`**: Rank machines across clouds and return a `spotinfo.recommend/v3` payload
 
 `find_spot_instances` and `list_spot_regions` are the AWS v1 contract. Their names,
 input schemas, defaults, error behaviour and response JSON are frozen; the AWS data
@@ -444,7 +444,9 @@ This tool returns a list of all AWS regions that have spot instance data availab
 ### `recommend_spot_instances`
 
 Rank Spot machines from committed multi-cloud data and return the provider-neutral
-`spotinfo.recommend/v2` payload.
+`spotinfo.recommend/v3` payload. It is the only recommendation document: the AWS-only
+`spotinfo.recommend/v1` shape, and the workload that used to select between the two, are
+retired.
 
 #### Description
 
@@ -458,9 +460,9 @@ stable bytes. The field is never filled with the derived snapshot hash.
 
 Normative machine-readable contracts:
 
-- `docs/plans/contracts/recommend-spot-instances-v2-input.schema.json`
-- `docs/plans/contracts/recommend-spot-instances-v2-success.schema.json`
-- `docs/plans/contracts/recommend-spot-instances-v2-error.schema.json`
+- `docs/plans/contracts/recommend-v3-input.schema.json`
+- `docs/plans/contracts/recommend-v3-success.schema.json`
+- `docs/plans/contracts/recommend-v3-error.schema.json`
 
 The schema files control types, required fields, defaults, nullability, formats and
 `additionalProperties`. `internal/mcp/recommend_test.go` validates real payloads against
@@ -493,7 +495,7 @@ them.
     },
     "min_vcpu": { "type": "integer", "minimum": 1 },
     "min_memory_gib": { "type": "number", "exclusiveMinimum": 0 },
-    "max_price_per_hour": { "type": "number", "exclusiveMinimum": 0 },
+    "max_price": { "type": "number", "exclusiveMinimum": 0 },
     "workload": {
       "type": "string",
       "enum": ["cost", "web", "ci", "batch"],
@@ -504,13 +506,13 @@ them.
 }
 ```
 
-- Omitted `machine` means no machine-name filter; omitted `max_price_per_hour` means no
+- Omitted `machine` means no machine-name filter; omitted `max_price` means no
   price ceiling.
 - `regions: ["all"]` selects every region the provider publishes and cannot be combined
   with explicit regions. It is also the default, so an omitted `regions` searches every
   region of the selected cloud. (The CLI differs: its `--region` default is the AWS region
   name `us-east-1`, which on a non-AWS cloud is treated as unset and expands to `all`.)
-- `cost` makes **no** interruption claim. v2 ranks by price, excess vCPU, excess memory, region, and machine; v1 ranks by price, interruption cap, excess vCPU, excess memory, region, and instance. `web`, `ci` and `batch`
+- `cost` makes **no** interruption claim. Ranking is by price, excess vCPU, excess memory, region, and machine, for every cloud and every workload. `web`, `ci` and `batch`
   admit only a risk bucket whose **maximum** is at most 5%, 16% and 22% respectively. On
   AWS the reachable Advisor buckets make those effective ceilings 5%, 15% and 20%. All
   three require a cloud that publishes risk; asking for one on a cloud that does not
@@ -541,7 +543,7 @@ A successful result has `isError=false` and a single text content item containin
 
 ```json
 {
-  "schema_version": "spotinfo.recommend/v2",
+  "schema_version": "spotinfo.recommend/v3",
   "status": "ok",
   "request": {
     "cloud": "aws",
@@ -551,7 +553,7 @@ A successful result has `isError=false` and a single text content item containin
     "os": "linux",
     "min_vcpu": 2,
     "min_memory_gib": 8,
-    "max_price_per_hour": null,
+    "max_price": null,
     "workload": "web",
     "top": 3
   },
@@ -574,7 +576,8 @@ A successful result has `isError=false` and a single text content item containin
         "parser_version": "aws-spot-advisor-json/1",
         "schema_version": "aws.spot-advisor-feed/v1"
       }
-    ]
+    ],
+    "sources_omitted": 0
   },
   "recommendations": [
     {
@@ -621,6 +624,13 @@ Contract notes:
   from different clouds measure different things and must not be compared.
 - Arrays are never null. `data_source.sources` always has at least one complete entry; a
   provider that cannot describe its provenance returns `DATA_UNAVAILABLE` instead.
+- `data_source.sources` lists the documents the published rows draw their values from,
+  not every document the snapshot was built from. Azure reads 81 — one Retail Prices
+  query per region and one Microsoft Learn page per machine series — so a three-row
+  answer would otherwise be mostly provenance for rows it does not contain.
+  `data_source.sources_omitted` counts what was read and not listed. A source whose scope
+  a provider cannot derive from its URL is always listed, so trimming can never drop the
+  provenance of a value a published row carries.
 
 #### Error Schema
 

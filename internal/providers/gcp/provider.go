@@ -31,6 +31,12 @@ func New() (*Provider, error) {
 		return nil, err
 	}
 
+	// The sources keep the zero cloud.SourceScope on purpose, which publishes
+	// every one of them with every answer. Google's pricing pages are
+	// whole-catalogue documents for the single region this snapshot covers, so
+	// there is no narrower scope to derive and nothing to trim: all five back
+	// every candidate. Azure, whose 81 sources are one per region and one per
+	// machine series, is the provider that needs the scope.
 	return &Provider{catalog: loaded.Catalog, sources: loaded.Manifest.SourceRefs()}, nil
 }
 

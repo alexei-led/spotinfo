@@ -13,7 +13,6 @@ import (
 
 	"spotinfo/internal/cloud"
 	gcpprovider "spotinfo/internal/providers/gcp"
-	"spotinfo/internal/spot"
 )
 
 // Each case below used to be accepted and answered. A rejected flag is visible;
@@ -198,18 +197,24 @@ func TestNeutralRecommendationTableShowsSavings(t *testing.T) {
 	var rendered strings.Builder
 	require.NoError(t, writeNeutralRecommendationTable([]cloud.RecommendationDTO{
 		{
-			Rank: 1, Cloud: cloud.ProviderGCP, Region: "us-central1", Machine: "c3d-standard-4",
-			Architecture: cloud.ArchitectureX8664, VCPU: 4, MemoryGiB: 16,
-			SpotUSDPerHour: "0.042496000", OnDemandUSDPerHour: &onDemand, SavingsPercent: &savings,
-			Risk: cloud.RiskDTO{Status: cloud.RiskStatusUnavailable},
+			Rank: 1,
+			CandidateDTO: cloud.CandidateDTO{
+				Cloud: cloud.ProviderGCP, Region: "us-central1", Machine: "c3d-standard-4",
+				Architecture: cloud.ArchitectureX8664, VCPU: 4, MemoryGiB: 16,
+				SpotUSDPerHour: "0.042496000", OnDemandUSDPerHour: &onDemand, SavingsPercent: &savings,
+				Risk: cloud.RiskDTO{Status: cloud.RiskStatusUnavailable},
+			},
 		},
 		// A provider with no on-demand price has not measured a discount of
 		// nothing, so its cell must not read 0%.
 		{
-			Rank: 2, Cloud: cloud.ProviderGCP, Region: "us-central1", Machine: "n2d-standard-4",
-			Architecture: cloud.ArchitectureX8664, VCPU: 4, MemoryGiB: 16,
-			SpotUSDPerHour: "0.053824000",
-			Risk:           cloud.RiskDTO{Status: cloud.RiskStatusUnavailable},
+			Rank: 2,
+			CandidateDTO: cloud.CandidateDTO{
+				Cloud: cloud.ProviderGCP, Region: "us-central1", Machine: "n2d-standard-4",
+				Architecture: cloud.ArchitectureX8664, VCPU: 4, MemoryGiB: 16,
+				SpotUSDPerHour: "0.053824000",
+				Risk:           cloud.RiskDTO{Status: cloud.RiskStatusUnavailable},
+			},
 		},
 	}, &rendered))
 
@@ -221,16 +226,22 @@ func TestNeutralRecommendationTableShowsSavings(t *testing.T) {
 	assert.Contains(t, lines[2], "-")
 }
 
-// Both recommend tables size their columns from the rows. The v1 renderer used
-// fixed widths that were narrower than real values, so one long region name
-// shifted every column to its right.
-func TestRecommendTablesAlignRowsWiderThanTheirHeaders(t *testing.T) {
+// The recommend table sizes its columns from the rows. The renderer it replaced
+// used fixed widths that were narrower than real values, so one long region
+// name shifted every column to its right.
+func TestRecommendTableAlignsRowsWiderThanTheirHeaders(t *testing.T) {
 	t.Parallel()
 
 	var rendered strings.Builder
-	require.NoError(t, writeRecommendationTable([]spot.Recommendation{
-		{Region: "ap-southeast-3", Instance: "m7i-flex.xlarge", Architecture: "x86_64", VCPU: 4, MemoryGiB: 16},
-		{Region: "ca-west-1", Instance: "t3.xlarge", Architecture: "x86_64", VCPU: 4, MemoryGiB: 16},
+	require.NoError(t, writeNeutralRecommendationTable([]cloud.RecommendationDTO{
+		{Rank: 1, CandidateDTO: cloud.CandidateDTO{
+			Region: "ap-southeast-3", Machine: "m7i-flex.xlarge", Architecture: "x86_64",
+			VCPU: 4, MemoryGiB: 16, SpotUSDPerHour: "0.100000000",
+		}},
+		{Rank: 2, CandidateDTO: cloud.CandidateDTO{
+			Region: "ca-west-1", Machine: "t3.xlarge", Architecture: "x86_64",
+			VCPU: 4, MemoryGiB: 16, SpotUSDPerHour: "0.200000000",
+		}},
 	}, &rendered))
 
 	lines := strings.Split(strings.TrimRight(rendered.String(), "\n"), "\n")

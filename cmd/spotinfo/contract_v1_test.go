@@ -46,15 +46,16 @@ func contractAdvices() []spot.Advice {
 	}
 }
 
-// Every rendering is part of the contract, not just JSON. The interruption
-// column exists only in the human formats, so pinning JSON alone would let it
-// be renamed or dropped without a single test failing.
+// Every rendering a person reads is part of the contract. JSON is not among
+// them any more: `list` publishes spotinfo.list/v1, whose shape is checked
+// against docs/plans/contracts/list-v1.schema.json rather than against recorded
+// bytes, and Task 7 records the goldens for the four below from a fixed
+// cloud.Provider stub.
 func TestAWSListOutputMatchesRecordedV1Contract(t *testing.T) {
 	text.DisableColors()
 	t.Cleanup(text.EnableColors)
 
 	for format, golden := range map[string]string{
-		"json":   "aws-root-v1.json",
 		"table":  "aws-root-v1.table.txt",
 		"text":   "aws-root-v1.text.txt",
 		"csv":    "aws-root-v1.csv",
@@ -76,25 +77,6 @@ func TestAWSListOutputMatchesRecordedV1Contract(t *testing.T) {
 			assertGolden(t, golden, output.Bytes())
 		})
 	}
-}
-
-func TestAWSRecommendJSONMatchesRecordedV1Contract(t *testing.T) {
-	client := newQueryClient(t)
-	client.EXPECT().GetSpotSavings(mock.Anything, mock.Anything).Return(contractAdvices(), nil).Once()
-
-	var output bytes.Buffer
-	app := newSpotinfoApp(
-		func(*cli.Context) error { return nil },
-		func(ctx *cli.Context) error {
-			return execRecommendCmd(ctx, context.Background(), awsOnlyRegistry(), client, &output)
-		},
-	)
-
-	require.NoError(t, app.Run([]string{
-		appName, recommendCommandName, "--architecture", "x86_64", "--min-vcpu", "2", "--min-memory-gib", "8",
-		"--region", "us-east-1", "--region", "us-west-2", "--workload", "ci", "--output", "json",
-	}))
-	assertGolden(t, "aws-recommend-v1.json", output.Bytes())
 }
 
 // spot.Advice.Price is a float64 and cloud.PriceObservation.Amount is

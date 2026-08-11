@@ -51,6 +51,50 @@ func candidatesFrom(t *testing.T, advices []spot.Advice) []cloud.Candidate {
 	return result.Candidates
 }
 
+// listJSONFrom renders the spotinfo.list/v1 document for a set of advice, the
+// way `spotinfo list --output json` does. It goes through the real provider so
+// the report is built from the same result the command publishes.
+func listJSONFrom(t *testing.T, advices []spot.Advice) []byte {
+	t.Helper()
+
+	provider, err := awsQueryProvider(&fixedSpotClient{advices: advices}, false)
+	require.NoError(t, err)
+
+	query := &cloud.Query{OS: cloud.OSLinux}
+
+	result, err := provider.Query(context.Background(), query)
+	require.NoError(t, err)
+
+	var rendered bytes.Buffer
+	require.NoError(t, renderList(outputJSON, query, &result, false, &rendered))
+
+	return rendered.Bytes()
+}
+
+// listedCandidates decodes the rows out of a spotinfo.list/v1 document. The
+// command used to print a bare array of AWS advice; the document that replaced
+// it carries the request echo and the provenance around the same rows.
+func listedCandidates(t *testing.T, document []byte) []cloud.ListCandidateDTO {
+	t.Helper()
+
+	var report cloud.ListReport
+	require.NoError(t, json.Unmarshal(document, &report), "list output must be a spotinfo.list/v1 document")
+	require.Equal(t, cloud.SchemaVersionListV1, report.SchemaVersion)
+
+	return report.Candidates
+}
+
+// listedPrice reads a published amount back as the float the assertions below
+// compare against. The wire form is a fixed-point decimal string.
+func listedPrice(t *testing.T, candidate *cloud.ListCandidateDTO) float64 {
+	t.Helper()
+
+	amount, err := cloud.ParseMoney(candidate.SpotUSDPerHour)
+	require.NoError(t, err)
+
+	return amount.Float64()
+}
+
 // fixedSpotClient answers with the advice it was built with and nothing else.
 type fixedSpotClient struct{ advices []spot.Advice }
 
@@ -205,12 +249,11 @@ func TestExecMainCmd_OutputFormats(t *testing.T) {
 			instanceType: "t2.micro",
 			region:       "us-east-1",
 			validateOutput: func(t *testing.T, output string) {
-				var advices []spot.Advice
-				err := json.Unmarshal([]byte(output), &advices)
-				require.NoError(t, err, "Output should be valid JSON")
-				assert.Len(t, advices, 1, "Should return one advice")
-				assert.Equal(t, "t2.micro", advices[0].Instance)
-				assert.Equal(t, 50, advices[0].Savings)
+				candidates := listedCandidates(t, []byte(output))
+				require.Len(t, candidates, 1, "Should return one candidate")
+				assert.Equal(t, cloud.MachineID("t2.micro"), candidates[0].Machine)
+				require.NotNil(t, candidates[0].SavingsPercent)
+				assert.InDelta(t, 50.0, *candidates[0].SavingsPercent, 0)
 			},
 		},
 		{
@@ -303,15 +346,15 @@ func TestExecMainCmd_SortingAndOrdering(t *testing.T) {
 		name     string
 		sortBy   string
 		order    string
-		validate func(t *testing.T, advices []spot.Advice)
+		validate func(t *testing.T, candidates []cloud.ListCandidateDTO)
 	}{
 		{
 			name:   "sort by savings ascending",
 			sortBy: "savings",
 			order:  "asc",
-			validate: func(t *testing.T, advices []spot.Advice) {
-				require.Len(t, advices, 2, "Should have 2 results")
-				assert.LessOrEqual(t, advices[0].Savings, advices[1].Savings,
+			validate: func(t *testing.T, candidates []cloud.ListCandidateDTO) {
+				require.Len(t, candidates, 2, "Should have 2 results")
+				assert.LessOrEqual(t, *candidates[0].SavingsPercent, *candidates[1].SavingsPercent,
 					"Savings should be in ascending order")
 			},
 		},
@@ -319,9 +362,9 @@ func TestExecMainCmd_SortingAndOrdering(t *testing.T) {
 			name:   "sort by savings descending",
 			sortBy: "savings",
 			order:  "desc",
-			validate: func(t *testing.T, advices []spot.Advice) {
-				require.Len(t, advices, 2, "Should have 2 results")
-				assert.GreaterOrEqual(t, advices[0].Savings, advices[1].Savings,
+			validate: func(t *testing.T, candidates []cloud.ListCandidateDTO) {
+				require.Len(t, candidates, 2, "Should have 2 results")
+				assert.GreaterOrEqual(t, *candidates[0].SavingsPercent, *candidates[1].SavingsPercent,
 					"Savings should be in descending order")
 			},
 		},
@@ -329,10 +372,10 @@ func TestExecMainCmd_SortingAndOrdering(t *testing.T) {
 			name:   "sort by machine name ascending",
 			sortBy: "machine",
 			order:  "asc",
-			validate: func(t *testing.T, advices []spot.Advice) {
-				require.Len(t, advices, 2, "Should have 2 results")
-				assert.True(t, advices[0].Instance <= advices[1].Instance,
-					"Instance types should be in ascending order")
+			validate: func(t *testing.T, candidates []cloud.ListCandidateDTO) {
+				require.Len(t, candidates, 2, "Should have 2 results")
+				assert.True(t, candidates[0].Machine <= candidates[1].Machine,
+					"Machine types should be in ascending order")
 			},
 		},
 	}
@@ -371,11 +414,7 @@ func TestExecMainCmd_SortingAndOrdering(t *testing.T) {
 			err := app.Run(args)
 			require.NoError(t, err, "CLI app should execute without error")
 
-			var advices []spot.Advice
-			err = json.Unmarshal(output.Bytes(), &advices)
-			require.NoError(t, err, "Output should be valid JSON")
-
-			tt.validate(t, advices)
+			tt.validate(t, listedCandidates(t, output.Bytes()))
 			mockClient.AssertExpectations(t)
 		})
 	}
@@ -388,7 +427,7 @@ func TestExecMainCmd_FilteringOptions(t *testing.T) {
 		memory          int
 		price           float64
 		expectedAdvices []spot.Advice
-		validate        func(t *testing.T, advices []spot.Advice)
+		validate        func(t *testing.T, candidates []cloud.ListCandidateDTO)
 	}{
 		{
 			name: "filter by minimum CPU cores",
@@ -403,9 +442,9 @@ func TestExecMainCmd_FilteringOptions(t *testing.T) {
 					Price:    0.096,
 				},
 			},
-			validate: func(t *testing.T, advices []spot.Advice) {
-				for _, advice := range advices {
-					assert.GreaterOrEqual(t, advice.Info.Cores, 4,
+			validate: func(t *testing.T, candidates []cloud.ListCandidateDTO) {
+				for _, candidate := range candidates {
+					assert.GreaterOrEqual(t, candidate.VCPU, 4,
 						"All results should have at least 4 CPU cores")
 				}
 			},
@@ -423,9 +462,9 @@ func TestExecMainCmd_FilteringOptions(t *testing.T) {
 					Price:    0.096,
 				},
 			},
-			validate: func(t *testing.T, advices []spot.Advice) {
-				for _, advice := range advices {
-					assert.GreaterOrEqual(t, advice.Info.RAM, float32(8),
+			validate: func(t *testing.T, candidates []cloud.ListCandidateDTO) {
+				for _, candidate := range candidates {
+					assert.GreaterOrEqual(t, candidate.MemoryGiB, 8.0,
 						"All results should have at least 8GB RAM")
 				}
 			},
@@ -443,9 +482,9 @@ func TestExecMainCmd_FilteringOptions(t *testing.T) {
 					Price:    0.023,
 				},
 			},
-			validate: func(t *testing.T, advices []spot.Advice) {
-				for _, advice := range advices {
-					assert.LessOrEqual(t, advice.Price, 0.50,
+			validate: func(t *testing.T, candidates []cloud.ListCandidateDTO) {
+				for i := range candidates {
+					assert.LessOrEqual(t, listedPrice(t, &candidates[i]), 0.50,
 						"All results should cost at most $0.50/hour")
 				}
 			},
@@ -454,8 +493,8 @@ func TestExecMainCmd_FilteringOptions(t *testing.T) {
 			name:            "extremely high CPU filter returns empty",
 			cpu:             1000,
 			expectedAdvices: []spot.Advice{},
-			validate: func(t *testing.T, advices []spot.Advice) {
-				assert.Empty(t, advices, "No instances should match extreme CPU requirement")
+			validate: func(t *testing.T, candidates []cloud.ListCandidateDTO) {
+				assert.Empty(t, candidates, "No instances should match extreme CPU requirement")
 			},
 		},
 	}
@@ -488,11 +527,7 @@ func TestExecMainCmd_FilteringOptions(t *testing.T) {
 			err := app.Run(args)
 			require.NoError(t, err, "CLI app should execute without error")
 
-			var advices []spot.Advice
-			err = json.Unmarshal(output.Bytes(), &advices)
-			require.NoError(t, err, "Output should be valid JSON")
-
-			tt.validate(t, advices)
+			tt.validate(t, listedCandidates(t, output.Bytes()))
 			mockClient.AssertExpectations(t)
 		})
 	}
@@ -684,10 +719,7 @@ func TestExecMainCmd_RegionHandling(t *testing.T) {
 			err := app.Run(args)
 			require.NoError(t, err, "CLI app should execute without error")
 
-			var advices []spot.Advice
-			err = json.Unmarshal(output.Bytes(), &advices)
-			require.NoError(t, err, "Output should be valid JSON")
-			require.NotEmpty(t, advices, "Should return some results")
+			require.NotEmpty(t, listedCandidates(t, output.Bytes()), "Should return some results")
 
 			mockClient.AssertExpectations(t)
 		})
@@ -860,18 +892,26 @@ func TestPrintFunctions_EdgeCases(t *testing.T) {
 		assert.Empty(t, output.String(), "Empty candidate list should produce no output")
 	})
 
-	t.Run("printAdvicesJSON with nil", func(t *testing.T) {
-		var output bytes.Buffer
-		printAdvicesJSON(nil, &output)
-		assert.Equal(t, "null\n", output.String(), "nil should produce 'null'")
-	})
-
 	// An unmatched query still has to be parseable by whatever is reading the
-	// pipe, so the empty answer is an empty array rather than null.
-	t.Run("printAdvicesJSON with no candidates", func(t *testing.T) {
-		var output bytes.Buffer
-		printAdvicesJSON(v1Advices(nil), &output)
-		assert.Equal(t, "[]\n", output.String())
+	// pipe, so the empty answer is an empty array rather than null — and it is
+	// still a complete document, with the request echo and the provenance the
+	// answer would have carried.
+	t.Run("the list report with no candidates", func(t *testing.T) {
+		var report struct {
+			SchemaVersion string            `json:"schema_version"`
+			Candidates    []json.RawMessage `json:"candidates"`
+			DataSource    struct {
+				Sources []json.RawMessage `json:"sources"`
+			} `json:"data_source"`
+		}
+		rendered := listJSONFrom(t, nil)
+		require.NoError(t, json.Unmarshal(rendered, &report))
+
+		assert.Equal(t, cloud.SchemaVersionListV1, report.SchemaVersion)
+		assert.NotNil(t, report.Candidates, "an empty answer is [], not null")
+		assert.Empty(t, report.Candidates)
+		assert.NotEmpty(t, report.DataSource.Sources,
+			"an empty answer has nothing to trim provenance against, so it publishes all of it")
 	})
 
 	t.Run("printAdvicesTable with empty list", func(t *testing.T) {
@@ -939,11 +979,28 @@ func TestAnAbsentSavingsStillPrintsZero(t *testing.T) {
 	assert.Equal(t, "0\n", number.String())
 	assert.Contains(t, text.String(), "saving=0%")
 	assert.Contains(t, csv.String(), "t3.nano,2,0.5,0,<5%")
-	assert.Equal(t, 0, v1AdviceOf(&candidates[0]).Savings)
+
+	// The rendered formats have one column and must fill it; the JSON document
+	// can say the figure was never measured, and does. A zero there would be a
+	// claim that this machine saves nothing against on-demand.
+	var report struct {
+		Candidates []struct {
+			SavingsPercent *float64 `json:"savings_percent"`
+		} `json:"candidates"`
+	}
+	require.NoError(t, json.Unmarshal(listJSONFrom(t, []spot.Advice{{
+		Region: "us-east-1", Instance: "t3.nano", InstanceType: "t3.nano",
+		Range: spot.Range{Label: "<5%", Min: 0, Max: 5},
+		Info:  spot.TypeInfo{Cores: 2, RAM: 0.5}, Price: 0.0016,
+	}}), &report))
+	require.Len(t, report.Candidates, 1)
+	assert.Nil(t, report.Candidates[0].SavingsPercent)
 }
 
-func TestLivePriceIndicator(t *testing.T) {
-	candidates := candidatesFrom(t, []spot.Advice{
+// liveAndStaticAdvices pairs a snapshot price with an API price, which is what
+// every price-provenance assertion below needs.
+func liveAndStaticAdvices() []spot.Advice {
+	return []spot.Advice{
 		{
 			Region:   "us-east-1",
 			Instance: "t2.micro",
@@ -961,7 +1018,11 @@ func TestLivePriceIndicator(t *testing.T) {
 			Price:     0.1567,
 			LivePrice: true,
 		},
-	})
+	}
+}
+
+func TestLivePriceIndicator(t *testing.T) {
+	candidates := candidatesFrom(t, liveAndStaticAdvices())
 	require.Len(t, candidates, 2)
 
 	t.Run("text output marks live prices with asterisk", func(t *testing.T) {
@@ -990,11 +1051,14 @@ func TestLivePriceIndicator(t *testing.T) {
 	})
 
 	t.Run("JSON output includes live_price field", func(t *testing.T) {
-		var output bytes.Buffer
-		printAdvicesJSON(v1Advices(candidates), &output)
+		var report struct {
+			Candidates []struct {
+				LivePrice bool `json:"live_price"`
+			} `json:"candidates"`
+		}
+		err := json.Unmarshal(listJSONFrom(t, liveAndStaticAdvices()), &report)
 
-		var advices []spot.Advice
-		err := json.Unmarshal(output.Bytes(), &advices)
+		advices := report.Candidates
 		require.NoError(t, err)
 		require.Len(t, advices, 2)
 		assert.False(t, advices[0].LivePrice, "Static price live_price should be false")

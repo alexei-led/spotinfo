@@ -141,7 +141,7 @@ Setup: [MCP server](docs/mcp-server.md) and [Claude Desktop](docs/claude-desktop
 | [Cloud coverage](docs/clouds.md)                          | What each cloud serves, and what it refuses  |
 | [Examples](docs/examples.md)                              | Pipelines, Terraform, CI, cost monitors      |
 | [MCP server](docs/mcp-server.md)                          | Tools, arguments, assistant setup            |
-| [API reference](docs/api-reference.md)                    | The `spotinfo.recommend/v2` contract         |
+| [API reference](docs/api-reference.md)                    | The `spotinfo.recommend/v3` contract         |
 | [AWS placement scores](docs/aws-spot-placement-scores.md) | What a score means, and does not             |
 | [Data sources](docs/data-sources.md)                      | Every feed, snapshot, cache and refresh rule |
 | [Troubleshooting](docs/troubleshooting.md)                | Errors, causes, fixes                        |

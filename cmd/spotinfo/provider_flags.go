@@ -67,14 +67,7 @@ func requestedArchitecture(value string) cloud.Architecture {
 	return architecture
 }
 
-// recommendCapabilityRequest describes v1 recommendations: every workload
-// (web, ci, batch) caps interruption frequency, so risk is required. The
-// risk-free cost policy is served by the neutral path, which derives its own
-// needs from the request.
-func recommendCapabilityRequest(ctx *cli.Context) cloud.CapabilityRequest {
-	return cloud.CapabilityRequest{
-		OS:           requestedOS(lineageString(ctx, flagOS)),
-		Architecture: requestedArchitecture(ctx.String(flagArchitecture)),
-		Needed:       []cloud.Capability{cloud.CapabilitySpotPrice, cloud.CapabilityMachineSpec, cloud.CapabilityRisk},
-	}
-}
+// The recommend command declares no capability request of its own any more.
+// cloud.Recommend derives one from the request — the workload decides whether
+// published risk is needed — and checks it before acquisition, so a second
+// hand-written copy here could only drift from it.

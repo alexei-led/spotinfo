@@ -74,7 +74,7 @@ func runRecommendWith(t *testing.T, registry *providers.Registry, args ...string
 	app := newSpotinfoApp(
 		func(*cli.Context) error { return nil },
 		func(ctx *cli.Context) error {
-			return execRecommendCmd(ctx, context.Background(), registry, newQueryClient(t), &output)
+			return execRecommendCmd(ctx, context.Background(), registry, &output)
 		},
 	)
 	err := app.Run(append([]string{"spotinfo", "recommend"}, args...))
@@ -124,7 +124,7 @@ func TestGCPRecommendationServesTheV2ContractOffline(t *testing.T) {
 	var report cloud.RecommendReport
 	require.NoError(t, json.Unmarshal([]byte(output), &report))
 
-	assert.Equal(t, cloud.SchemaVersionRecommendV2, report.SchemaVersion)
+	assert.Equal(t, cloud.SchemaVersionRecommendV3, report.SchemaVersion)
 	assert.Equal(t, cloud.ProviderGCP, report.Request.Cloud)
 	assert.Equal(t, []cloud.Region{cloud.RegionAll}, report.Request.Regions)
 	assert.Equal(t, cloud.WorkloadCost, report.Request.Workload,
@@ -161,8 +161,8 @@ func TestRecommendationAcceptsABudgetFinerThanTheScale(t *testing.T) {
 	var report cloud.RecommendReport
 	require.NoError(t, json.Unmarshal([]byte(output), &report))
 
-	require.NotNil(t, report.Request.MaxPricePerHour)
-	assert.InDelta(t, 0.041666666, *report.Request.MaxPricePerHour, 1e-9,
+	require.NotNil(t, report.Request.MaxPrice)
+	assert.InDelta(t, 0.041666666, *report.Request.MaxPrice, 1e-9,
 		"the echoed ceiling is the truncated one the query actually used")
 	require.NotEmpty(t, report.Recommendations)
 
@@ -210,7 +210,7 @@ func TestAzureRecommendationServesTheV2ContractOffline(t *testing.T) {
 	var report cloud.RecommendReport
 	require.NoError(t, json.Unmarshal([]byte(output), &report))
 
-	assert.Equal(t, cloud.SchemaVersionRecommendV2, report.SchemaVersion)
+	assert.Equal(t, cloud.SchemaVersionRecommendV3, report.SchemaVersion)
 	assert.Equal(t, cloud.ProviderAzure, report.Request.Cloud)
 	assert.Equal(t, cloud.WorkloadCost, report.Request.Workload,
 		"a cloud that publishes no risk cannot claim an interruption ceiling")
@@ -319,7 +319,7 @@ func TestMCPRecommendServesGCPFromTheCommittedSnapshot(t *testing.T) {
 	require.False(t, result.IsError)
 
 	payload := toolPayload(t, result)
-	assert.Equal(t, "spotinfo.recommend/v2", payload["schema_version"])
+	assert.Equal(t, "spotinfo.recommend/v3", payload["schema_version"])
 	assert.Equal(t, "ok", payload["status"])
 
 	recommendations, ok := payload["recommendations"].([]any)
@@ -388,7 +388,7 @@ func TestMCPRecommendServesAzureFromTheCommittedSnapshot(t *testing.T) {
 	require.False(t, result.IsError)
 
 	payload := toolPayload(t, result)
-	assert.Equal(t, "spotinfo.recommend/v2", payload["schema_version"])
+	assert.Equal(t, "spotinfo.recommend/v3", payload["schema_version"])
 	assert.Equal(t, "ok", payload["status"])
 
 	recommendations, ok := payload["recommendations"].([]any)

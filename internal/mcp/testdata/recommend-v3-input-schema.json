@@ -5,7 +5,7 @@
     "idempotentHint": false,
     "openWorldHint": true
   },
-  "description": "Recommend Spot machines from committed multi-cloud price data. Returns a spotinfo.recommend/v2 payload with explicit risk availability per cloud.",
+  "description": "Recommend Spot machines from committed multi-cloud price data. Returns a spotinfo.recommend/v3 payload with explicit risk availability per cloud.",
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
@@ -32,7 +32,7 @@
         "description": "Machine type RE2 regexp. Omit for no machine-name filter",
         "type": "string"
       },
-      "max_price_per_hour": {
+      "max_price": {
         "description": "Maximum USD per machine-hour. Omit for no price ceiling",
         "exclusiveMinimum": 0,
         "type": "number"

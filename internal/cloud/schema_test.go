@@ -15,7 +15,7 @@ import (
 )
 
 // The wire enum of risk kinds is frozen by
-// docs/plans/contracts/recommend-spot-instances-v2-success.schema.json. This
+// docs/plans/contracts/recommend-v3-success.schema.json. This
 // scans the package for every declared RiskKind constant, so a kind added for a
 // new provider fails here instead of shipping a value the schema forbids.
 func TestEveryDeclaredRiskKindHasAPublishedName(t *testing.T) {
@@ -191,7 +191,7 @@ func TestIncompleteProvenanceFailsClosed(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := sourceDTOs(&Result{Provider: ProviderAWS, Sources: test.sources})
+			_, _, err := sourceDTOs(&Result{Provider: ProviderAWS, Sources: test.sources}, nil)
 			require.ErrorIs(t, err, ErrDataUnavailable)
 			assert.Equal(t, CodeDataUnavailable, CodeOf(err))
 		})
@@ -206,10 +206,11 @@ func TestSourceDTOAllowsAnUnhashedReviewedDocument(t *testing.T) {
 
 	source := testSources()[0]
 	source.ContentSHA256 = ""
-	result, err := sourceDTOs(&Result{Provider: ProviderGCP, Sources: []SourceRef{source}})
+	published, omitted, err := sourceDTOs(&Result{Provider: ProviderGCP, Sources: []SourceRef{source}}, nil)
 	require.NoError(t, err)
-	require.Len(t, result, 1)
-	assert.Nil(t, result[0].ContentSHA256)
+	require.Len(t, published, 1)
+	assert.Zero(t, omitted)
+	assert.Nil(t, published[0].ContentSHA256)
 }
 
 // The error payload names the cloud the caller asked for, or null when none

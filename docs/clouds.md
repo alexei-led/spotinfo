@@ -57,10 +57,9 @@ records as $0, which happens for very new families and for the regions AWS omits
 committed snapshot. `--offline` skips every request, including the live-price call.
 `--refresh` ignores the cache for one run. See [data-sources.md](data-sources.md).
 
-**Schema.** `--workload cost` emits `spotinfo.recommend/v2`. `web`, `ci` and `batch` emit
-`spotinfo.recommend/v1`, which is byte-compatible with releases that predate multi-cloud
-support. The CLI default workload is `web`, so an unqualified `spotinfo recommend` on AWS
-emits v1. The MCP tool defaults to `cost` and emits v2. See
+**Schema.** Every workload emits `spotinfo.recommend/v3`, on every cloud and on both
+surfaces. The AWS-only `spotinfo.recommend/v1` document, and the workload that used to
+select between it and the neutral schema, are retired. See
 [reviews/cli-and-mcp-surface-review.md](reviews/cli-and-mcp-surface-review.md).
 
 **Placement scores.** `--with-score` reads `GetSpotPlacementScores`. A score rates the whole

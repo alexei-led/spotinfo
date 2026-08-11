@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/alexei-led/spotinfo/schemas/recommend-spot-instances-v2-input.schema.json",
-  "title": "recommend_spot_instances input",
+  "$id": "https://github.com/alexei-led/spotinfo/schemas/recommend-v3-input.schema.json",
+  "title": "spotinfo.recommend/v3 input",
   "type": "object",
   "additionalProperties": false,
   "required": ["architecture", "min_vcpu", "min_memory_gib"],
@@ -23,7 +23,7 @@
     "os": {"type": "string", "enum": ["linux", "windows"], "default": "linux"},
     "min_vcpu": {"type": "integer", "minimum": 1},
     "min_memory_gib": {"type": "number", "exclusiveMinimum": 0},
-    "max_price_per_hour": {"type": "number", "exclusiveMinimum": 0},
+    "max_price": {"type": "number", "exclusiveMinimum": 0},
     "workload": {"type": "string", "enum": ["cost", "web", "ci", "batch"], "default": "cost"},
     "top": {"type": "integer", "minimum": 1, "maximum": 50, "default": 3}
   }

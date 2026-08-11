@@ -266,7 +266,7 @@ func runRecommendCapturing(t *testing.T, registry providerRegistry, args ...stri
 	app := newSpotinfoApp(
 		func(*cli.Context) error { return nil },
 		func(ctx *cli.Context) error {
-			return execRecommendCmd(ctx, context.Background(), registry, newQueryClient(t), &output)
+			return execRecommendCmd(ctx, context.Background(), registry, &output)
 		},
 	)
 	err := app.Run(append([]string{appName}, args...))
@@ -433,14 +433,15 @@ func TestRecommendRejectsARiskFreeProviderForEveryCappedWorkload(t *testing.T) {
 // acquisition path. The stub returns no candidates, so reaching AWS data would
 // show up as rows this provider never published.
 func TestNonAWSCloudIsAnsweredFromItsOwnProvider(t *testing.T) {
-	registry := mustRegistry(registrationOf(stubProvider{
-		id:           cloud.ProviderAzure,
-		capabilities: offlineLinuxCapabilities(),
-	}))
+	registry := listRegistry(cloud.ProviderAzure, offlineLinuxCapabilities())
 
 	output, err := runListCapturing(t, registry, "--cloud", "azure", "--output", outputJSON)
 	require.NoError(t, err)
-	assert.Equal(t, "[]\n", output, "an azure query must not be answered with AWS candidates")
+
+	var report cloud.ListReport
+	require.NoError(t, json.Unmarshal([]byte(output), &report))
+	assert.Equal(t, cloud.ProviderAzure, report.DataSource.Provider)
+	assert.Empty(t, report.Candidates, "an azure query must not be answered with AWS candidates")
 }
 
 // --cloud is declared on both commands, so an explicit value must win over the

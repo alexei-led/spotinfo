@@ -8,12 +8,18 @@ import (
 // Published schema versions. They are the contract every spotinfo surface
 // serialises; the normative JSON Schemas live in docs/plans/contracts/.
 const (
-	// SchemaVersionRecommendV2 is the provider-neutral recommendation payload.
-	SchemaVersionRecommendV2 = "spotinfo.recommend/v2"
+	// SchemaVersionRecommendV3 is the recommendation payload. It answers every
+	// cloud under every workload: the AWS-only spotinfo.recommend/v1 document,
+	// and the branch that picked between the two by workload, are retired.
+	SchemaVersionRecommendV3 = "spotinfo.recommend/v3"
+	// SchemaVersionListV1 is the browse payload. It shares the candidate, risk,
+	// price and source blocks with v3 and drops the ranking: a browse answer
+	// states what is there, not what to pick.
+	SchemaVersionListV1 = "spotinfo.list/v1"
 	// SchemaVersionErrorV1 is the shared error payload.
 	SchemaVersionErrorV1 = "spotinfo.error/v1"
 
-	// statusOK is the only status a successful recommendation reports.
+	// statusOK is the only status a successful answer reports.
 	statusOK = "ok"
 
 	// maxSavingsPercent is the ceiling the published schema puts on a savings
@@ -23,9 +29,9 @@ const (
 
 // riskKindWireNames maps a domain risk kind onto the published enum value. The
 // table is deliberate rather than a rename of the domain constants: the wire
-// enum is frozen by recommend-spot-instances-v2-success.schema.json, so a risk
-// kind added for a new provider must be given a reviewed wire name here instead
-// of leaking a Go constant into a published payload.
+// enum is frozen by recommend-v3-success.schema.json, so a risk kind added for
+// a new provider must be given a reviewed wire name here instead of leaking a
+// Go constant into a published payload.
 var riskKindWireNames = map[RiskKind]string{
 	RiskKindInterruptionFrequencyRange: riskKindWireInterruptionBucket,
 	RiskKindPreemptionRate:             riskKindWirePreemptionRate,
@@ -77,30 +83,39 @@ type SourceDTO struct { //nolint:govet // field order follows the published sche
 }
 
 // DataSourceDTO describes where a result came from.
+//
+// SourcesOmitted counts the documents the snapshot was read from that no
+// published candidate draws a value from. Azure reads 81 of them, so a
+// three-row answer that listed all of them would be mostly provenance for rows
+// it does not contain; the count keeps the omission visible and resolvable
+// rather than silent.
 type DataSourceDTO struct {
-	Provider ProviderID  `json:"provider"`
-	Mode     DataMode    `json:"mode"`
-	Sources  []SourceDTO `json:"sources"`
+	Provider       ProviderID  `json:"provider"`
+	Mode           DataMode    `json:"mode"`
+	Sources        []SourceDTO `json:"sources"`
+	SourcesOmitted int         `json:"sources_omitted"`
 }
 
-// RequestDTO echoes the request a report answers, with every default resolved.
+// RequestDTO echoes the recommendation request a report answers, with every
+// default resolved.
 type RequestDTO struct { //nolint:govet // field order follows the published schema
-	Cloud           ProviderID      `json:"cloud"`
-	Regions         []Region        `json:"regions"`
-	Machine         string          `json:"machine"`
-	Architecture    Architecture    `json:"architecture"`
-	OS              OperatingSystem `json:"os"`
-	MinVCPU         int             `json:"min_vcpu"`
-	MinMemoryGiB    float64         `json:"min_memory_gib"`
-	MaxPricePerHour *float64        `json:"max_price_per_hour"`
-	Workload        Workload        `json:"workload"`
-	Top             int             `json:"top"`
+	Cloud        ProviderID      `json:"cloud"`
+	Regions      []Region        `json:"regions"`
+	Machine      string          `json:"machine"`
+	Architecture Architecture    `json:"architecture"`
+	OS           OperatingSystem `json:"os"`
+	MinVCPU      int             `json:"min_vcpu"`
+	MinMemoryGiB float64         `json:"min_memory_gib"`
+	MaxPrice     *float64        `json:"max_price"`
+	Workload     Workload        `json:"workload"`
+	Top          int             `json:"top"`
 }
 
-// RecommendationDTO is one ranked machine. Prices are canonical decimal strings
-// so a consumer never has to reconstruct them from a float.
-type RecommendationDTO struct { //nolint:govet // field order follows the published schema
-	Rank               int             `json:"rank"`
+// CandidateDTO is one priced machine. Prices are canonical decimal strings so a
+// consumer never has to reconstruct them from a float. Both published schemas
+// carry this block unchanged, which is what makes an answer from `list` and an
+// answer from `recommend` comparable field for field.
+type CandidateDTO struct { //nolint:govet // field order follows the published schema
 	Cloud              ProviderID      `json:"cloud"`
 	Region             Region          `json:"region"`
 	Machine            MachineID       `json:"machine"`
@@ -112,10 +127,52 @@ type RecommendationDTO struct { //nolint:govet // field order follows the publis
 	OnDemandUSDPerHour *string         `json:"on_demand_usd_per_hour"`
 	SavingsPercent     *float64        `json:"savings_percent"`
 	Risk               RiskDTO         `json:"risk"`
-	RationaleCodes     []string        `json:"rationale_codes"`
 }
 
-// RecommendReport is the spotinfo.recommend/v2 success payload.
+// RecommendationDTO is one ranked machine: the shared candidate block, its
+// position in the published ranking policy, and why it was kept.
+type RecommendationDTO struct { //nolint:govet // field order follows the published schema
+	Rank int `json:"rank"`
+	CandidateDTO
+	RationaleCodes []string `json:"rationale_codes"`
+}
+
+// ListCandidateDTO is one browsable machine: the shared candidate block plus
+// the observations only `list` asks for.
+//
+// LivePrice is always emitted, where the four below it are omitted when unset.
+// The split mirrors the other output formats: price provenance is carried by
+// every one of them — a "*" suffix in text and table, a "Price Source" column
+// in CSV — so a JSON form that dropped the key would be the only rendering
+// where "this price came from the snapshot" and "this build does not report
+// provenance" look identical. The others are genuinely absent unless the
+// matching flag asked for them.
+type ListCandidateDTO struct { //nolint:govet // field order follows the published schema
+	CandidateDTO
+	LivePrice      bool              `json:"live_price"`
+	ZonePrices     map[string]string `json:"zone_prices,omitempty"`
+	RegionScore    *int              `json:"region_score,omitempty"`
+	ZoneScores     map[string]int    `json:"zone_scores,omitempty"`
+	ScoreFetchedAt *string           `json:"score_fetched_at,omitempty"`
+}
+
+// ListRequestDTO echoes the browse request an answer was built from. Every
+// filter `list` accepts is present, so a consumer can tell an unfiltered answer
+// from a filtered one without re-reading the command line.
+type ListRequestDTO struct { //nolint:govet // field order follows the published schema
+	Cloud        ProviderID      `json:"cloud"`
+	Regions      []Region        `json:"regions"`
+	Machine      string          `json:"machine"`
+	Architecture Architecture    `json:"architecture"`
+	OS           OperatingSystem `json:"os"`
+	MinVCPU      int             `json:"min_vcpu"`
+	MinMemoryGiB float64         `json:"min_memory_gib"`
+	MaxPrice     *float64        `json:"max_price"`
+	Sort         SortKey         `json:"sort"`
+	Order        string          `json:"order"`
+}
+
+// RecommendReport is the spotinfo.recommend/v3 success payload.
 type RecommendReport struct { //nolint:govet // field order follows the published schema
 	SchemaVersion   string              `json:"schema_version"`
 	Status          string              `json:"status"`
@@ -124,6 +181,18 @@ type RecommendReport struct { //nolint:govet // field order follows the publishe
 	DataSource      DataSourceDTO       `json:"data_source"`
 	Recommendations []RecommendationDTO `json:"recommendations"`
 	Warnings        []string            `json:"warnings"`
+}
+
+// ListReport is the spotinfo.list/v1 success payload. It publishes no ranking
+// policy: nothing here is ranked, and an empty candidate list is a real answer
+// rather than a failure.
+type ListReport struct { //nolint:govet // field order follows the published schema
+	SchemaVersion string             `json:"schema_version"`
+	Status        string             `json:"status"`
+	Request       ListRequestDTO     `json:"request"`
+	DataSource    DataSourceDTO      `json:"data_source"`
+	Candidates    []ListCandidateDTO `json:"candidates"`
+	Warnings      []string           `json:"warnings"`
 }
 
 // ErrorReport is the spotinfo.error/v1 payload. Cloud is null when the request
@@ -147,32 +216,158 @@ func NewErrorReport(code ErrorCode, message, cloudValue string) *ErrorReport {
 	return report
 }
 
-// newRecommendReport assembles the published payload from a validated request,
-// the provider result it was answered from, and the ranked candidates.
-func newRecommendReport(request *RecommendRequest, result *Result, ranked []scored) (*RecommendReport, error) {
-	sources, err := sourceDTOs(result)
+// orderAscending and orderDescending are the two values the published request
+// echo reports for a sort direction.
+const (
+	orderAscending  = "asc"
+	orderDescending = "desc"
+)
+
+// NewListReport assembles the spotinfo.list/v1 payload from the query that was
+// asked and the result it was answered from.
+func NewListReport(query *Query, result *Result) (*ListReport, error) {
+	if query == nil {
+		return nil, fmt.Errorf("%w: query is required", ErrInvalidArgument)
+	}
+
+	candidates := make([]ListCandidateDTO, 0, len(result.Candidates))
+	published := make([]*Candidate, 0, len(result.Candidates))
+
+	for i := range result.Candidates {
+		candidate := &result.Candidates[i]
+
+		shared, err := candidateDTO(candidate)
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, listCandidateDTO(&shared, candidate))
+		published = append(published, candidate)
+	}
+
+	sources, omitted, err := sourceDTOs(result, published)
 	if err != nil {
 		return nil, err
 	}
 
+	return &ListReport{
+		SchemaVersion: SchemaVersionListV1,
+		Status:        statusOK,
+		Request:       listRequestDTO(query, result.Provider),
+		DataSource: DataSourceDTO{
+			Provider:       result.Provider,
+			Mode:           result.Mode,
+			Sources:        sources,
+			SourcesOmitted: omitted,
+		},
+		Candidates: candidates,
+		Warnings:   []string{},
+	}, nil
+}
+
+func listRequestDTO(query *Query, provider ProviderID) ListRequestDTO {
+	order := orderAscending
+	if query.Sort.Descending {
+		order = orderDescending
+	}
+
+	echoed := ListRequestDTO{
+		Cloud:        provider,
+		Regions:      query.Regions,
+		Machine:      query.MachinePattern,
+		Architecture: query.Architecture,
+		OS:           query.OS,
+		MinVCPU:      query.MinVCPU,
+		MinMemoryGiB: query.MinMemoryGiB,
+		Sort:         query.Sort.Key,
+		Order:        order,
+	}
+	if echoed.Regions == nil {
+		echoed.Regions = []Region{}
+	}
+	if query.MaxPrice != nil {
+		ceiling := query.MaxPrice.Float64()
+		echoed.MaxPrice = &ceiling
+	}
+
+	return echoed
+}
+
+// listCandidateDTO adds the observations `list` renders on top of the shared
+// candidate block. Each is absent unless the flag that fetches it was given.
+func listCandidateDTO(shared *CandidateDTO, candidate *Candidate) ListCandidateDTO {
+	published := ListCandidateDTO{CandidateDTO: *shared}
+	if candidate.Spot != nil {
+		published.LivePrice = candidate.Spot.Live
+	}
+
+	if len(candidate.ZonePrices) > 0 {
+		published.ZonePrices = make(map[string]string, len(candidate.ZonePrices))
+		for i := range candidate.ZonePrices {
+			published.ZonePrices[candidate.ZonePrices[i].Location.Zone] = candidate.ZonePrices[i].Amount.String()
+		}
+	}
+
+	for i := range candidate.Placements {
+		placement := &candidate.Placements[i]
+		if placement.Location.Zone == "" {
+			score := placement.Score
+			published.RegionScore = &score
+
+			continue
+		}
+		if published.ZoneScores == nil {
+			published.ZoneScores = make(map[string]int, len(candidate.Placements))
+		}
+		published.ZoneScores[placement.Location.Zone] = placement.Score
+	}
+
+	// Every observation on one candidate comes from the same call, so the first
+	// timestamp present is the answer.
+	for i := range candidate.Placements {
+		if candidate.Placements[i].FetchedAt != nil {
+			published.ScoreFetchedAt = timestamp(*candidate.Placements[i].FetchedAt)
+
+			break
+		}
+	}
+
+	return published
+}
+
+// newRecommendReport assembles the published payload from a validated request,
+// the provider result it was answered from, and the ranked candidates.
+func newRecommendReport(request *RecommendRequest, result *Result, ranked []scored) (*RecommendReport, error) {
 	recommendations := make([]RecommendationDTO, len(ranked))
+	published := make([]*Candidate, len(ranked))
+
 	for i := range ranked {
 		recommendation, err := recommendationDTO(&ranked[i], request.Workload, i+1)
 		if err != nil {
 			return nil, err
 		}
 		recommendations[i] = recommendation
+		published[i] = ranked[i].candidate
+	}
+
+	// Trimmed against the ranked page rather than against everything the
+	// provider matched: a --region all Azure query matches 55 regions and
+	// publishes three, and provenance for the other 52 describes no value in
+	// this document.
+	sources, omitted, err := sourceDTOs(result, published)
+	if err != nil {
+		return nil, err
 	}
 
 	return &RecommendReport{
-		SchemaVersion: SchemaVersionRecommendV2,
+		SchemaVersion: SchemaVersionRecommendV3,
 		Status:        statusOK,
 		Request:       requestDTO(request),
 		RankingPolicy: RankingPolicy(),
 		DataSource: DataSourceDTO{
-			Provider: result.Provider,
-			Mode:     result.Mode,
-			Sources:  sources,
+			Provider:       result.Provider,
+			Mode:           result.Mode,
+			Sources:        sources,
+			SourcesOmitted: omitted,
 		},
 		Recommendations: recommendations,
 		Warnings:        []string{},
@@ -193,9 +388,9 @@ func requestDTO(request *RecommendRequest) RequestDTO {
 	}
 	if request.MaxPrice != nil {
 		// Float64 is documented as lossy and not for rendering, and this is the
-		// one place it is correct anyway: the published schema types
-		// max_price_per_hour as a number, so a canonical decimal string — what
-		// every amount in the payload uses — would not validate.
+		// one place it is correct anyway: the published schema types max_price
+		// as a number, so a canonical decimal string — what every amount in the
+		// payload uses — would not validate.
 		//
 		// It is exact here. Money carries 9 fractional digits, and float64 holds
 		// any such value below 2^53 nanos (about $9,007,199) without rounding,
@@ -203,49 +398,63 @@ func requestDTO(request *RecommendRequest) RequestDTO {
 		// actually applied rather than the float the caller sent, so a value
 		// finer than the scale reads back truncated on purpose.
 		ceiling := request.MaxPrice.Float64()
-		echoed.MaxPricePerHour = &ceiling
+		echoed.MaxPrice = &ceiling
 	}
 
 	return echoed
 }
 
 func recommendationDTO(candidate *scored, workload Workload, rank int) (RecommendationDTO, error) {
-	risk, err := riskDTO(&candidate.candidate.Risk)
+	shared, err := candidateDTO(candidate.candidate)
 	if err != nil {
 		return RecommendationDTO{}, err
 	}
 
-	machine := candidate.candidate.Machine
-	recommendation := RecommendationDTO{
+	return RecommendationDTO{
 		Rank:           rank,
-		Cloud:          candidate.candidate.Provider,
-		Region:         candidate.candidate.Location.Region,
-		Machine:        machine.ID,
-		Architecture:   machine.Architecture,
-		OS:             candidate.candidate.OS,
-		VCPU:           machine.VCPU,
-		MemoryGiB:      machine.MemoryGiB,
-		SpotUSDPerHour: candidate.candidate.Spot.Amount.String(),
-		Risk:           risk,
+		CandidateDTO:   shared,
 		RationaleCodes: candidate.rationaleCodes(workload),
+	}, nil
+}
+
+// candidateDTO publishes the block both schemas share.
+func candidateDTO(candidate *Candidate) (CandidateDTO, error) {
+	risk, err := riskDTO(&candidate.Risk)
+	if err != nil {
+		return CandidateDTO{}, err
 	}
-	if onDemand := candidate.candidate.OnDemand; onDemand != nil {
+
+	machine := candidate.Machine
+	published := CandidateDTO{
+		Cloud:        candidate.Provider,
+		Region:       candidate.Location.Region,
+		Machine:      machine.ID,
+		Architecture: machine.Architecture,
+		OS:           candidate.OS,
+		VCPU:         machine.VCPU,
+		MemoryGiB:    machine.MemoryGiB,
+		Risk:         risk,
+	}
+	if candidate.Spot != nil {
+		published.SpotUSDPerHour = candidate.Spot.Amount.String()
+	}
+	if onDemand := candidate.OnDemand; onDemand != nil {
 		price := onDemand.Amount.String()
-		recommendation.OnDemandUSDPerHour = &price
+		published.OnDemandUSDPerHour = &price
 	}
-	if savings := candidate.candidate.SavingsPercent; savings != nil {
+	if savings := candidate.SavingsPercent; savings != nil {
 		// The published schema bounds savings to 0..100. A provider that maps a
 		// figure outside it has a mapping bug, and publishing the number anyway
 		// would hand the client a payload its own schema rejects.
 		if *savings < 0 || *savings > maxSavingsPercent {
-			return RecommendationDTO{}, fmt.Errorf("savings %d%% for %s is not a percentage of on-demand",
+			return CandidateDTO{}, fmt.Errorf("savings %d%% for %s is not a percentage of on-demand",
 				*savings, machine.ID)
 		}
 		percent := float64(*savings)
-		recommendation.SavingsPercent = &percent
+		published.SavingsPercent = &percent
 	}
 
-	return recommendation, nil
+	return published, nil
 }
 
 // riskDTO publishes a risk observation. An unmapped kind fails closed: emitting
@@ -291,20 +500,37 @@ func riskDTO(risk *RiskObservation) (RiskDTO, error) {
 	return published, nil
 }
 
-// sourceDTOs publishes the provenance of every snapshot a result was built
-// from. A provider that cannot say where its data came from cannot serve a v2
-// answer, so an empty or incomplete source list fails rather than publishing a
-// payload with invented provenance.
-func sourceDTOs(result *Result) ([]SourceDTO, error) {
+// sourceDTOs publishes the provenance of the snapshots a published answer draws
+// its values from, and counts the ones it does not.
+//
+// A provider that cannot say where its data came from cannot serve an answer,
+// so an empty or incomplete source list fails rather than publishing a payload
+// with invented provenance. Trimming is per scope and each provider derives the
+// scope from its own URLs; an unrecognised URL carries no scope and is kept, so
+// this can only ever drop provenance for a value no published candidate has.
+func sourceDTOs(result *Result, published []*Candidate) ([]SourceDTO, int, error) {
 	if len(result.Sources) == 0 {
-		return nil, fmt.Errorf("%w: provider %q reported no data sources", ErrDataUnavailable, result.Provider)
+		return nil, 0, fmt.Errorf("%w: provider %q reported no data sources", ErrDataUnavailable, result.Provider)
 	}
 
 	sources := make([]SourceDTO, 0, len(result.Sources))
-	for _, source := range result.Sources {
+	omitted := 0
+
+	for i := range result.Sources {
+		source := &result.Sources[i]
 		if source.URL == "" || source.ParserVersion == "" ||
 			source.SchemaVersion == "" || source.FetchedAt.IsZero() {
-			return nil, fmt.Errorf("%w: provider %q reported an incomplete data source", ErrDataUnavailable, result.Provider)
+			return nil, 0, fmt.Errorf("%w: provider %q reported an incomplete data source",
+				ErrDataUnavailable, result.Provider)
+		}
+
+		// An answer with no candidates has nothing to trim against: every source
+		// stays, because "which of these describes a row" has no answer when
+		// there are no rows.
+		if len(published) > 0 && !coversAny(source.Scope, published) {
+			omitted++
+
+			continue
 		}
 
 		var contentSHA256 *string
@@ -312,7 +538,7 @@ func sourceDTOs(result *Result) ([]SourceDTO, error) {
 			value := source.ContentSHA256
 			contentSHA256 = &value
 		}
-		published := SourceDTO{
+		entry := SourceDTO{
 			URL:           source.URL,
 			FetchedAt:     *timestamp(source.FetchedAt),
 			ContentSHA256: contentSHA256,
@@ -320,12 +546,38 @@ func sourceDTOs(result *Result) ([]SourceDTO, error) {
 			SchemaVersion: source.SchemaVersion,
 		}
 		if source.ObservedAt != nil {
-			published.ObservedAt = timestamp(*source.ObservedAt)
+			entry.ObservedAt = timestamp(*source.ObservedAt)
 		}
-		sources = append(sources, published)
+		sources = append(sources, entry)
 	}
 
-	return sources, nil
+	// Both published schemas declare data_source.sources with minItems 1. A
+	// trim that empties the list has lost the provenance of every row it kept,
+	// which is the one outcome this must never publish.
+	if len(sources) == 0 {
+		return nil, 0, fmt.Errorf("%w: provider %q published no source for the rows it answered with",
+			ErrDataUnavailable, result.Provider)
+	}
+
+	return sources, omitted, nil
+}
+
+// coversAny is O(sources x candidates) and short-circuits on the first row a
+// source backs. Measured ceiling: `spotinfo list --cloud azure --output json`
+// over every region is 11,204 rows against 81 sources and is not distinguishable
+// from the same query rendered as a table, which does no trimming at all; the
+// worst shape found — 950 rows with 37 sources omitted — is the same. Upgrade
+// trigger: a provider whose sources outnumber a browse answer's rows, where
+// collecting the published regions and machine IDs into two sets first turns
+// this into O(sources + candidates).
+func coversAny(scope SourceScope, published []*Candidate) bool {
+	for _, candidate := range published {
+		if scope.Covers(candidate) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // timestamp renders an instant in the one format the schemas accept.
