@@ -1755,7 +1755,13 @@ catalogue, and it is fetched for the ranked page — one authenticated request p
 333-machine catalogue is hundreds of calls billed to the caller's own project for an answer
 nobody browses. The refusal lives in `gcp.Provider.Query`, which is the one place the CLI and
 the MCP `list_spot_machines` tool both pass through; a CLI-only check would have left the MCP
-browse tool answering an empty column and exiting 0. `Capabilities().PlacementScore` is
+browse tool answering an empty column and exiting 0. The CLI half is tested twice — a unit test
+and an `e2e_test.go` refusal row, which is where the exit code and the empty stdout are
+observed. The MCP half follows from the chokepoint plus the mapping: `ListSpotMachinesTool.Handle`
+wraps every error out of `list` — `provider.Query` included — in `cloud.CodeOf`, which turns
+`ErrUnsupportedCapability` into `UNSUPPORTED_CAPABILITY`. It is not tested directly because
+`internal/mcp` answers from stubs and registers no GCP provider.
+`Capabilities().PlacementScore` is
 declared **unconditionally** and not from whether a fetcher is wired: both surfaces check
 capabilities on the provider they resolved, before `withPlacement` attaches one, so a
 conditional declaration would refuse the single request that can be served.
@@ -1807,10 +1813,20 @@ schema}.go` (the `PlacementEnricher` seam, `enrichRankedPlacement`, the uptime f
 both contract schema files, and `cmd/spotinfo/{placement,e2e}_test.go` plus
 `internal/providers/gcp/provider_test.go`.
 
+➕ **`make verify-architecture` passes: verdict `pass`, `archfitcheck: no open critical or high
+findings (31 findings reviewed)`, all 44 severities `medium`** — unchanged from Task 11. Run
+because this task adds two production files and about 400 lines across nine, which is the shape
+a size or complexity rule notices.
+
 ⚠️ **A ranked page's obtainability is reachable only from the CLI**, for the same reason Task 11
 recorded: `recommend_spot_machines` declares none of the four score arguments, and the MCP
 surface has no `gcp_project` argument at all. **Task 15 should check this** alongside the
 existing criterion-2 notes.
+
+⚠️ **Two lines of Task 16 doc debt, added to Task 11's.** `docs/clouds.md:65` says `--with-score`
+reads `GetSpotPlacementScores`, which is now true of AWS only — on GCP it reads
+`advice.capacity` and returns a probability. And Task 11's ⚠️ about `docs/api-reference.md`
+missing three placement fields now misses four: `region_estimated_uptime_seconds` joins them.
 
 ---
 
