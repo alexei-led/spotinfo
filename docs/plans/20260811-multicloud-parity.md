@@ -1212,7 +1212,27 @@ refusal is retired by Tasks 10 and 13.
 ignores the other two: `az` sets `SingleZone` on a request with `Enabled: false`, and
 `score_timeout` is dropped. That is the same silent no-op on the other surface, and this task's
 file list is CLI-only, so it is recorded rather than fixed. **Task 15 must check it** when it
-verifies acceptance criterion 2 — the CLI now refuses what MCP answers.
+verifies acceptance criterion 2 — the CLI now refuses what MCP answers. The MCP `offline` and
+`refresh` arguments diverge the same way on a snapshot-only cloud — `Query.CapabilityNeeds()`
+never asks for `CapabilityLiveEnrichment` — but that half self-heals at Tasks 10 and 13, which
+stop the CLI refusing them at all.
+
+⚠️ **One documentation sentence is now wrong, and Task 16 owns it.**
+`docs/quick-start.md:122` reads "It applies to AWS. GCP and Azure are always offline", which
+describes `--offline` on those two clouds as redundant where it is now refused. Every other
+`--offline` / `--refresh` mention is already AWS-scoped and stays true: `docs/clouds.md:57-58`
+sits under `## AWS`, and `docs/data-sources.md:329` sits inside the AWS fetch-order list whose
+own last bullet says GCP and Azure have no live path. `--gcp-project` needs no doc change —
+`docs/installation.md:136`, `docs/clouds.md:113` and `docs/troubleshooting.md:465` all describe
+`GOOGLE_CLOUD_PROJECT` as a source for the project, which `withLiveRisk` still reads. The
+retired `spotinfo --type …` examples throughout `README.md`, `docs/usage.md`,
+`docs/examples.md` and `docs/aws-spot-placement-scores.md` are a Task 4/5/7 debt, not this
+task's: audited here, no new breakage found.
+
+➕ **Files this task's list omits.** `cmd/spotinfo/list.go` (the refusal call site and the
+companion check moved out of `validateScoreFloor`), `cmd/spotinfo/recommend.go` (the same call
+site), `cmd/spotinfo/liverisk.go` (the Azure live-risk wording and the `EnvVars` removal) and
+`cmd/spotinfo/e2e_test.go` (three refusal rows, where the process exit code is observed).
 
 ➕ **`--score-timeout` is unbounded on the CLI where MCP bounds it.** `internal/mcp` rejects a
 value outside 1..`cloud.MaxScoreTimeoutSeconds`; `listQuery` applies `if timeout > 0` and drops
