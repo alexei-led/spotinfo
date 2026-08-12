@@ -105,16 +105,32 @@ Add a new `recommend_spot_instances` tool. Its input schema is:
   "additionalProperties": false,
   "required": ["architecture", "min_vcpu", "min_memory_gib"],
   "properties": {
-    "cloud": {"type": "string", "enum": ["aws", "gcp", "azure"], "default": "aws"},
-    "regions": {"type": "array", "items": {"type": "string"}, "default": ["all"]},
-    "machine": {"type": "string", "default": ""},
-    "architecture": {"type": "string", "enum": ["x86_64", "arm64"]},
-    "os": {"type": "string", "enum": ["linux", "windows"], "default": "linux"},
-    "min_vcpu": {"type": "integer", "minimum": 1},
-    "min_memory_gib": {"type": "number", "exclusiveMinimum": 0},
-    "max_price_per_hour": {"type": "number", "exclusiveMinimum": 0},
-    "workload": {"type": "string", "enum": ["cost", "web", "ci", "batch"], "default": "cost"},
-    "top": {"type": "integer", "minimum": 1, "maximum": 50, "default": 3}
+    "cloud": {
+      "type": "string",
+      "enum": ["aws", "gcp", "azure"],
+      "default": "aws"
+    },
+    "regions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": ["all"]
+    },
+    "machine": { "type": "string", "default": "" },
+    "architecture": { "type": "string", "enum": ["x86_64", "arm64"] },
+    "os": {
+      "type": "string",
+      "enum": ["linux", "windows"],
+      "default": "linux"
+    },
+    "min_vcpu": { "type": "integer", "minimum": 1 },
+    "min_memory_gib": { "type": "number", "exclusiveMinimum": 0 },
+    "max_price_per_hour": { "type": "number", "exclusiveMinimum": 0 },
+    "workload": {
+      "type": "string",
+      "enum": ["cost", "web", "ci", "batch"],
+      "default": "cost"
+    },
+    "top": { "type": "integer", "minimum": 1, "maximum": 50, "default": 3 }
   }
 }
 ```
@@ -139,7 +155,13 @@ A successful result has `isError=false`. Its single text content item contains J
     "workload": "cost",
     "top": 3
   },
-  "ranking_policy": ["spot_price_ascending", "excess_vcpu_ascending", "excess_memory_gib_ascending", "region_ascending", "machine_ascending"],
+  "ranking_policy": [
+    "spot_price_ascending",
+    "excess_vcpu_ascending",
+    "excess_memory_gib_ascending",
+    "region_ascending",
+    "machine_ascending"
+  ],
   "data_source": {
     "provider": "aws",
     "mode": "embedded-snapshot",
@@ -177,7 +199,11 @@ A successful result has `isError=false`. Its single text content item contains J
         "source_url": null,
         "observed_at": null
       },
-      "rationale_codes": ["COST_POLICY", "ARCHITECTURE_MATCH", "RESOURCE_MINIMUMS_MET"]
+      "rationale_codes": [
+        "COST_POLICY",
+        "ARCHITECTURE_MATCH",
+        "RESOURCE_MINIMUMS_MET"
+      ]
     }
   ],
   "warnings": []
@@ -266,13 +292,32 @@ Manual checks:
 - Confirm that no AWS SDK type appears in `internal/cloud`.
 - Review fixed-point precision against the maximum fractional precision observed in AWS, GCP, and Azure fixtures.
 
-- [ ] Record AWS root and recommendation output hashes plus the normalized MCP v1 input and response fixtures.
-- [ ] Add neutral domain types with explicit units, currencies, source metadata, risk, and placement observations.
-- [ ] Add the AWS adapter without removing legacy AWS types or methods.
-- [ ] Add `internal/cloud/dependencies_test.go` and prove its forbidden-import case fails before the implementation passes.
-- [ ] Update `.archfit.yaml` module metadata and layer intent.
-- [ ] Run focused tests, race tests, vet, and the architecture gate.
-- [ ] Commit the #35 slice before starting Task 2.
+- [x] Record AWS root and recommendation output hashes plus the normalized MCP v1 input and response fixtures.
+- [x] Add neutral domain types with explicit units, currencies, source metadata, risk, and placement observations.
+- [x] Add the AWS adapter without removing legacy AWS types or methods.
+- [x] Add `internal/cloud/dependencies_test.go` and prove its forbidden-import case fails before the implementation passes.
+- [x] Update `.archfit.yaml` module metadata and layer intent.
+- [x] Run focused tests, race tests, vet, and the architecture gate.
+- [x] Commit the #35 slice before starting Task 2.
+
+Task 1 results:
+
+- Fixed-point scale confirmed against the committed AWS price feed: 42,886 price
+  strings, maximum 4 fractional digits, so nano-USD (9) stores every observed
+  amount exactly. GCP and Azure precision is re-checked in Task 5.
+- Goldens are the recorded contract: `cmd/spotinfo/testdata/aws-root-v1.json`,
+  `aws-recommend-v1.json`, `internal/mcp/testdata/find-spot-instances-v1-input-schema.json`,
+  and `find-spot-instances-v1-response.json`. All four come from fixed advice via
+  mocked clients, never from the embedded feeds, so a weekly data refresh cannot
+  rewrite them. Regenerate with `UPDATE_GOLDEN=1`.
+- Archfit after the config change: `verdict pass`, 0 gate findings, `config-quality`
+  warnings gone, `no-layer-back-edges` still `warn`. Critical finding
+  `bac6b2e4f1019c672ac2eec8dc470b31` is unchanged (`model × cross_module_same_owner`,
+  same id, still critical) — Task 4's target was not hidden by metadata. Two new
+  medium advisories cover the expected `providers_aws -> cloud` and
+  `providers_aws -> spot` edges.
+- `owner` is uniform (`spotinfo`) across modules because the repository has one
+  maintainer; inventing a team split would have altered Balanced-Coupling distance.
 
 ### Task 2: Add manifest-backed embedded snapshots and parser gates
 
@@ -320,13 +365,66 @@ Manual checks:
 - Confirm the update path cannot replace a valid snapshot with empty or partial output.
 - Confirm that raw source hashes and parsed payload hashes describe different artifacts.
 
-- [ ] Define manifest, payload, parser, and source schema versions.
-- [ ] Add AWS sidecar manifests without changing AWS runtime output.
-- [ ] Add and validate the provider source-contract schema and generic approved/rejected fixtures.
-- [ ] Add atomic output writing and fail-closed validation.
-- [ ] Extend `make verify-data` and the AWS update workflow.
-- [ ] Run focused data tests, race tests, build, and verification gates.
-- [ ] Commit the #36 slice before starting Task 3.
+- [x] Define manifest, payload, parser, and source schema versions.
+- [x] Add AWS sidecar manifests without changing AWS runtime output.
+- [x] Add and validate the provider source-contract schema and generic approved/rejected fixtures.
+- [x] Add atomic output writing and fail-closed validation.
+- [x] Extend `make verify-data` and the AWS update workflow.
+- [x] Run focused data tests, race tests, build, and verification gates.
+- [x] Commit the #36 slice before starting Task 3.
+
+Task 2 results:
+
+- Hash model: `payload.sha256` is the hash of the **committed** file, so
+  `make verify-data` can recompute it offline. `sources[].sha256` is upstream
+  provenance. `payload.form` names the relationship: `raw-source` (AWS embeds
+  the feed verbatim — the two hashes must be equal) or `parsed-catalog` (GCP and
+  Azure commit a derived catalogue — the payload hash must differ from every
+  source hash). No canonicalizer was written; a parse-derived hash would have
+  forced a manifest rewrite on every weekly refresh for no extra signal.
+- `min_records` is a **floor**, not a census. A refresh may grow the data; a
+  shrink below the reviewed floor fails. That is what keeps a weekly refresh
+  from rewriting review metadata, and it matches the `min_regions`/`min_machines`
+  thresholds in the source-contract schema. AWS floors are ~75-80% of observed:
+  price 30 regions / 1000 machines / 25000 priced cells (observed 40 / 1339 /
+  36082), advisor 25 / 900 (observed 34 / 1192), architecture 140 families
+  (observed 170).
+- The coverage floor is also applied to the **live** AWS fetch. A feed that
+  returns HTTP 200 with a truncated document now falls back to the embedded
+  snapshot instead of replacing it. Embedded loads are not re-hashed at runtime:
+  the bytes are compiled in, so that is a gate fact, not a runtime one.
+- No JSON Schema library was added. `internal/snapshot/source_contract.go`
+  mirrors `docs/plans/contracts/provider-source-contract.schema.json` in Go and
+  names it as normative; the binary keeps its zero-dependency scratch-image
+  runtime. Both fixtures are synthetic — the schema restricts `provider` to
+  `gcp` and `azure`, and neither is approved here.
+- Regeneration reuses the repo's `UPDATE_GOLDEN=1` convention:
+  `make refresh-manifests`, invoked automatically by `update-data` and
+  `update-price`. It rewrites hashes and, for raw feeds, the fetch time. Floors
+  and reviewed provenance are never regenerated. The update workflow runs it a
+  second time and fails on any diff, so a stale manifest cannot be merged.
+- Archfit after the change: `verdict pass`, no new Critical. The four new medium
+  advisories are the expected value-object edges (`snapshot -> cloud` ×2,
+  `spot -> cloud`, `spot -> snapshot`). Critical
+  `bac6b2e4f1019c672ac2eec8dc470b31` (`mcp -> spot`) is unchanged and remains
+  Task 4's target.
+- `internal/snapshot` is declared in the `domain` layer: both `internal/spot`
+  (legacy) and future provider packages depend on it, so any other placement
+  would create a back edge.
+- Duplicate rule, corrected against real data: the committed AWS price feed
+  lists 118 region/size pairs twice (8 GPU machine types) with **identical**
+  prices. That is redundancy, not ambiguity, so `ValidatePrices` rejects only a
+  key priced two _different_ ways and counts distinct keys toward the floor.
+  Rejecting exact repeats would have made the gate unusable on real AWS data
+  without catching anything the success criteria ask for.
+  `TestEmbeddedPricesSatisfyTheNeutralRecordContract` runs the neutral record
+  validator over the whole embedded feed, so `ValidatePrices` has a real
+  consumer now rather than waiting for Task 5.
+- `.golangci.yaml` depguard trap fixed. depguard prefix-checks only the nearest
+  allow entry in sorted order, so `spotinfo/internal/spot` sitting alongside
+  `spotinfo/internal` silently denied every package sorting between them —
+  `internal/snapshot` here, and `internal/providers` in Task 3. The narrower
+  entries are removed; a single `spotinfo/internal` now covers all of them.
 
 ### Task 3: Add the provider registry and capability-aware CLI routing
 
@@ -375,13 +473,83 @@ Manual checks:
 - Confirm GCP and Azure reject `--with-score`, `--az`, and `--min-score` before snapshot access.
 - Confirm CI uses pinned archfit `v1.6.0`; GitNexus stays a review-only tool.
 
-- [ ] Add the compiled registry and capability vocabulary.
-- [ ] Add provider selection with AWS as the default.
-- [ ] Preserve root `--type` and recommendation `--instance` behavior.
-- [ ] Add unsupported-capability and flag-order tests.
-- [ ] Pin archfit and add the provider-boundary gate to CI.
-- [ ] Run focused and full validation.
-- [ ] Commit the #37 slice before starting Task 4.
+- [x] Add the compiled registry and capability vocabulary.
+- [x] Add provider selection with AWS as the default.
+- [x] Preserve root `--type` and recommendation `--instance` behavior.
+- [x] Add unsupported-capability and flag-order tests.
+- [x] Pin archfit and add the provider-boundary gate to CI.
+- [x] Run focused and full validation.
+- [x] Commit the #37 slice before starting Task 4.
+
+Task 3 results:
+
+- `--cloud` is declared on both the root command and `recommend` with **no**
+  default value, and the AWS default is applied once in `providerID`. Declaring
+  `Value: "aws"` on both would let the subcommand's own default shadow an
+  explicit `spotinfo --cloud gcp recommend …` and answer a GCP question with AWS
+  prices. `TestCloudFlagResolvesAcrossContextLineage` pins both flag positions.
+- `--machine` is the neutral machine-type filter, added as a `cli` **alias** of
+  the AWS spellings (`--type` on root, `--instance` on recommend). Both names
+  reach the same value, so every documented AWS invocation is byte-identical;
+  only the help text gains the alias.
+- Fixed validation order, each step before acquisition: unparseable `--cloud` →
+  `INVALID_ARGUMENT`; recognised but disabled provider → `DATA_UNAVAILABLE`
+  carrying the registry reason code; declared-capability shortfall →
+  `UNSUPPORTED_CAPABILITY`. In the shipped binary `--cloud gcp` therefore reports
+  `DATA_UNAVAILABLE (PROVIDER_NOT_REGISTERED)` — resolution precedes the
+  capability check — so the capability branches are proven against enabled stub
+  providers instead. Both reject before any snapshot access.
+- The root command requires `risk` because it renders an interruption column, so
+  a risk-free provider fails the ordinary capability gate with no special-casing;
+  `--with-score`/`--min-score` add `placement_score` and `--az` adds
+  `zone_detail`. Recommend requires `risk` too: every v1 workload is an
+  interruption cap. The risk-free `cost` policy arrives with the v2 schema.
+- An OS outside the neutral vocabulary is deliberately **not** a capability
+  question — the provider owns that error. That keeps the existing AWS
+  `invalid instance OS` message and its mock-backed test intact; only a
+  well-formed OS is checked against declared support.
+- `resolveAWSProvider` rejects any non-AWS provider from the legacy acquisition
+  path. Both commands still read candidates through the AWS client, so without it
+  a hypothetical enabled provider would be answered with AWS data. Task 4 removes
+  the second half of that function, not the first.
+- Registry builds every factory eagerly, so `Status()` can report a broken
+  snapshot before the first query. It returns all three recognised providers in
+  stable lexical order; construction fails only on wiring bugs (unknown id,
+  duplicate, nil factory, identifier mismatch), never on a provider's own data.
+- `no-layer-back-edges` promoted `warn` → `fail`. Verified both ways: with a
+  temporary `internal/providers` → `internal/mcp` import the gate returned
+  `verdict fail, gate_findings 1, no-layer-back-edges providers -> mcp`; with the
+  probe removed, `verdict pass, gate_findings 0`. The archfit module for the
+  registry uses the `internal/providers/*.go` glob so it does not swallow
+  `providers_aws`; both modules appear with their own edges. 15 medium
+  Balanced-Coupling advisories, up from 10 — the new ones are the expected
+  `cmd_spotinfo -> cloud|providers_aws`, `mcp -> cloud`, `providers -> cloud`
+  edges. Critical `bac6b2e4f1019c672ac2eec8dc470b31` is unchanged and remains
+  Task 4's target.
+- Error vocabulary added to `internal/cloud`: `ErrUnsupportedCapability`,
+  `ErrDataUnavailable`, and `CodeOf`. `NO_CANDIDATES` is deliberately not here —
+  nothing in Task 3 returns it, and it belongs with the v2 contract Task 4
+  freezes.
+- Two test-harness fixes were needed, both pre-existing hazards this task
+  exposed. `TestMainCmd_Integration` built its context with
+  `cli.NewContext(app, nil, nil)`, which carries no parsed flag set: its
+  `ctx.Set` calls silently failed and `LocalFlagNames` panics on it. It now runs
+  through `app.Run`. CLI tests that run the app are not `t.Parallel()` —
+  urfave/cli appends its package-level `HelpFlag` to every parsed command and
+  writes to it in `Apply`, so concurrent `app.Run` calls race inside the library.
+- `make lint` now installs pinned `golangci-lint v2.12.2` instead of `latest`,
+  and CI installs pinned archfit `v1.6.0` before `make verify-architecture-rules`.
+  GitNexus stays a review-only tool and is not installed in CI.
+- `Registry.Status()` has a real consumer: `newProviderRegistry` logs every
+  disabled provider and its reason code at debug level, so `spotinfo --debug`
+  explains a missing cloud without a failing request. The recorded goldens are
+  unchanged — none of them capture help text — so the new `--cloud` and
+  `--machine` entries in `--help` are gated by nothing. Documenting both flags is
+  deferred to Task 5, which already owns `README.md` and `docs/usage.md`.
+- Accepted duplication until Task 4: `execRecommendCmd` parses the 3.9 KB
+  architecture snapshot twice per run — once inside the registry factory, once
+  for the v1 recommender. Threading the lookup through the command signature now
+  would be undone when neutral acquisition replaces that call site.
 
 ### Task 4: Move recommendations and MCP to provider-neutral candidates
 
@@ -440,15 +608,109 @@ Manual checks:
 - Confirm that unavailable risk is explicit and that `cost` does not imply interruption safety.
 - Confirm that the critical archfit finding is fixed, not hidden by configuration metadata.
 
-- [ ] Freeze the neutral cost-policy and `spotinfo.recommend/v2` contracts.
-- [ ] Move neutral recommendation filtering and ordering onto neutral candidates.
-- [ ] Preserve AWS recommendation v1 through an adapter and golden tests.
-- [ ] Add `recommend_spot_instances` and exact AWS/fake-provider MCP contracts.
-- [ ] Route existing AWS MCP response shaping through the neutral adapter without changing the existing tool contract.
-- [ ] Remove the direct `internal/mcp -> internal/spot` import.
-- [ ] Run focused, full, race, data, lint, build, and architecture gates.
-- [ ] Stop if any Critical or High archfit finding remains.
-- [ ] Commit the #38 slice before starting Task 5.
+- [x] Freeze the neutral cost-policy and `spotinfo.recommend/v2` contracts.
+- [x] Move neutral recommendation filtering and ordering onto neutral candidates.
+- [x] Preserve AWS recommendation v1 through an adapter and golden tests.
+- [x] Add `recommend_spot_instances` and exact AWS/fake-provider MCP contracts.
+- [x] Route existing AWS MCP response shaping through the neutral adapter without changing the existing tool contract.
+- [x] Remove the direct `internal/mcp -> internal/spot` import.
+- [x] Run focused, full, race, data, lint, build, and architecture gates.
+- [x] Stop if any Critical or High archfit finding remains.
+- [x] Commit the #38 slice before starting Task 5.
+
+Task 4 results:
+
+- Critical finding `bac6b2e4f1019c672ac2eec8dc470b31` is **fixed, not waived**: the
+  `internal/mcp -> internal/spot` edge no longer exists in production code, so
+  archfit reports neither the critical `mcp -> spot` advisory from `server.go`
+  nor the medium one from `tools.go`. Findings dropped 15 → 13, all medium;
+  coupling score 36 → 44; `critical-band edges: 0`.
+- `find_spot_instances` was **not** routed through `cloud.Provider.Query`
+  unchanged. `cloud.Query` carried none of the acquisition knobs that tool
+  advertises, so routing through it as it stood would have silently made
+  `with_score`, `min_score`, `az`, `score_timeout` and `sort_by` no-ops — and the
+  recorded golden would still have passed, because it injects a `RegionScore`
+  into fixed advice rather than asking for one. `cloud.Query` therefore gained
+  `Sort SortOrder` and `Placement PlacementRequest`, both already part of the
+  declared capability vocabulary, and
+  `TestToolParametersReachTheProviderQuery` asserts every parameter lands on the
+  query. Sorting still happens inside `internal/spot`; the adapter preserves the
+  provider's order, which `Result` now documents.
+- v1 compatibility is byte-identical against both goldens. The neutral domain
+  models an unknown price, an unpublished savings figure and an unlabelled risk
+  range as absences; `find_spot_instances` maps them back to the zeros v1
+  published, because it is the compatibility surface. `data_source` keeps its own
+  vocabulary (`aws`/`embedded`) mapped from `DataMode`.
+- Risk kinds are mapped to the wire enum through a table in `internal/cloud/schema.go`,
+  not by renaming the domain constants. The success schema freezes
+  `interruption_bucket|preemption_rate|eviction_rate`;
+  `TestEveryDeclaredRiskKindHasAPublishedName` scans the package AST for every
+  `RiskKind` constant, so a kind added in Task 5 fails there instead of shipping
+  a value outside the enum. An unmapped kind fails closed as `INTERNAL`.
+- `data_source.sources` requires at least one complete entry, so the AWS provider
+  now reads `spot.EmbeddedSourceRefs()` in `New` and a build that cannot describe
+  its provenance is disabled by the registry. A documentation source may have no stable upstream hash, so
+  `Manifest.SourceRefs()` preserves that absence. The derived payload hash is
+  used only for manifest verification, never as upstream provenance. A live answer
+  still reports the committed manifests: they are the provenance of the data the
+  parser was written against.
+- CLI schema routing: AWS under `web`, `ci` or `batch` keeps `spotinfo.recommend/v1`
+  and its legacy acquisition path. Every other combination — another cloud, or
+  the risk-free `cost` policy on any cloud including AWS — is answered by the
+  neutral engine and `spotinfo.recommend/v2`. `--workload` lost its `Value:` for
+  the same reason `--cloud` did in Task 3: the default depends on the provider
+  (`web` where risk is published, `cost` where it is not), so "unset" has to stay
+  distinguishable from "set to web".
+- Task 3's `TestRecommendRejectsAProviderWithoutRisk` encoded the behaviour this
+  task changes and was replaced: a risk-free provider now defaults to `cost` and
+  is served, reporting `NO_CANDIDATES` for an empty result rather than
+  `UNSUPPORTED_CAPABILITY`. Asking for a capped workload explicitly still fails
+  before acquisition.
+- The ranker re-applies every constraint over neutral candidates rather than
+  trusting the provider, and `compareScored` is a total order over
+  (price nanos, excess vCPU, excess memory, region, machine), so
+  `TestRankingIsIndependentOfCandidateOrder` runs all 24 permutations of a
+  four-candidate set and gets one answer. A risk-aware workload drops a candidate
+  whose risk is unknown instead of ranking it as if it had cleared the cap.
+- No JSON Schema library was added, keeping the zero-dependency runtime. The
+  contracts in `docs/plans/contracts/` are enforced by a ~130-line checker in
+  `internal/mcp/jsonschema_test.go` covering exactly the keywords they use. Its
+  ceiling is documented there: reach for a real validator if the contracts start
+  using `$ref`, `allOf`, or conditionals.
+- The advisor feed publishes an unvalidated savings integer, and the v2 schema
+  bounds `savings_percent` to 0..100. The AWS adapter now treats a figure above
+  100 as unpublished, exactly as it already treated `<= 0`, and
+  `recommendationDTO` fails closed on an out-of-range value so a Task 5 provider
+  that derives savings rather than reading it cannot publish a payload the
+  schema rejects.
+- `find_spot_instances` and `list_spot_regions` are AWS-only by contract:
+  `queryAWS` resolves `cloud.ProviderAWS` and nothing else, which is why
+  `Query.CapabilityNeeds()` demanding risk only for a risk-ordered query is safe
+  here — the tools render an interruption column and AWS always publishes one.
+  `queryAWS` is not a generic helper; a second cloud on those tools would need
+  the capability request widened first.
+- `make verify-architecture` was checked on both paths: it passes on the current
+  tree, and a failing analyze step aborts the target instead of feeding an empty
+  document to the checker (verified against a simulated failure, since archfit
+  itself does not fail here).
+- `internal/mcp/mocks_test.go` was deleted and the `spotinfo/internal/mcp` entry
+  removed from `.mockery.yaml`: the mocked `spotClient` interface is gone, and the
+  remaining seam is a two-method registry where a programmable stub reads better
+  than a generated mock.
+- `internal/mcp` test helpers still build the real embedded AWS client — that is
+  the point of the race and bench tests, which exercise `spot.Client`'s
+  `sync.Once` and shared providers. The new `mcp` import policy in
+  `dependencies_test.go` is therefore `productionOnly`; archfit gates the shipped
+  boundary, and the policy walker now keys imports by file rather than by
+  directory so a policy can apply to production code without exempting a package.
+- `make verify-architecture` runs the rule gate, then writes
+  `archfit analyze --json` to a temporary file and feeds it to
+  `go run ./cmd/archfitcheck`. A pipeline would report only the last command's
+  status and hand the checker an empty document on an archfit failure. The
+  checker treats only `fixed`, `resolved`, `waived` and `baselined` as closed —
+  any status it has not seen counts as open, so a new archfit status cannot hide
+  a Critical finding. CI runs `make verify-architecture` in place of the
+  rule-only target.
 
 ### Task 5: Add GCP and Azure providers, then run final verification and documentation
 
@@ -523,21 +785,137 @@ Manual checks:
 - Review every changed public JSON field and schema version.
 - Ask an independent reviewer to run a scoped architecture review against #35–#38, #28, and #29 and save it to `docs/reviews/spotinfo-multicloud-v2-architecture-review.md`.
 
-- [ ] Write `docs/research/multicloud-source-contracts.md` and the exact GCP support matrix.
-- [ ] Create and approve `internal/providers/gcp/data/source-contract.json`; run its schema and threshold gate; stop before GCP code if it fails.
-- [ ] Record GCP source headers, page list, exact Linux machine/region/architecture matrix, terms decision, coverage thresholds, and binary-size delta.
-- [ ] Implement and verify the GCP updater, parser, snapshot, provider, CLI flow, MCP flow, docs, and update workflow.
-- [ ] Run all GCP-focused gates and commit the #28 slice.
-- [ ] After the GCP slice is reviewed and committed, record the exact Azure support matrix.
-- [ ] Create and approve `internal/providers/azure/data/source-contract.json`; run its schema and threshold gate; stop before Azure code if it fails.
-- [ ] Record Azure filters, page selection, exact Linux machine/region/architecture matrix, terms decision, effective-date rules, coverage thresholds, and binary-size delta.
-- [ ] Implement and verify the Azure updater, parser, snapshot, provider, CLI flow, MCP flow, docs, and update workflow.
-- [ ] Run all Azure-focused gates and commit the #29 slice.
-- [ ] Run the complete repository validation command set.
-- [ ] Record GitNexus detect-changes and all HIGH-impact symbol reviews.
-- [ ] Record archfit findings and prove that no Critical or High finding remains.
-- [ ] Complete user, API, MCP, source, troubleshooting, and support-matrix documentation.
-- [ ] Save the independent architecture review to `docs/reviews/spotinfo-multicloud-v2-architecture-review.md`, disposition every finding, and record the release recommendation.
+- [x] Write `docs/research/multicloud-source-contracts.md` and the exact GCP support matrix.
+- [x] Create and approve `internal/providers/gcp/data/source-contract.json`; run its schema and threshold gate; stop before GCP code if it fails.
+- [x] Record GCP source headers, page list, exact Linux machine/region/architecture matrix, terms decision, coverage thresholds, and binary-size delta.
+- [x] Implement and verify the GCP updater, parser, snapshot, provider, CLI flow, MCP flow, docs, and update workflow.
+- [x] Run all GCP-focused gates and commit the #28 slice.
+
+GCP slice result (#28), recorded for the Azure slice and the final review:
+
+- **Region coverage is `us-central1` only.** The official pages server-render one region and
+  switch the rest in with JavaScript. The plan assumed a broader matrix; it is a narrower
+  claim, not a no-go. The parser attributes every table to the region selector rendered above
+  it, so a table Google renders for another region — the Spot page has one, for
+  `africa-south1` — is skipped rather than relabelled.
+- **Source list changed.** `https://cloud.google.com/compute/vm-instance-pricing` now
+  redirects to a landing page with no tables. On-Demand prices come from the
+  `products/compute/pricing/{general-purpose,compute-optimized,memory-optimized}` category
+  pages. `storage-optimized` is not read: no machine it prices is offered as Spot.
+- **`machine-resource.html` fixture not created.** Architecture is a reviewed series list in
+  the parser (`c4a`, `n4a`, `t2a` are Arm), with the documentation page recorded as its source
+  in the manifest — the same posture as the AWS architecture snapshot. There is no page to
+  parse, so there is no fixture for one.
+- **`internal/mcp/recommend_test.go` was left alone.** Its fake providers cover the error
+  matrix without pinning MCP tests to committed prices, and importing a concrete provider into
+  `internal/mcp` would add a layer edge the boundary gate exists to prevent. The embedded-GCP
+  MCP contract test lives in `cmd/spotinfo/multicloud_test.go`, which already composes the
+  real registry.
+- **The root query command stays AWS-only.** It renders an interruption column, so it requires
+  the risk capability, which GCP does not have; `spotinfo --cloud gcp --type …` returns
+  `UNSUPPORTED_CAPABILITY`. GCP is served by `recommend` and by `recommend_spot_instances`.
+- **`--region` default.** The declared default `us-east-1` is an AWS region name, so on a
+  non-AWS cloud an unset `--region` now means every region that cloud publishes. An explicit
+  `--region` is always honoured.
+- **Numbers.** 333 machines, 18 series, 666 prices, 5,815 compressed bytes, maximum 9
+  fractional digits (exactly `cloud.MoneyScale` — no headroom). Binary-size delta +127,056
+  bytes.
+- **The coverage floor already earned its keep.** One refresh received a partially rendered
+  page missing every `n4d` table; the run stopped at 295 machines and wrote nothing.
+- **Open maintainer item.** `terms.redistribution_decision` is recorded as `approved` with
+  evidence `https://developers.google.com/site-policies`. The pricing pages carry no Creative
+  Commons footer, so the decision rests on the figures being facts. The project owner must
+  confirm it before release.
+- [x] After the GCP slice is reviewed and committed, record the exact Azure support matrix.
+- [x] Create and approve `internal/providers/azure/data/source-contract.json`; run its schema and threshold gate; stop before Azure code if it fails.
+- [x] Record Azure filters, page selection, exact Linux machine/region/architecture matrix, terms decision, effective-date rules, coverage thresholds, and binary-size delta.
+- [x] Implement and verify the Azure updater, parser, snapshot, provider, CLI flow, MCP flow, docs, and update workflow.
+- [x] Run all Azure-focused gates and commit the #29 slice.
+- [x] Run the complete repository validation command set.
+- [x] Record GitNexus detect-changes and all HIGH-impact symbol reviews.
+- [x] Record archfit findings and prove that no Critical or High finding remains.
+- [x] Complete user, API, MCP, source, troubleshooting, and support-matrix documentation.
+- [x] Save the independent architecture review to `docs/reviews/spotinfo-multicloud-v2-architecture-review.md`, disposition every finding, and record the release recommendation.
+
+Azure slice result (#29), and final verification:
+
+- **Two sources, because neither answers the whole question.** The Retail Prices API publishes
+  no vCPU count, memory figure or architecture, so those come from one Microsoft Learn size
+  page per approved series — 27 sources in the contract. Architecture is read from each page's
+  own `[x86-64]`/`[Arm64]` marker and never inferred from a size name.
+- **Three source quirks, each found by a gate rather than by reading docs.**
+  1. `Low Priority` is the retired Batch meter, priced beside Spot under the same size. Excluded.
+  2. Legacy **Cloud Services** meters are published under `serviceName = "Virtual Machines"`
+     against the same `armSkuName` at a different rate. They made ~40 sizes per region
+     ambiguous and failed the refresh. The second spelling — `Eadsv5 Series CloudServices`,
+     no space — survived a first fix that matched only `Cloud Services`, so the marker is
+     matched with spaces removed.
+  3. Memory is labelled `Memory (GiB)` on 18 pages and `Memory (GB)` on the 8 memory-optimized
+     pages, for identical figures (`Standard_E2_v5` reads 16 on one, `Standard_E2s_v5` reads 16
+     on the other). Both accepted as gibibytes; a third label fails.
+- **Effective dates are resolved against an instant passed in, not `time.Now()`.** The API
+  returns expired and future intervals — 289 meters in `eastus` carry more than one row — so a
+  parser that took the first or last row would publish an expired price and pass every other
+  gate. All eight regions resolve against one instant per run. No interval in effect drops the
+  machine and reports it; two intervals in effect at different prices fails the refresh.
+  Resolution runs *after* the reviewed-matrix filter, so a conflict in a size this catalogue
+  never publishes is not a reason to fail a weekly refresh.
+- **The coverage floor is per region**, not global: 180 machines minimum against 224 observed
+  in every region. A global count would let one region return three sizes and be absorbed by
+  seven healthy ones.
+- **Numbers.** 224 sizes, 26 series (37 arm64 sizes across `bpsv2`, `dpdsv5`, `dpsv5`, `dpsv6`,
+  `epsv5`), 8 regions, 3,584 prices, 16,515 compressed bytes, max 6 fractional digits against a
+  `MoneyScale` of 9 — three digits of headroom, unlike GCP's zero. Binary-size delta
+  **+119,536 bytes** (0.20%); `golang.org/x/net/html` was already a dependency.
+- **Region coverage is a reviewed choice, not a source limit** — unlike GCP. The API serves
+  every Azure region; eight bound the weekly refresh to ~100 requests. Widening is a contract
+  edit plus a refresh, no code change.
+- **Cross-checked against the live source at commit time**: `uksouth/Standard_D2as_v6` spot
+  `0.014013` and on-demand `0.106`, `westeurope/Standard_D2ps_v5` spot `0.017002`. Exact matches.
+- Two changes outside Azure. `Money.FractionalDigits` replaced a copy that would have existed in
+  each provider — it is a property of the value object, not of a catalogue. And the neutral
+  recommendation table now sizes its region and machine columns from the rows: fixed widths were
+  fine for `n2d-standard-2` and broke on `Standard_D2pds_v5`.
+- Two gaps closed after a review pass. `sizeRows` skipped an unparseable size name with a
+  silent `continue`, so a constrained-vCPU row such as `Standard_E32-8as_v5` would have shrunk
+  the catalogue without a word — the one behaviour the rest of this design rules out. A row
+  starting with `Standard_` is now a size row, and a name the parser cannot read fails. No
+  contracted page lists one today (0 of 225 rows), and re-running the updater with the stricter
+  parser produced a byte-identical payload. `make verify-data` also now runs both updater test
+  packages, which is where the contract checks live — notably that every approved series has a
+  source page.
+- The three HTML helpers (`walk`, `cellText`, `tableRows`) are deliberately duplicated between
+  the GCP and Azure parsers, with the trigger recorded in `sizes.go`: extract them when a third
+  provider parses HTML. A package created to hold forty lines would add a dependency edge for
+  less than it removes.
+
+Final verification:
+
+- Gates: `make fmt`, `go build ./...`, `go test ./...`, `make test-verbose`, `make test-race`,
+  `go vet ./...`, `make lint` (0 issues), `make verify-data`, `make build`, `git diff --check`,
+  `make verify-architecture`, and `archfit --gate --base origin/master` all pass.
+- **Archfit: `verdict pass`, 0 gate findings, 29 findings, all medium `bc/imbalanced_coupling`.**
+  Critical `bac6b2e4f1019c672ac2eec8dc470b31` is **absent** — fixed in Task 4, not baselined or
+  waived. All 29 advisories are modules depending on `internal/cloud` or `internal/snapshot`, or
+  a composition root depending on what it composes; dispositioned as accepted in the review.
+  Metrics: 0 cycles, 0 new high-risk unbalanced edges, 100% coverage, 2 change-impact hubs
+  (`internal/cloud` 91%, `internal/snapshot` 64%) — both stable contract modules.
+- **GitNexus re-index: 3,519 nodes, 10,129 edges, 291 flows** (from 1,706 / 3,894 / 83). The
+  plan's headline risk was that changing `Advice` touched 22 symbols across three modules
+  including `internal/mcp`; it now touches 19 across two, and `internal/mcp` has left the set.
+  `spot.Recommend` 11, `cloud.Recommend` 15 (`Spotinfo` + `Mcp`, a forward edge),
+  `providers.Registry` 31, `gcp.Provider` 12, `azure.Provider` 9 — each provider's radius is
+  itself plus the composition root, so a fourth cloud is additive.
+- `CLAUDE.md` was rewritten for the post-Task-1 architecture: neutral seam, snapshot contracts,
+  provider registry, the two new updaters and workflows, the neutral `cloud.Provider` interface,
+  and four new "never" rules drawn from what actually went wrong in this task.
+- Review saved to `docs/reviews/spotinfo-multicloud-v2-architecture-review.md`: no open Critical
+  or High, ship recommendation conditional on the redistribution approvals below.
+
+**Project owner approval recorded.** The project owner confirmed both redistribution decisions
+for `internal/providers/{gcp,azure}/data/source-contract.json`. The reasoning is recorded in
+`docs/research/multicloud-source-contracts.md`: factual figures with attribution, and Microsoft
+Learn content under CC BY 4.0. Reconfirm each decision before a schema change or source expansion.
 
 ## Acceptance criteria
 

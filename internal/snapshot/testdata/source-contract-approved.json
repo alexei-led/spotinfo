@@ -1,0 +1,46 @@
+{
+  "schema_version": "spotinfo.source-contract/v1",
+  "provider": "gcp",
+  "review_status": "approved",
+  "reviewer": "example-maintainer",
+  "reviewed_at": "2026-08-07",
+  "sources": [
+    {
+      "url": "https://cloud.google.com/spot-vms/pricing",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["spot-price"]
+    },
+    {
+      "url": "https://cloud.google.com/compute/vm-instance-pricing",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": ["on-demand-price", "machine-spec", "architecture"]
+    }
+  ],
+  "terms": {
+    "redistribution_decision": "approved",
+    "evidence_url": "https://example.invalid/terms-review",
+    "notes": "Synthetic fixture. Records the shape an approved contract must have; it approves no real source."
+  },
+  "expected_fields": ["region", "machine_type", "vcpu", "memory_gib", "spot_usd_per_hour", "on_demand_usd_per_hour"],
+  "support": {
+    "risk_status": "unavailable",
+    "operating_systems": ["linux"],
+    "architectures": ["x86_64", "arm64"],
+    "price_classes": ["spot", "on-demand"],
+    "regions": ["us-central1", "us-east1", "europe-west1"],
+    "machine_series": ["n2", "n2d", "t2a"]
+  },
+  "thresholds": {
+    "min_regions": 3,
+    "min_machines": 10,
+    "max_compressed_bytes": 1048576,
+    "max_fractional_digits": 9
+  },
+  "parser_version": "gcp-spot-html/1",
+  "update_cadence": "weekly",
+  "no_go_conditions": [
+    "A source page stops rendering its price table server-side.",
+    "A machine appears with a price but no vCPU or memory row.",
+    "Redistribution terms change or become unclear."
+  ]
+}

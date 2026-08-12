@@ -69,7 +69,7 @@ func TestClientDataSource(t *testing.T) {
 func TestPricingProviderRecordsFallback(t *testing.T) {
 	t.Parallel()
 
-	p := newDefaultPricingProvider(time.Second, true)
+	p := newDefaultPricingProvider(time.Second, fetchOptions{useEmbedded: true})
 	require.NoError(t, p.loadData())
 
 	assert.True(t, p.usedEmbeddedData(), "an embedded load must be recorded as embedded")

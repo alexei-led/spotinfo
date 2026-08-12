@@ -1,0 +1,4 @@
+RANK  CLOUD  REGION     MACHINE    ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR    SAVINGS  RISK          WHY
+   1  aws    us-east-1  m5.large   x86_64           2         8.0  0.0350          68%  <5%           ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
+   2  aws    us-east-1  m6i.large  x86_64           2         8.0  0.0416          72%  <5%           ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET
+   3  aws    us-west-2  m5.xlarge  x86_64           4        16.0  0.1234          65%  5-10%         ARCHITECTURE_MATCH,COST_POLICY,KNOWN_POSITIVE_PRICE,RESOURCE_MINIMUMS_MET

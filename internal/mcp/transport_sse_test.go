@@ -17,10 +17,12 @@ import (
 
 // TestSSETransportBasic tests basic SSE transport functionality
 func TestSSETransportBasic(t *testing.T) {
+	t.Parallel()
+
 	cfg := Config{
-		Version:    "1.0.0",
-		Logger:     slog.Default(),
-		SpotClient: newEmbeddedClient(),
+		Version:   "1.0.0",
+		Logger:    slog.Default(),
+		Providers: newEmbeddedRegistry(),
 	}
 
 	server, err := NewServer(cfg)
@@ -52,10 +54,12 @@ func TestSSETransportBasic(t *testing.T) {
 
 // TestSSETransportContextCancellation tests graceful shutdown
 func TestSSETransportContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	cfg := Config{
-		Version:    "1.0.0",
-		Logger:     slog.Default(),
-		SpotClient: newEmbeddedClient(),
+		Version:   "1.0.0",
+		Logger:    slog.Default(),
+		Providers: newEmbeddedRegistry(),
 	}
 
 	server, err := NewServer(cfg)
@@ -88,6 +92,8 @@ func TestSSETransportContextCancellation(t *testing.T) {
 
 // TestSSETransportPortBinding tests port binding behavior
 func TestSSETransportPortBinding(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		port        string
@@ -113,9 +119,9 @@ func TestSSETransportPortBinding(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := Config{
-				Version:    "1.0.0",
-				Logger:     slog.Default(),
-				SpotClient: newEmbeddedClient(),
+				Version:   "1.0.0",
+				Logger:    slog.Default(),
+				Providers: newEmbeddedRegistry(),
 			}
 
 			server, err := NewServer(cfg)
@@ -137,14 +143,16 @@ func TestSSETransportPortBinding(t *testing.T) {
 	}
 }
 
-// TestSSETransportWithMockClient tests SSE with mock spot client
-func TestSSETransportWithMockClient(t *testing.T) {
-	mockClient := newMockspotClient(t)
+// TestSSETransportWithStubProvider tests SSE with a stubbed provider registry
+func TestSSETransportWithStubProvider(t *testing.T) {
+	t.Parallel()
+
+	_, registry := awsStub()
 
 	cfg := Config{
-		Version:    "1.0.0",
-		Logger:     slog.Default(),
-		SpotClient: mockClient,
+		Version:   "1.0.0",
+		Logger:    slog.Default(),
+		Providers: registry,
 	}
 
 	server, err := NewServer(cfg)
@@ -154,7 +162,7 @@ func TestSSETransportWithMockClient(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	// Test that server can start with mock client
+	// Test that server can start with a stubbed registry
 	errChan := make(chan error, 1)
 	go func() {
 		errChan <- server.ServeSSE(ctx, "0")
@@ -171,10 +179,12 @@ func TestSSETransportWithMockClient(t *testing.T) {
 
 // TestSSEServerCreation tests that SSE server can be created properly
 func TestSSEServerCreation(t *testing.T) {
+	t.Parallel()
+
 	cfg := Config{
-		Version:    "1.0.0",
-		Logger:     slog.Default(),
-		SpotClient: newEmbeddedClient(),
+		Version:   "1.0.0",
+		Logger:    slog.Default(),
+		Providers: newEmbeddedRegistry(),
 	}
 
 	server, err := NewServer(cfg)
@@ -193,10 +203,12 @@ func TestSSEServerCreation(t *testing.T) {
 
 // TestSSEConcurrentAccess tests concurrent access to SSE server
 func TestSSEConcurrentAccess(t *testing.T) {
+	t.Parallel()
+
 	cfg := Config{
-		Version:    "1.0.0",
-		Logger:     slog.Default(),
-		SpotClient: newEmbeddedClient(),
+		Version:   "1.0.0",
+		Logger:    slog.Default(),
+		Providers: newEmbeddedRegistry(),
 	}
 
 	server, err := NewServer(cfg)
@@ -233,6 +245,8 @@ func TestSSEConcurrentAccess(t *testing.T) {
 
 // TestSSEWithDifferentConfigurations tests different server configurations
 func TestSSEWithDifferentConfigurations(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		version string
@@ -258,9 +272,9 @@ func TestSSEWithDifferentConfigurations(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := Config{
-				Version:    tt.version,
-				Logger:     tt.logger,
-				SpotClient: newEmbeddedClient(),
+				Version:   tt.version,
+				Logger:    tt.logger,
+				Providers: newEmbeddedRegistry(),
 			}
 
 			server, err := NewServer(cfg)
@@ -280,6 +294,8 @@ func TestSSEWithDifferentConfigurations(t *testing.T) {
 
 // Mock HTTP test to simulate SSE endpoint behavior
 func TestSSEEndpointSimulation(t *testing.T) {
+	t.Parallel()
+
 	// This test simulates what the SSE endpoint would do
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Set SSE headers
@@ -321,9 +337,9 @@ func TestSSEEndpointSimulation(t *testing.T) {
 // BenchmarkSSEServerCreation benchmarks server creation performance
 func BenchmarkSSEServerCreation(b *testing.B) {
 	cfg := Config{
-		Version:    "1.0.0",
-		Logger:     slog.Default(),
-		SpotClient: newEmbeddedClient(),
+		Version:   "1.0.0",
+		Logger:    slog.Default(),
+		Providers: newEmbeddedRegistry(),
 	}
 
 	b.ResetTimer()
@@ -338,6 +354,8 @@ func BenchmarkSSEServerCreation(b *testing.B) {
 
 // TestSSETransportErrorHandling tests error scenarios
 func TestSSETransportErrorHandling(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name          string
 		setupServer   func() (*Server, error)
@@ -345,12 +363,12 @@ func TestSSETransportErrorHandling(t *testing.T) {
 		expectedError string
 	}{
 		{
-			name: "nil spot client",
+			name: "nil provider registry",
 			setupServer: func() (*Server, error) {
 				cfg := Config{
-					Version:    "1.0.0",
-					Logger:     slog.Default(),
-					SpotClient: nil, // nil client
+					Version:   "1.0.0",
+					Logger:    slog.Default(),
+					Providers: nil, // nil registry
 				}
 				return NewServer(cfg)
 			},
@@ -361,9 +379,9 @@ func TestSSETransportErrorHandling(t *testing.T) {
 			name: "normal configuration",
 			setupServer: func() (*Server, error) {
 				cfg := Config{
-					Version:    "1.0.0",
-					Logger:     slog.Default(),
-					SpotClient: newEmbeddedClient(),
+					Version:   "1.0.0",
+					Logger:    slog.Default(),
+					Providers: newEmbeddedRegistry(),
 				}
 				return NewServer(cfg)
 			},

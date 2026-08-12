@@ -1,0 +1,109 @@
+{
+  "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true
+  },
+  "description": "Recommend Spot machines from committed multi-cloud price data. Answers on AWS, GCP and Azure with workload 'cost'; the interruption-capped workloads 'web', 'ci' and 'batch' are AWS-only, because no other cloud publishes an interruption frequency. Returns a spotinfo.recommend/v3 payload with explicit risk availability per cloud.",
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "architecture": {
+        "description": "Required processor architecture",
+        "enum": [
+          "x86_64",
+          "arm64"
+        ],
+        "type": "string"
+      },
+      "cloud": {
+        "default": "aws",
+        "description": "Cloud provider to query",
+        "enum": [
+          "aws",
+          "azure",
+          "gcp"
+        ],
+        "type": "string"
+      },
+      "machine": {
+        "default": "",
+        "description": "Machine type RE2 regexp. Omit for no machine-name filter",
+        "type": "string"
+      },
+      "max_price": {
+        "description": "Maximum USD per machine-hour. Omit for no price ceiling",
+        "exclusiveMinimum": 0,
+        "type": "number"
+      },
+      "min_memory_gib": {
+        "description": "Required minimum memory in GiB",
+        "exclusiveMinimum": 0,
+        "type": "number"
+      },
+      "min_vcpu": {
+        "description": "Required minimum vCPU cores",
+        "minimum": 1,
+        "type": "integer"
+      },
+      "offline": {
+        "default": false,
+        "description": "Answer from the committed snapshots and make no request at all",
+        "type": "boolean"
+      },
+      "os": {
+        "default": "linux",
+        "description": "Machine operating system",
+        "enum": [
+          "linux",
+          "windows"
+        ],
+        "type": "string"
+      },
+      "refresh": {
+        "default": false,
+        "description": "Ignore any locally cached provider document for this call",
+        "type": "boolean"
+      },
+      "regions": {
+        "default": [
+          "all"
+        ],
+        "description": "Provider regions to search. Use ['all'] for every region the provider publishes",
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "minItems": 1,
+        "type": "array",
+        "uniqueItems": true
+      },
+      "top": {
+        "default": 3,
+        "description": "Maximum recommendations to return",
+        "maximum": 50,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "workload": {
+        "default": "cost",
+        "description": "Ranking policy. 'cost' ranks by price alone and makes no interruption claim; 'web', 'ci' and 'batch' cap interruption frequency and need a provider that publishes risk",
+        "enum": [
+          "cost",
+          "web",
+          "ci",
+          "batch"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "architecture",
+      "min_vcpu",
+      "min_memory_gib"
+    ],
+    "type": "object"
+  },
+  "name": "recommend_spot_machines"
+}

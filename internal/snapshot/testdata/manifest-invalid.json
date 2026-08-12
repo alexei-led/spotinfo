@@ -1,0 +1,27 @@
+{
+  "schema_version": "spotinfo.snapshot-manifest/v1",
+  "data_schema_version": "gcp.spot-catalog/v1",
+  "parser_version": "gcp-spot-html/1",
+  "provider": "gcp",
+  "kind": "spot-price",
+  "currency": "USD",
+  "billing_unit": "instance-hour",
+  "payload": {
+    "file": "catalog.json.gz",
+    "form": "parsed-catalog",
+    "sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
+  },
+  "sources": [
+    {
+      "fetched_at": "2026-08-07T06:00:00Z",
+      "observed_at": null,
+      "url": "https://cloud.google.com/spot-vms/pricing",
+      "sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
+    }
+  ],
+  "min_records": {
+    "regions": 20,
+    "machines": 40,
+    "prices": 800
+  }
+}

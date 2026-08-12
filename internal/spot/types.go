@@ -22,14 +22,20 @@ type TypeInfo struct {
 
 // Advice represents spot price advice including interruption range and savings.
 type Advice struct { //nolint:govet
-	Region         string             `json:"region"`
-	Instance       string             `json:"instance"`
-	InstanceType   string             `json:"instance_type"`
-	Range          Range              `json:"range"`
-	Savings        int                `json:"savings"`
-	Info           TypeInfo           `json:"info"`
-	Price          float64            `json:"price"`
-	LivePrice      bool               `json:"live_price,omitempty"`
+	Region       string   `json:"region"`
+	Instance     string   `json:"instance"`
+	InstanceType string   `json:"instance_type"`
+	Range        Range    `json:"range"`
+	Savings      int      `json:"savings"`
+	Info         TypeInfo `json:"info"`
+	Price        float64  `json:"price"`
+	// Always emitted, unlike the optional fields below it. Price provenance is
+	// carried by every other output format — a "*" suffix in text and table, a
+	// "Price Source" column in CSV — and under omitempty the JSON form was the
+	// only one where "this price came from the static feed" and "this build does
+	// not report provenance" looked identical. The optional fields below stay
+	// omitempty: each is genuinely absent unless the matching flag asked for it.
+	LivePrice      bool               `json:"live_price"`
 	ZonePrice      map[string]float64 `json:"zone_price,omitempty"`
 	RegionScore    *int               `json:"region_score,omitempty"`
 	ZoneScores     map[string]int     `json:"zone_scores,omitempty"`
@@ -133,7 +139,13 @@ func sortAdvices(advices []Advice, sortBy SortBy, sortDesc bool) {
 		data = sort.Reverse(data)
 	}
 
-	sort.Sort(data)
+	// Stable, not sort.Sort: none of the comparators above is a total order —
+	// every row in the same interruption bucket, at the same price or in the
+	// same region ties. Byte-identical runs come from the acquisition loop
+	// feeding rows in region and machine-name order; stability is what makes
+	// that order survive the sort, so ties read as "by region, then by name"
+	// instead of as whichever permutation pdqsort left them in.
+	sort.Stable(data)
 }
 
 // filterByMinScore filters advices to only include those with a minimum region score.

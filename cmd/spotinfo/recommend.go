@@ -1,0 +1,883 @@
+package main
+
+import (
+	"cmp"
+	"context"
+	"encoding/csv"
+	"encoding/json"
+	"fmt"
+	"io"
+	"maps"
+	"math"
+	"slices"
+	"strconv"
+	"strings"
+
+	"github.com/urfave/cli/v2"
+
+	"spotinfo/internal/cloud"
+)
+
+// execRecommendCmd answers one recommendation request.
+//
+// There is one report. The workload used to pick between two published schemas
+// — AWS under web, ci or batch was answered by spotinfo.recommend/v1 and
+// everything else by the neutral engine — so the same question returned a
+// different document depending on which cloud and which policy answered it.
+// Every cloud and every workload now emits spotinfo.recommend/v3.
+func execRecommendCmd(ctx *cli.Context, execCtx context.Context, registry providerRegistry, output io.Writer) error {
+	if err := requireRecommendFlags(ctx); err != nil {
+		return err
+	}
+
+	outputFormat := lineageString(ctx, flagOutput)
+	if err := validateRecommendOutput(outputFormat); err != nil {
+		return err
+	}
+
+	// MaxTop is enforced here rather than in the neutral validator, which bounds
+	// only the lower end: the bound is written into the v3 payload schema, which
+	// pins request.top at a maximum of 50, so an unbounded CLI emitted documents
+	// that fail their own published contract.
+	if top := ctx.Int(flagTop); top > cloud.MaxTop {
+		return fmt.Errorf("%w: top must be between 1 and %d", cloud.ErrInvalidArgument, cloud.MaxTop)
+	}
+
+	sortKey, err := parseSortBy(ctx.String(flagSort))
+	if err != nil {
+		return err
+	}
+	if invalid := validateOrder(ctx.String(flagOrder)); invalid != nil {
+		return invalid
+	}
+
+	provider, err := resolveProviderForRecommend(ctx, registry)
+	if err != nil {
+		return err
+	}
+
+	if liveRiskErr := rejectLiveRiskOffGCP(ctx, provider.ID()); liveRiskErr != nil {
+		return liveRiskErr
+	}
+
+	// Every other flag this cloud cannot act on, refused here rather than
+	// accepted and ignored — and before acquisition, so a refusal costs no I/O.
+	if refusal := refuseUnsupportedFlags(ctx, provider); refusal != nil {
+		return refusal
+	}
+
+	// The same score rules `list` applies. Declaring the four flags without
+	// this is what would land three of them accepted and silently ignored.
+	if invalid := validateScoreFlags(ctx); invalid != nil {
+		return invalid
+	}
+	// After refuseUnsupportedFlags, so a cloud that cannot serve a placement
+	// figure at all names that rather than naming --offline. Every cloud that
+	// can serve one fetches it live, so the conflict holds on all of them.
+	if invalid := refuseScoresUnderOffline(ctx); invalid != nil {
+		return invalid
+	}
+	if invalid := requireScoresToSortByThem(ctx, sortKey); invalid != nil {
+		return invalid
+	}
+
+	workload, err := recommendWorkload(ctx)
+	if err != nil {
+		return err
+	}
+
+	return execRecommend(ctx, execCtx, provider, workload,
+		cloud.SortOrder{Key: sortKey, Descending: strings.EqualFold(ctx.String(flagOrder), orderDesc)},
+		outputFormat, output)
+}
+
+// recommendOutputFormats is the --output vocabulary a ranked page can render:
+// every format `list` offers except number.
+//
+// number is the one that cannot describe a recommendation — it prints a single
+// savings percent, and a ranked page is several rows with several discounts.
+// The other four each render the same columns, so a caller can pipe a
+// recommendation into the same tools they pipe a listing into. Until this
+// landed, `recommend --output csv` was refused with "output must be table or
+// json" while the identical flag on `list` rendered a page, which made --output
+// the one flag whose accepted values depended on which command it was given on.
+var recommendOutputFormats = []string{outputText, outputJSON, outputTable, outputCSV}
+
+// validateRecommendOutput rejects a format this command cannot render, and says
+// where number lives rather than only that it is wrong.
+func validateRecommendOutput(format string) error {
+	if slices.Contains(recommendOutputFormats, format) {
+		return nil
+	}
+
+	if format == outputNumber {
+		return fmt.Errorf("%w: --%s %s belongs to `spotinfo %s`: one savings percent cannot describe a ranked page",
+			cloud.ErrInvalidArgument, flagOutput, outputNumber, listCommandName)
+	}
+
+	return fmt.Errorf("%w: unknown output format %q, want one of %s",
+		cloud.ErrInvalidArgument, format, strings.Join(recommendOutputFormats, "|"))
+}
+
+// requireRecommendFlags rejects a request that omits one of the three
+// constraints every recommendation needs, naming the flags rather than the wire
+// fields they become.
+//
+// urfave/cli's own Required check is not used for these. It prints the entire
+// help page to stdout before returning the error, so `spotinfo recommend >
+// out.json` produced a file containing a help page and an exit code of 1, and
+// the message named only the first missing flag's declaration order rather than
+// what the caller should add.
+func requireRecommendFlags(ctx *cli.Context) error {
+	var missing []string
+	for _, name := range []string{flagArchitecture, flagMinVCPU, flagMinMemoryGiB} {
+		if !lineageIsSet(ctx, name) {
+			missing = append(missing, "--"+name)
+		}
+	}
+
+	if len(missing) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("%w: %s %s required; every recommendation needs an architecture and a size floor",
+		cloud.ErrInvalidArgument, strings.Join(missing, ", "), plural(len(missing), "is", "are"))
+}
+
+func plural(count int, singular, multiple string) string {
+	if count == 1 {
+		return singular
+	}
+
+	return multiple
+}
+
+// resolveProviderForRecommend applies the fixed failure order: an unrecognised
+// --cloud is INVALID_ARGUMENT, a recognised but disabled provider is
+// DATA_UNAVAILABLE. The capability check belongs to the chosen policy, so it
+// runs after the workload is known.
+func resolveProviderForRecommend(ctx *cli.Context, registry providerRegistry) (cloud.Provider, error) {
+	id, err := providerID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return registry.Get(id)
+}
+
+// recommendWorkload resolves the policy.
+//
+// The default is cost on every cloud, and the same value over MCP. It used to
+// depend on the provider — web where risk was published, cost where it was not —
+// which meant the same question returned a different document depending on which
+// cloud answered it, and a different one again on the other surface. cost is
+// also the only policy every cloud can serve honestly: an interruption ceiling
+// is a claim a provider without risk data cannot make.
+func recommendWorkload(ctx *cli.Context) (cloud.Workload, error) {
+	value := strings.TrimSpace(lineageString(ctx, flagWorkload))
+	if value == "" {
+		return cloud.WorkloadCost, nil
+	}
+
+	return cloud.ParseWorkload(value)
+}
+
+// foldVocabulary normalises a fixed-vocabulary flag value the way the neutral
+// parsers in internal/cloud do, so the same spelling is accepted on both
+// commands. It normalises only; an unrecognised value is still rejected
+// downstream, with that path's own error type.
+func foldVocabulary(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+// validCeiling reports whether a --max-price value can act as a price ceiling.
+//
+// Both non-finite values have to be named explicitly. NaN fails every
+// comparison, so `ceiling <= 0` alone lets it through as a set-but-unenforceable
+// ceiling; +Inf passes that check too and would be stored raw as a ceiling no
+// price can exceed, making the filter a silent no-op. The same three terms guard
+// the flag on `list` — see validateListFlags.
+func validCeiling(ceiling float64) bool {
+	return !math.IsNaN(ceiling) && !math.IsInf(ceiling, 0) && ceiling > 0
+}
+
+// sortRecommendations orders the ranked page for presentation.
+//
+// Selection is not affected: which candidates appear is decided by the canonical
+// ranking policy, published in ranking_policy, and Rank keeps naming each row's
+// position in it. A row labelled rank 3 printed first is honest; renumbering
+// would be a claim about the policy that is not true. The sort is applied here
+// rather than through Query.Sort because the recommender re-sorts every
+// candidate by that policy, which would make the key a silent no-op.
+//
+// An unset key leaves the policy order alone.
+func sortRecommendations(recommendations []cloud.RecommendationDTO, order cloud.SortOrder) error {
+	if order.Key == "" {
+		if order.Descending {
+			slices.Reverse(recommendations)
+		}
+
+		return nil
+	}
+
+	compare, err := recommendationComparator(order.Key)
+	if err != nil {
+		return err
+	}
+
+	slices.SortStableFunc(recommendations, func(left, right cloud.RecommendationDTO) int {
+		return compare(&left, &right, order.Descending)
+	})
+
+	return nil
+}
+
+// requireScoresToSortByThem refuses `--sort score` on a page whose placement
+// figures it could not order.
+//
+// The ranked page publishes a placement figure now, so the key is no longer
+// meaningless — but only for a regional one fetched by --with-score. There are
+// two ways to ask for a sort that would order nothing, and both exit 0 having
+// done exactly that, so both are refused as companion rules rather than as an
+// unsupported key: the message then says what to change.
+//
+//   - without --with-score, every row's figure is absent and compareOptional
+//     sorts them all equal
+//   - with --az, every row carries zone figures and no regional one, which is
+//     the only figure comparePlacements orders by
+//
+// Both commands apply it. `list` reaches its placement capability through
+// listCapabilityRequest, which treats a score sort as a score request — but
+// that is a capability check, not an acquisition, so it refuses only a cloud
+// that publishes no score at all. On AWS it passed and the sort then ordered by
+// a figure nothing had fetched.
+func requireScoresToSortByThem(ctx *cli.Context, key cloud.SortKey) error {
+	if key != cloud.SortByPlacementScore {
+		return nil
+	}
+
+	if !lineageBool(ctx, flagWithScore) {
+		return fmt.Errorf("%w: --%s %s needs --%s, which is what fetches the placement figures it orders by",
+			cloud.ErrInvalidArgument, flagSort, sortScore, flagWithScore)
+	}
+
+	// Keyed off --az rather than off the kind: neither kind publishes a regional
+	// figure once zone detail was asked for, so both clouds have the same hole.
+	if lineageBool(ctx, flagAZ) {
+		return fmt.Errorf("%w: --%s %s cannot be combined with --%s: only a regional placement figure "+
+			"orders a page, and --%s asks for one figure per zone instead",
+			cloud.ErrInvalidArgument, flagSort, sortScore, flagAZ, flagAZ)
+	}
+
+	return nil
+}
+
+// recommendationComparison orders two rows in the direction the caller asked
+// for.
+//
+// The direction is an argument rather than something the caller applies by
+// flipping an ascending comparison, because flipping inverts how an absent
+// figure is placed along with everything else: `--order desc` put every row a
+// provider published no figure for *first*, ahead of the best measured one,
+// which is the one position compareOptional exists to keep it out of.
+type recommendationComparison func(left, right *cloud.RecommendationDTO, descending bool) int
+
+// recommendationComparator resolves a neutral sort key against the fields a
+// recommendation publishes.
+func recommendationComparator(key cloud.SortKey) (recommendationComparison, error) {
+	switch key {
+	case cloud.SortByMachine:
+		return func(left, right *cloud.RecommendationDTO, descending bool) int {
+			return orient(cmp.Compare(left.Machine, right.Machine), descending)
+		}, nil
+	case cloud.SortByRegion:
+		return func(left, right *cloud.RecommendationDTO, descending bool) int {
+			return orient(cmp.Compare(left.Region, right.Region), descending)
+		}, nil
+	case cloud.SortByPrice:
+		return comparePrices, nil
+	case cloud.SortBySavings:
+		return func(left, right *cloud.RecommendationDTO, descending bool) int {
+			return compareOptional(left.SavingsPercent, right.SavingsPercent, descending)
+		}, nil
+	case cloud.SortByRisk:
+		return func(left, right *cloud.RecommendationDTO, descending bool) int {
+			return compareOptional(left.Risk.MaxPercent, right.Risk.MaxPercent, descending)
+		}, nil
+	case cloud.SortByPlacementScore:
+		return comparePlacements, nil
+	default:
+		return nil, fmt.Errorf("%w: unknown sort %q", cloud.ErrInvalidArgument, key)
+	}
+}
+
+// orient applies the sort direction to a comparison of two figures that are
+// both present. A tie stays a tie in either direction, so a stable sort still
+// leaves the ranking policy's own order among equals alone.
+func orient(result int, descending bool) int {
+	if descending {
+		return -result
+	}
+
+	return result
+}
+
+// comparePrices orders the fixed-point wire amounts numerically. They are
+// nine-decimal strings, so a lexicographic comparison would sort 10.000000000
+// below 2.000000000.
+//
+// The shared candidate block types the amount as nullable because `list`
+// publishes rows AWS has no price for. A recommendation never carries one —
+// accepts() drops a price-less candidate before ranking — so an absent amount
+// is treated the same as an unparsable one rather than given an order.
+func comparePrices(left, right *cloud.RecommendationDTO, descending bool) int {
+	if left.SpotUSDPerHour == nil || right.SpotUSDPerHour == nil {
+		return 0
+	}
+
+	leftAmount, leftErr := cloud.ParseMoney(*left.SpotUSDPerHour)
+	rightAmount, rightErr := cloud.ParseMoney(*right.SpotUSDPerHour)
+	if leftErr != nil || rightErr != nil {
+		return 0
+	}
+
+	return orient(cmp.Compare(leftAmount.Nanos(), rightAmount.Nanos()), descending)
+}
+
+// comparePlacements orders the ranked page by its regional placement figure.
+//
+// The branch is chosen by the kind the page carries, and each is compared on
+// its own scale. A page cannot mix kinds — one answer comes from one cloud —
+// which is what makes comparing within a branch safe; there is deliberately no
+// conversion between them, because a shared number is one no vendor published.
+//
+// Only the regional figure orders a page. Under --az a candidate carries one
+// observation per zone and no regional one, and picking a maximum or a mean
+// across zones would be this tool inventing a regional figure the provider
+// declined to give — so that combination is refused outright by
+// requireScoresToSortByThem rather than accepted and left ordering nothing.
+func comparePlacements(left, right *cloud.RecommendationDTO, descending bool) int {
+	if left.RegionScore != nil || right.RegionScore != nil {
+		return compareOptional(left.RegionScore, right.RegionScore, descending)
+	}
+
+	return compareOptional(left.RegionObtainability, right.RegionObtainability, descending)
+}
+
+// compareOptional orders a figure a provider may not publish. An absent value
+// sorts last under either order, because "not measured" is not a position on
+// the scale — which is why the direction is applied to the two present values
+// here rather than by flipping the whole comparison, and why a page sorted
+// descending no longer opens with every row nobody measured.
+func compareOptional[T cmp.Ordered](left, right *T, descending bool) int {
+	switch {
+	case left == nil && right == nil:
+		return 0
+	case left == nil:
+		return 1
+	case right == nil:
+		return -1
+	default:
+		return orient(cmp.Compare(*left, *right), descending)
+	}
+}
+
+// execRecommend answers with the provider-neutral engine and the
+// spotinfo.recommend/v3 report.
+func execRecommend(ctx *cli.Context, execCtx context.Context, provider cloud.Provider,
+	workload cloud.Workload, order cloud.SortOrder, outputFormat string, output io.Writer,
+) error {
+	request, err := neutralRecommendRequest(ctx, provider.ID(), workload)
+	if err != nil {
+		return err
+	}
+
+	provider, err = withLiveRisk(ctx, provider, request)
+	if err != nil {
+		return err
+	}
+
+	provider, err = withPlacement(ctx, provider, request)
+	if err != nil {
+		return err
+	}
+
+	// Last, so a live price path is wired onto whatever the two authenticated
+	// lookups above returned rather than replacing it. All three copy the
+	// provider, so the registry's own stays untouched.
+	provider = withGCPPrices(ctx, provider)
+
+	report, err := cloud.Recommend(execCtx, provider, request)
+	if err != nil {
+		return err
+	}
+
+	if err := sortRecommendations(report.Recommendations, order); err != nil {
+		return err
+	}
+
+	return renderRecommendation(outputFormat, report, output)
+}
+
+// renderRecommendation writes the ranked page in the requested format.
+//
+// Only the JSON form carries the request echo, the ranking policy and the
+// provenance: it is the document a program reads, which is why it takes the
+// whole report where the three rendered formats take the rows.
+func renderRecommendation(format string, report *cloud.RecommendReport, output io.Writer) error {
+	switch format {
+	case outputTable:
+		return writeNeutralRecommendationTable(report.Recommendations, output)
+	case outputText:
+		return writeRecommendationText(report.Recommendations, output)
+	case outputCSV:
+		return writeRecommendationCSV(report.Recommendations, output)
+	case outputJSON:
+		return writeJSONReport(report, output)
+	default:
+		// Unreachable: validateRecommendOutput rejects an unknown format before
+		// any acquisition. Kept so a format added to the vocabulary and not here
+		// fails loudly instead of silently printing nothing.
+		return fmt.Errorf("%w: unsupported output format %q", cloud.ErrInvalidArgument, format)
+	}
+}
+
+// recommendationColumn pairs the heading the csv form prints with the key the
+// text form prints.
+//
+// The keys are the wire field names of spotinfo.recommend/v3 rather than the
+// headings lower-cased: "USD/Hour" is a good column title and a poor shell
+// variable, and a caller who already reads the JSON document should not have to
+// learn a second spelling for the same value.
+type recommendationColumn struct{ heading, key string }
+
+// The ranked page's wire field names, from spotinfo.recommend/v3. They are
+// constants because they are a published vocabulary: the text form prints them
+// as keys and the JSON document as field names, and the two must not drift.
+const (
+	keyRank           = "rank"
+	keyArchitecture   = "architecture"
+	keyVCPU           = "vcpu"
+	keyMemoryGiB      = "memory_gib"
+	keySpotUSDPerHour = "spot_usd_per_hour"
+	keySavingsPercent = "savings_percent"
+	keyRisk           = "risk"
+	keyRationaleCodes = "rationale_codes"
+)
+
+// recommendationColumns is the ranked page's column set for the two formats that
+// label their values. The placement column is appended when the page carries
+// one, so a recommendation that asked for no placement figure has no empty
+// column in either format — the same rule the table follows.
+var recommendationColumns = []recommendationColumn{
+	{heading: rankColumn, key: keyRank},
+	{heading: cloudColumn, key: flagCloud},
+	{heading: regionColumn, key: flagRegion},
+	{heading: machineColumn, key: flagMachine},
+	{heading: architectureColumn, key: keyArchitecture},
+	{heading: vCPUColumn, key: keyVCPU},
+	{heading: memoryColumn, key: keyMemoryGiB},
+	{heading: priceColumn, key: keySpotUSDPerHour},
+	{heading: savingsColumn, key: keySavingsPercent},
+	{heading: riskColumn, key: keyRisk},
+	{heading: whyColumn, key: keyRationaleCodes},
+}
+
+// recommendationCells renders one row's values, in recommendationColumns order.
+//
+// The two machine-readable formats publish the amount and the discount as the
+// report does — the full fixed-point price string and a bare percent — rather
+// than the table's truncated and suffixed cells. A person reads a column width;
+// a program reads the number. An absent figure prints absentValue, never a
+// zero: a price nobody published is not a price of zero.
+func recommendationCells(recommendation *cloud.RecommendationDTO) []string {
+	price := absentValue
+	if recommendation.SpotUSDPerHour != nil {
+		price = *recommendation.SpotUSDPerHour
+	}
+
+	savings := absentValue
+	if recommendation.SavingsPercent != nil {
+		savings = strconv.FormatFloat(*recommendation.SavingsPercent, 'f', -1, 64)
+	}
+
+	return []string{
+		strconv.Itoa(recommendation.Rank), string(recommendation.Cloud),
+		string(recommendation.Region), string(recommendation.Machine), string(recommendation.Architecture),
+		strconv.Itoa(recommendation.VCPU),
+		strconv.FormatFloat(recommendation.MemoryGiB, 'f', -1, 64),
+		price, savings, riskDisplay(&recommendation.Risk),
+		// Space-separated, not comma-separated: the csv form would otherwise
+		// quote every row's last field for a list that is one value to a reader.
+		strings.Join(recommendation.RationaleCodes, " "),
+	}
+}
+
+// writeRecommendationText prints one key=value line per ranked row, the shape
+// `list` already prints: a page a shell filters with grep and cut.
+func writeRecommendationText(recommendations []cloud.RecommendationDTO, output io.Writer) error {
+	columns, rows := recommendationRows(recommendations)
+
+	for _, row := range rows {
+		pairs := make([]string, len(row))
+		for i, value := range row {
+			pairs[i] = columns[i].key + "=" + value
+		}
+
+		if _, err := fmt.Fprintln(output, strings.Join(pairs, ", ")); err != nil {
+			return fmt.Errorf("write recommendation output: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// writeRecommendationCSV prints the ranked page as comma-separated rows with a
+// header, for a spreadsheet or a script.
+func writeRecommendationCSV(recommendations []cloud.RecommendationDTO, output io.Writer) error {
+	columns, rows := recommendationRows(recommendations)
+
+	headings := make([]string, len(columns))
+	for i, column := range columns {
+		headings[i] = column.heading
+	}
+
+	writer := csv.NewWriter(output)
+	if err := writer.Write(headings); err != nil {
+		return fmt.Errorf("write recommendation output: %w", err)
+	}
+
+	if err := writer.WriteAll(rows); err != nil {
+		return fmt.Errorf("write recommendation output: %w", err)
+	}
+
+	return nil
+}
+
+// recommendationRows builds the columns and the cells both label-bearing formats
+// share, so text and csv cannot drift apart.
+func recommendationRows(recommendations []cloud.RecommendationDTO) (columns []recommendationColumn, rows [][]string) {
+	placement := placementColumn(recommendations)
+
+	columns = slices.Clone(recommendationColumns)
+	if placement.width > 0 {
+		columns = append(columns, recommendationColumn{heading: placement.title, key: placementKey(placement.title)})
+	}
+
+	rows = make([][]string, 0, len(recommendations))
+
+	for i := range recommendations {
+		cells := recommendationCells(&recommendations[i])
+		if placement.width > 0 {
+			cells = append(cells, placement.cells[i])
+		}
+
+		rows = append(rows, cells)
+	}
+
+	return columns, rows
+}
+
+// placementKey turns a placement column heading into a text-form key:
+// "Placement Score" becomes placement_score, "Obtainability" obtainability. The
+// measurement stays in the name on purpose — an AWS score is an integer 1-10
+// and a GCP obtainability a probability, and one key for both would tell a
+// reader they are the same number.
+func placementKey(title string) string {
+	return strings.ReplaceAll(strings.ToLower(title), " ", "_")
+}
+
+// neutralRecommendRequest maps CLI flags onto the neutral request. Values
+// outside the neutral vocabulary are rejected here; bounds and combinations are
+// validated by the request itself, before any provider is queried.
+func neutralRecommendRequest(ctx *cli.Context, id cloud.ProviderID, workload cloud.Workload) (*cloud.RecommendRequest, error) {
+	architecture, err := cloud.ParseArchitecture(ctx.String(flagArchitecture))
+	if err != nil {
+		return nil, err
+	}
+
+	instanceOS, err := cloud.ParseOperatingSystem(lineageString(ctx, flagOS))
+	if err != nil {
+		return nil, err
+	}
+
+	budget := ctx.Float64(flagMaxPrice)
+	if ctx.IsSet(flagMaxPrice) && !validCeiling(budget) {
+		return nil, fmt.Errorf("%w: --%s must be a positive USD machine-hour price",
+			cloud.ErrInvalidArgument, flagMaxPrice)
+	}
+
+	// IsSet, not a zero check: an explicit --top 0 must reach the request
+	// validator and be rejected, exactly as it is on the v1 path, rather than
+	// being read as "unset" and silently answered with the default.
+	top := cloud.DefaultTop
+	if ctx.IsSet(flagTop) {
+		top = ctx.Int(flagTop)
+	}
+
+	request := &cloud.RecommendRequest{
+		Cloud:        id,
+		Machine:      machineFilter(ctx),
+		Architecture: architecture,
+		OS:           instanceOS,
+		Workload:     workload,
+		Regions:      neutralRegions(lineageStringSlice(ctx, flagRegion)),
+		MinMemoryGiB: float64(lineageInt(ctx, flagMinMemoryGiB)),
+		MinVCPU:      lineageInt(ctx, flagMinVCPU),
+		Top:          top,
+		// Carried on the request, not applied afterwards: RecommendRequest
+		// derives its capability needs from the Query this becomes, so a cloud
+		// that publishes no placement figure is refused before acquisition
+		// rather than answering with an empty column.
+		Placement: placementRequest(ctx),
+	}
+	if budget > 0 {
+		// A ceiling, not a measured price: --max-price is routinely a monthly figure
+		// divided by 720, which carries more fractional digits than the scale.
+		// Truncating can only tighten it, where MoneyFromFloat would reject the
+		// request outright — and the v1 path already accepts that same value.
+		ceiling, err := cloud.MoneyCeilingFromFloat(budget)
+		if err != nil {
+			return nil, err
+		}
+		request.MaxPrice = &ceiling
+	}
+
+	return request, nil
+}
+
+// neutralRegions trims and deduplicates repeated --region flags. It rejects
+// nothing: an empty or contradictory region list is the request validator's
+// job, so both CLI schemas report it with their own error vocabulary.
+func neutralRegions(regions []string) []cloud.Region {
+	unique := make([]cloud.Region, 0, len(regions))
+	for _, region := range regions {
+		trimmed := cloud.Region(strings.TrimSpace(region))
+		if !slices.Contains(unique, trimmed) {
+			unique = append(unique, trimmed)
+		}
+	}
+	slices.Sort(unique)
+
+	return unique
+}
+
+func writeJSONReport(report any, output io.Writer) error {
+	encoded, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return fmt.Errorf("render recommendation JSON: %w", err)
+	}
+	if _, err := fmt.Fprintln(output, string(encoded)); err != nil {
+		return fmt.Errorf("write recommendation output: %w", err)
+	}
+
+	return nil
+}
+
+// writeNeutralRecommendationTable renders the ranked page. Risk is printed as
+// its status when no figure was published, so a cost recommendation never reads
+// as an interruption claim.
+func writeNeutralRecommendationTable(recommendations []cloud.RecommendationDTO, output io.Writer) error {
+	// The region and machine columns are sized from the rows rather than fixed:
+	// an Azure size name runs to twenty-odd characters where an AWS instance
+	// type takes ten, and a fixed width lets the longer one push every later
+	// column out of alignment.
+	regionWidth, machineWidth := len("REGION"), len("MACHINE")
+	for i := range recommendations {
+		regionWidth = max(regionWidth, len(recommendations[i].Region))
+		machineWidth = max(machineWidth, len(recommendations[i].Machine))
+	}
+
+	placement := placementColumn(recommendations)
+
+	header := fmt.Sprintf("RANK  CLOUD  %-*s  %-*s  ARCHITECTURE  vCPU  MEMORY GiB  USD/HOUR    SAVINGS  RISK          %sWHY",
+		regionWidth, "REGION", machineWidth, "MACHINE", placement.cell(placement.title))
+	if _, err := fmt.Fprintln(output, header); err != nil {
+		return fmt.Errorf("write recommendation output: %w", err)
+	}
+
+	decimals := priceDecimals(recommendations)
+	for i, recommendation := range recommendations {
+		if _, err := fmt.Fprintf(output, "%4d  %-5s  %-*s  %-*s  %-12s  %4d  %10.1f  %-10s  %7s  %-12s  %s%s\n",
+			recommendation.Rank, recommendation.Cloud,
+			regionWidth, recommendation.Region, machineWidth, recommendation.Machine,
+			recommendation.Architecture, recommendation.VCPU, recommendation.MemoryGiB,
+			humanPrice(recommendation.SpotUSDPerHour, decimals), savingsDisplay(recommendation.SavingsPercent),
+			riskDisplay(&recommendation.Risk),
+			placement.cell(placement.cells[i]),
+			strings.Join(recommendation.RationaleCodes, ",")); err != nil {
+			return fmt.Errorf("write recommendation output: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// rankedPlacements is the ranked page's placement column, or nothing at all.
+//
+// A page that asked for no placement figure has no column, which is what keeps
+// a recommendation that asked for none rendering exactly as it always has. The
+// values are the undecorated ones: this table is hand-padded, and an emoji is
+// two columns wide in some terminals and one in others.
+type rankedPlacements struct {
+	title string
+	cells []string
+	width int
+}
+
+// cell renders one value at the column's width, or nothing when the page has no
+// placement column at all.
+func (p rankedPlacements) cell(value string) string {
+	if p.width == 0 {
+		return ""
+	}
+
+	return fmt.Sprintf("%-*s  ", p.width, value)
+}
+
+func placementColumn(recommendations []cloud.RecommendationDTO) rankedPlacements {
+	column := rankedPlacements{cells: make([]string, len(recommendations))}
+
+	var kind cloud.PlacementKind
+
+	present := false
+
+	for i := range recommendations {
+		published := &recommendations[i].PlacementDTO
+		column.cells[i] = rankedPlacementCell(published)
+
+		if column.cells[i] != absentValue {
+			present = true
+		}
+		if kind == "" {
+			kind = rankedPlacementKind(published)
+		}
+	}
+
+	if !present {
+		return rankedPlacements{cells: column.cells}
+	}
+
+	column.title = strings.ToUpper(determineScoreHeader(scoreTypeInfo{kind: kind, hasScores: true}))
+	column.width = len(column.title)
+
+	for _, cell := range column.cells {
+		column.width = max(column.width, len(cell))
+	}
+
+	return column
+}
+
+// rankedPlacementKind names the measurement a published row carries, so the
+// column can be titled after it rather than after whichever kind came first.
+func rankedPlacementKind(published *cloud.PlacementDTO) cloud.PlacementKind {
+	switch {
+	case published.RegionScore != nil || len(published.ZoneScores) > 0:
+		return cloud.PlacementKindPlacementScore
+	case published.RegionObtainability != nil || len(published.ZoneObtainability) > 0:
+		return cloud.PlacementKindObtainability
+	default:
+		return ""
+	}
+}
+
+// rankedPlacementCell renders one row's placement figure, on its own kind's
+// scale and never converted onto another's.
+func rankedPlacementCell(published *cloud.PlacementDTO) string {
+	switch {
+	case published.RegionScore != nil:
+		return strconv.Itoa(*published.RegionScore)
+	case published.RegionObtainability != nil:
+		return strconv.FormatFloat(*published.RegionObtainability, 'f', obtainabilityDecimals, 64)
+	case len(published.ZoneScores) > 0:
+		return zonedCells(published.ZoneScores, strconv.Itoa)
+	case len(published.ZoneObtainability) > 0:
+		return zonedCells(published.ZoneObtainability, func(value float64) string {
+			return strconv.FormatFloat(value, 'f', obtainabilityDecimals, 64)
+		})
+	case published.PlacementStatus == cloud.PlacementStatusUnavailable:
+		return string(cloud.PlacementStatusUnavailable)
+	default:
+		return absentValue
+	}
+}
+
+// zonedCells renders a zone-keyed figure in zone order, matching what `list`
+// prints for the same observation.
+func zonedCells[V any](values map[string]V, render func(V) string) string {
+	cells := make([]string, 0, len(values))
+	for _, zone := range slices.Sorted(maps.Keys(values)) {
+		cells = append(cells, zone+":"+render(values[zone]))
+	}
+
+	return strings.Join(cells, ",")
+}
+
+// savingsDisplay renders the discount against on-demand.
+//
+// The figure was computed and published in the v2 JSON from the start, but the
+// table never had a column for it: a GCP or Azure recommendation showed an
+// absolute hourly price where the AWS table showed price *and* savings, so the
+// one number people compare clouds on was the one the table dropped. Absent
+// savings prints as "-" rather than as 0% — a provider that publishes no
+// on-demand price has not measured a discount of nothing.
+func savingsDisplay(savings *float64) string {
+	if savings == nil {
+		return "-"
+	}
+
+	return fmt.Sprintf("%.0f%%", *savings)
+}
+
+// priceDecimals picks one decimal count for the whole price column: the fewest
+// that keeps every amount in the set exact, and never fewer than four.
+//
+// The wire format is a nine-decimal string and stays that way — the schema
+// pins the pattern and a consumer parses it. But a person reading the table saw
+// GCP's 0.042496000 beside AWS's 0.0502 in the same column family. Trimming each
+// amount independently traded that for a ragged column (0.027894 above 0.02862),
+// so the width is decided once, from all the rows.
+func priceDecimals(recommendations []cloud.RecommendationDTO) int {
+	const minDecimals = 4
+
+	decimals := minDecimals
+	for i := range recommendations {
+		if recommendations[i].SpotUSDPerHour == nil {
+			continue
+		}
+		amount := *recommendations[i].SpotUSDPerHour
+
+		dot := strings.IndexByte(amount, '.')
+		if dot < 0 {
+			continue
+		}
+
+		decimals = max(decimals, len(strings.TrimRight(amount, "0"))-dot-1)
+	}
+
+	return decimals
+}
+
+// humanPrice renders a fixed-point amount at the column's decimal count. An
+// absent amount prints as "-", the way savingsDisplay prints an absent
+// discount: a price nobody published is not a price of zero.
+func humanPrice(amount *string, decimals int) string {
+	if amount == nil {
+		return "-"
+	}
+
+	dot := strings.IndexByte(*amount, '.')
+	if dot < 0 || len(*amount) < dot+1+decimals {
+		return *amount
+	}
+
+	return (*amount)[:dot+1+decimals]
+}
+
+func riskDisplay(risk *cloud.RiskDTO) string {
+	if risk.Label != nil && *risk.Label != "" {
+		return *risk.Label
+	}
+
+	return string(risk.Status)
+}

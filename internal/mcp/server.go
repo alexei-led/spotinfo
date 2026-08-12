@@ -5,48 +5,51 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"spotinfo/internal/spot"
+	"spotinfo/internal/cloud"
 )
 
-// Constants for MCP server configuration
-const (
-	defaultMaxInterruptionRateParam = 100
-	defaultLimitParam               = 10
-	maxLimitParam                   = 50
-	totalMCPTools                   = 2
-	maxScoreValue                   = 10
-	maxScoreTimeoutSeconds          = 300
-)
+// totalMCPTools is the published tool count: one per CLI command, plus the
+// region enumeration neither command covers.
+const totalMCPTools = 3
 
-// spotClient interface defined close to consumer for testing (following codebase patterns)
-type spotClient interface {
-	GetSpotSavings(ctx context.Context, opts ...spot.GetSpotSavingsOption) ([]spot.Advice, error)
-	// DataSource reports whether the advice came from live AWS feeds or the
-	// embedded snapshot, so the response can say which rather than guess.
-	DataSource() string
+// providerRegistry is the slice of the compiled provider registry this server
+// needs, defined next to its consumer. Tools are registered against the neutral
+// providers it hands out rather than against a provider SDK.
+//
+// Get takes the request's data policy because one server answers many clients:
+// a snapshot-only question from one of them must not put the process into
+// snapshot-only mode for the rest. The composition root decides how to build
+// and reuse a client per policy; this side only states which one it needs.
+type providerRegistry interface {
+	Get(id cloud.ProviderID, policy cloud.FetchPolicy) (cloud.Provider, error)
+	Registered() []cloud.ProviderID
 }
 
 // Server wraps the MCP server with spotinfo-specific configuration
 type Server struct {
-	mcpServer  *server.MCPServer
-	logger     *slog.Logger
-	spotClient spotClient
+	mcpServer *server.MCPServer
+	logger    *slog.Logger
+	providers providerRegistry
 }
 
 // Config holds MCP server configuration
 type Config struct {
-	Logger     *slog.Logger
-	SpotClient spotClient
-	Version    string
-	Transport  string
-	Port       string
+	Logger    *slog.Logger
+	Providers providerRegistry
+	Version   string
+	Transport string
+	Port      string
 }
 
 // NewServer creates a new MCP server instance with spotinfo tools
+//
+//nolint:gocritic // Config is the public constructor shape; a pointer would break every caller to save one startup copy.
 func NewServer(cfg Config) (*Server, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -61,9 +64,9 @@ func NewServer(cfg Config) (*Server, error) {
 	)
 
 	s := &Server{
-		mcpServer:  mcpServer,
-		logger:     cfg.Logger,
-		spotClient: cfg.SpotClient,
+		mcpServer: mcpServer,
+		logger:    cfg.Logger,
+		providers: cfg.Providers,
 	}
 
 	// Register tools
@@ -72,71 +75,54 @@ func NewServer(cfg Config) (*Server, error) {
 	return s, nil
 }
 
-// registerTools registers all spotinfo MCP tools
+// registerTools registers all spotinfo MCP tools. Each mirrors the CLI and
+// takes the cloud as an argument, so the same question asked either way is the
+// same document.
 func (s *Server) registerTools() {
 	s.logger.Debug("registering MCP tools")
 
-	// Register find_spot_instances tool - combines search and lookup functionality
-	findSpotInstancesTool := mcp.NewTool("find_spot_instances",
-		mcp.WithDescription("Search for AWS EC2 Spot Instance options based on requirements. Returns pricing, savings, and interruption data."),
-		mcp.WithArray(argRegions,
-			mcp.Description("AWS regions to search (e.g., ['us-east-1', 'eu-west-1']). Use ['all'] or omit to search all regions"),
-			mcp.Items(map[string]any{"type": "string"})),
-		mcp.WithString(argInstanceTypes,
-			mcp.Description("Instance type pattern - exact type (e.g., 'm5.large') or pattern (e.g., 't3.*', 'm5.*')")),
-		mcp.WithNumber(argMinVCPU,
-			mcp.Description("Minimum number of vCPUs required"),
-			mcp.DefaultNumber(0)),
-		mcp.WithNumber(argMinMemoryGB,
-			mcp.Description("Minimum memory in gigabytes"),
-			mcp.DefaultNumber(0)),
-		mcp.WithNumber(argMaxPricePerHour,
-			mcp.Description("Maximum spot price per hour in USD"),
-			mcp.DefaultNumber(0)),
-		mcp.WithNumber(argMaxInterruptionRate,
-			mcp.Description("Maximum acceptable interruption rate percentage (0-100)"),
-			mcp.DefaultNumber(defaultMaxInterruptionRateParam)),
-		mcp.WithString(argSortBy,
-			mcp.Description("Sort results by: 'price' (cheapest first), 'reliability' (lowest interruption first), 'savings' (highest savings first), 'score' (highest score first)"),
-			mcp.DefaultString(sortByReliability)),
-		mcp.WithNumber(argLimit,
-			mcp.Description("Maximum number of results to return"),
-			mcp.DefaultNumber(defaultLimitParam),
-			mcp.Max(maxLimitParam)),
-		mcp.WithBoolean(argWithScore,
-			mcp.Description("Include AWS spot placement scores (experimental)"),
-			mcp.DefaultBool(false)),
-		mcp.WithNumber(argMinScore,
-			mcp.Description("Filter: minimum spot placement score (1-10)"),
-			mcp.DefaultNumber(0),
-			mcp.Min(0),
-			mcp.Max(maxScoreValue)),
-		mcp.WithBoolean(argAZ,
-			mcp.Description("Request AZ-level scores instead of region-level (use with --with-score)"),
-			mcp.DefaultBool(false)),
-		mcp.WithNumber(argScoreTimeout,
-			mcp.Description("Timeout for score enrichment in seconds"),
-			mcp.DefaultNumber(spot.DefaultScoreTimeoutSeconds),
-			mcp.Min(1),
-			mcp.Max(maxScoreTimeoutSeconds)),
-	)
+	s.registerListTool()
+	s.registerRecommendTool()
+	s.registerRegionsTool()
 
-	findSpotInstancesHandler := NewFindSpotInstancesTool(s.spotClient, s.logger)
-	s.mcpServer.AddTool(findSpotInstancesTool, findSpotInstancesHandler.Handle)
+	s.logger.Info("MCP tools registered",
+		slog.Int("count", totalMCPTools),
+		slog.Any("providers", s.registeredProviders()))
+}
 
-	// Register list_spot_regions tool
-	// No arguments: the handler ignores the request and the underlying advisor
-	// feed carries no human-readable region names. An include_names boolean was
-	// advertised here with DefaultBool(true) but was never read by any handler,
-	// so clients were told of a parameter that did nothing.
-	listSpotRegionsTool := mcp.NewTool("list_spot_regions",
-		mcp.WithDescription("List all AWS regions where EC2 Spot Instances are available"),
-	)
+// Tools reports the tool definitions this server publishes, in stable name
+// order.
+//
+// It is exported for the vocabulary test in cmd/spotinfo: mcpArgName lives in
+// package main and cannot be imported here, so "every argument name is derived
+// from its CLI flag" has to be asserted from the side that owns the vocabulary,
+// against what this server actually registered rather than against a second
+// list that could drift from it.
+func (s *Server) Tools() []mcp.Tool {
+	registered := s.mcpServer.ListTools()
 
-	listSpotRegionsHandler := NewListSpotRegionsTool(s.spotClient, s.logger)
-	s.mcpServer.AddTool(listSpotRegionsTool, listSpotRegionsHandler.Handle)
+	tools := make([]mcp.Tool, 0, len(registered))
+	for _, name := range slices.Sorted(maps.Keys(registered)) {
+		tools = append(tools, registered[name].Tool)
+	}
 
-	s.logger.Info("MCP tools registered", slog.Int("count", totalMCPTools))
+	return tools
+}
+
+// registeredProviders names the clouds this binary was built to serve, for the
+// startup log. Registration is unconditional so the advertised tool surface does
+// not change with the data a binary happens to carry; a request for a cloud
+// whose snapshot is unusable reports why.
+//
+// It reports registration, not health, because providers are built on first use:
+// asking whether each one loads would decode every catalogue at startup, which
+// is exactly the cost the registry defers.
+func (s *Server) registeredProviders() []cloud.ProviderID {
+	if s.providers == nil {
+		return nil
+	}
+
+	return s.providers.Registered()
 }
 
 // ServeStdio starts the MCP server with stdio transport

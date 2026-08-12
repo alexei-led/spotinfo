@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alexei-led/spotinfo/schemas/recommend-v3-input.schema.json",
+  "title": "spotinfo.recommend/v3 input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["architecture", "min_vcpu", "min_memory_gib"],
+  "properties": {
+    "cloud": {
+      "type": "string",
+      "enum": ["aws", "gcp", "azure"],
+      "default": "aws"
+    },
+    "regions": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1,
+      "uniqueItems": true,
+      "default": ["all"]
+    },
+    "machine": {"type": "string", "default": ""},
+    "architecture": {"type": "string", "enum": ["x86_64", "arm64"]},
+    "os": {"type": "string", "enum": ["linux", "windows"], "default": "linux"},
+    "min_vcpu": {"type": "integer", "minimum": 1},
+    "min_memory_gib": {"type": "number", "exclusiveMinimum": 0},
+    "max_price": {"type": "number", "exclusiveMinimum": 0},
+    "workload": {"type": "string", "enum": ["cost", "web", "ci", "batch"], "default": "cost"},
+    "top": {"type": "integer", "minimum": 1, "maximum": 50, "default": 3},
+    "offline": {"type": "boolean", "default": false},
+    "refresh": {"type": "boolean", "default": false}
+  }
+}

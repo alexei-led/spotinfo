@@ -1,0 +1,7 @@
+Region,Machine,vCPU,Memory GiB,Savings over On-Demand,Risk,USD/Hour,Price Source,Placement Score
+us-east-1,m6i.large,2,8,72,<5%,0.0416,static,-
+us-west-2,m5.xlarge,4,16,65,5-10%,0.1234,live,8
+eu-west-1,t3.nano,2,0.5,60,10-15%,0.0016,static,-
+us-east-1,m5.large,2,8,68,<5%,0.034,static,us-east-1a:7*
+us-east-1,m5.large,2,8,68,<5%,0.036,static,us-east-1b:9*
+me-south-1,dl1.24xlarge,96,768,41,10-15%,-,-,-

@@ -1,164 +1,170 @@
-# AWS Spot Placement Scores
+# Placement figures
 
-## Overview
+`--with-score` asks a cloud how likely it is to *fulfil* a Spot request. That is a different
+question from "how likely is it to be interrupted", which is what the `RISK` column answers,
+and the two are never combined.
 
-AWS Spot Placement Scores provide insights into the likelihood of successfully launching Spot instances in different regions and availability zones. This feature helps DevOps engineers make data-driven decisions when selecting spot instances for cost optimization.
+Two clouds publish a placement figure, and they publish different measurements:
 
-## What are Spot Placement Scores?
+| Cloud   | Figure                | Scale                    | Where                       | Interface                                       |
+| ------- | --------------------- | ------------------------ | --------------------------- | ----------------------------------------------- |
+| `aws`   | Spot placement score  | integer **1-10**         | `list` and `recommend`      | `ec2:GetSpotPlacementScores`, GA                |
+| `gcp`   | Obtainability         | probability **0.0-1.0**  | `recommend` only            | `compute.advice.capacity`, **beta**             |
+| `azure` | none                  | —                        | —                           | published, but needs a subscription — not built |
 
-Spot Placement Scores are **1-10 ratings** provided by AWS that indicate:
-- **10**: Very high likelihood of successful spot instance launch
-- **1**: Very low likelihood of successful spot instance launch
+**They are never normalised onto a shared scale.** No vendor published a mapping between an
+AWS 1-10 score and a Google probability, so spotinfo does not invent one. Each figure carries
+its kind, and the column header follows the kind — `Placement Score (Regional)` against
+`Obtainability (Regional)` — because a reader who saw "Placement Score" over `0.83` would read
+it as a very bad score.
 
-The scores are calculated by AWS based on:
-- Current spot capacity availability
-- Historical demand patterns
-- Instance type popularity
-- Regional capacity distribution
+The rest of this page is about the AWS score. For obtainability, see
+[Cloud coverage](clouds.md#gcp) and [API reference](api-reference.md).
 
-## Critical Understanding: Contextual Scoring
+## What an AWS placement score is
 
-**🚨 Important**: Spot Placement Scores are **contextual** - they represent the likelihood of fulfilling your **entire request**, not individual instance types.
+An integer 1-10 from AWS:
+
+- **10**: very high likelihood of a successful Spot launch
+- **1**: very low likelihood
+
+AWS calculates it from current Spot capacity, historical demand, instance-type popularity and
+regional capacity distribution. It is a capacity signal, not a price and not an interruption
+rate.
+
+## Critical understanding: the score is contextual
+
+**The score describes your entire request, not one machine.** Ask about one instance type and
+AWS answers "can I fulfil only that"; ask about a family and it answers "can I fulfil any of
+these". The second is a different, usually easier, question.
 
 ```mermaid
 graph TD
-    A[AWS Spot Placement Score API] --> B{Request Type}
-    B -->|Single Instance| C[Score for t3.micro only<br/>Score: 3 🔴]
-    B -->|Multiple Types| D[Score for ALL types together<br/>t3.micro, t3.small, t3.medium<br/>Score: 9 🟢]
-    
-    C --> E[Limited flexibility<br/>Only one option]
-    D --> F[High flexibility<br/>Multiple fallback options]
-    
-    E --> G[Lower success probability]
-    F --> H[Higher success probability]
-    
-    style C fill:#ffcccc
-    style D fill:#ccffcc
-    style G fill:#ffcccc
-    style H fill:#ccffcc
+    A[AWS Spot Placement Score API] --> B{Request shape}
+    B -->|One machine| C[Score for that machine alone]
+    B -->|A family| D[Score for the whole set together]
+
+    C --> E[Limited flexibility<br/>one option]
+    D --> F[High flexibility<br/>fallback options]
+
+    E --> G[Lower fulfilment probability]
+    F --> H[Higher fulfilment probability]
 ```
 
-### Why Scores Differ by Query Context
+| Request                      | What AWS evaluates                        |
+| ---------------------------- | ----------------------------------------- |
+| `--machine '^t3\.micro$'`    | Can I fulfil **only** `t3.micro`?         |
+| `--machine '^t3\.'`          | Can I fulfil **any** `t3` machine?        |
 
-| Query Type | What AWS Evaluates | Example Score |
-|------------|-------------------|---------------|
-| `--type "t3.micro"` | Can I fulfill **only** t3.micro? | 3 🔴 (Limited options) |
-| `--type "t3.*"` | Can I fulfill **any** t3 instance type? | 9 🟢 (Flexible options) |
+The same machine scoring differently in the two queries is **expected**, not a bug. Widening
+the pattern gives AWS more ways to say yes.
 
-This is **expected behavior** - providing multiple instance types gives AWS more flexibility to fulfill your request.
+## Visual score indicators
 
-## Visual Score Indicators
+| Score range | Indicator | Meaning  |
+| ----------- | --------- | -------- |
+| 8-10        | 🟢        | Excellent |
+| 5-7         | 🟡        | Moderate  |
+| 1-4         | 🔴        | Poor      |
+| Unknown     | ❓        | No data   |
 
-`spotinfo` provides intuitive visual indicators for quick assessment:
+The emoji appear in `table` and `text` output only. `csv` carries the number without them, and
+`json` carries it as a plain integer, so a pipeline never has to strip an emoji.
 
-| Score Range | Indicator | Meaning | Recommendation |
-|-------------|-----------|---------|----------------|
-| 8-10 | 🟢 | Excellent | Highly recommended |
-| 5-7 | 🟡 | Moderate | Consider alternatives |
-| 1-4 | 🔴 | Poor | High risk of interruption |
-| Unknown | ❓ | No data | Proceed with caution |
+## Regional versus zone scores
 
-## Regional vs Availability Zone Scores
+**Regional** scores evaluate a whole region and suit capacity planning. The column header is
+`Placement Score (Regional)`.
 
-### Regional Scores
-- Evaluate placement likelihood across **entire regions**
-- Best for general capacity planning
-- Header: "Placement Score (Regional)"
+**Zone** scores evaluate one availability zone and suit precise placement. Add `--az`. The
+header becomes `Placement Score (AZ)` and each cell reads `us-east-1a:🟢 9`. A page carrying
+both kinds falls back to the generic header `Placement Score`.
 
-### AZ-Level Scores  
-- Evaluate placement likelihood for **specific availability zones**
-- Best for precise deployment targeting
-- Header: "Placement Score (AZ)"
-- Format: `us-east-1a:🟢 9`
+## Usage
 
-## Usage Examples
-
-### Basic Score Queries
+The four score flags are declared on **both** `spotinfo list` and `spotinfo recommend`. There
+is no root query command.
 
 ```bash
-# Get regional placement scores
-spotinfo --type "m5.large" --with-score --region "us-east-1"
+# Regional scores for one machine
+spotinfo list --machine '^m5\.large$' --with-score --region us-east-1
 
-# Get AZ-level placement scores  
-spotinfo --type "m5.large" --with-score --az --region "us-east-1"
+# Zone-level scores for the same machine
+spotinfo list --machine '^m5\.large$' --with-score --az --region us-east-1
+
+# Only machines AWS scores 8 or better
+spotinfo list --machine '^t3\.' --with-score --min-score 8 --region us-east-1
+
+# Highest-scoring first
+spotinfo list --machine '^m5\.' --with-score --min-score 7 --sort score --order desc --region us-east-1
+
+# On a recommendation, the score annotates the ranked page
+spotinfo recommend --architecture x86_64 --min-vcpu 2 --min-memory-gib 8 --with-score --region us-east-1
 ```
 
-### Filtering by Score Thresholds
+Every example above calls AWS. Each needs credentials and
+`ec2:GetSpotPlacementScores`; without them the command fails rather than printing a number
+nobody measured — see [Fallback behaviour](#fallback-behaviour).
 
-```bash
-# Find instances with excellent placement scores (8+)
-spotinfo --type "t3.*" --with-score --min-score 8
+### Flags
 
-# High-reliability instances for production
-spotinfo --type "m5.*" --with-score --min-score 7 --sort score --order desc
+| Flag              | Meaning                                     | Default    |
+| ----------------- | ------------------------------------------- | ---------- |
+| `--with-score`    | fetch placement figures (experimental)      | off        |
+| `--az`            | zone-level instead of regional              | off        |
+| `--min-score N`   | keep only rows scoring at least N (1-10)    | no filter  |
+| `--sort score`    | order by the placement figure               | no default |
+| `--score-timeout` | seconds for placement enrichment, 1-300     | 30         |
+
+`--min-score` is 1-10 on the CLI; the MCP `min_score` schema also accepts `0`, which is the
+"no filter" sentinel and not a floor a real score could fail.
+
+Three refusals worth knowing, each measured:
+
+```console
+$ spotinfo list --offline --sort score
+spotinfo: invalid argument: --sort score needs --with-score, which is what fetches the placement figures it orders by
+
+$ spotinfo list --cloud gcp --with-score --min-score 5
+spotinfo: unsupported capability: --min-score is refused on gcp: gcp publishes obtainability, and an integer 1-10 floor states no reviewed mapping onto it
+
+$ spotinfo list --cloud gcp --with-score
+spotinfo: failed to get spot savings: unsupported capability: gcp obtainability is fetched for a ranked recommendation only, and needs a Google Cloud project
 ```
 
-### Strategic Instance Selection
+**`--offline` does not suppress `--with-score`.** The flag governs price and risk acquisition,
+and there is no snapshot a placement figure can be read from, so the call still goes out:
 
-```bash
-# Single instance assessment (precise evaluation)
-spotinfo --type "c5.xlarge" --with-score --region "us-east-1"
-
-# Flexible deployment options (higher scores expected)
-spotinfo --type "c5\.(large|xlarge|2xlarge)" --with-score --region "us-east-1"
+```console
+$ spotinfo list --offline --region us-east-1 --machine '^m5\.large$' --with-score --score-timeout 3
+spotinfo: failed to get spot savings: aws candidate acquisition: score enrichment failed: region us-east-1: spot placement scores unavailable: requires AWS credentials and the ec2:GetSpotPlacementScores permission: …
 ```
 
-## Output Formats
+## Output formats
 
-### Visual Formats (with emojis)
-- **Table**: `🟢 9` (includes visual indicators)
-- **Text**: `score=us-east-1a:🟢 9`
+| Format  | Score cell                                             |
+| ------- | ------------------------------------------------------ |
+| `table` | `🟢 9`, or `us-east-1a:🟡 7*` with `--az`              |
+| `text`  | `score=🟢 8`, or `score=us-east-1a:🟡 7*,us-east-1b:🟢 9*` |
+| `csv`   | `8`, or `us-east-1a:7*` — no emoji                     |
+| `json`  | `"region_score": 8`, or `"zone_scores": {…}`, plus `"score_fetched_at"` |
 
-### Data-Only Formats (automation-friendly)
-- **CSV**: `us-east-1a:9` (no emojis)
-- **JSON**: `{"region_score": 9, "score_fetched_at": "2025-01-26T..."}`
+## Score freshness
 
-## Score Freshness Tracking
-
-Placement scores include timestamp tracking for cache freshness:
+A fetched score carries the instant it was measured:
 
 ```json
 {
   "region_score": 9,
-  "score_fetched_at": "2025-01-26T10:45:02.844335+03:00"
+  "score_fetched_at": "2026-08-06T08:58:27Z"
 }
 ```
 
-Stale scores (>30 minutes) are indicated with an asterisk: `🟢 9*`
+A score older than thirty minutes is marked with an asterisk in `table`, `text` and `csv`:
+`🟢 9*`.
 
-## Command Reference
+## Permissions
 
-| Flag | Description | Example |
-|------|-------------|---------|
-| `--with-score` | Enable placement score fetching | `--with-score` |
-| `--az` | Get AZ-level scores instead of regional | `--with-score --az` |
-| `--min-score N` | Filter instances with score ≥ N | `--min-score 7` |
-| `--sort score` | Sort results by placement score | `--sort score --order desc` |
-| `--score-timeout N` | Set API timeout in seconds | `--score-timeout 30` |
-
-## DevOps Best Practices
-
-### For Production Workloads
-```bash
-# High-reliability instances with flexibility
-spotinfo --type "m5\.(large|xlarge|2xlarge)" --with-score --min-score 7 --region "us-east-1"
-```
-
-### For Cost-Optimized Development
-```bash
-# Find cheapest instances with acceptable reliability
-spotinfo --type "t3.*" --with-score --min-score 5 --sort price --order asc
-```
-
-### For Multi-Region Deployment
-```bash
-# Compare placement scores across regions
-spotinfo --type "c5.large" --with-score --region "us-east-1" --region "eu-west-1"
-```
-
-## Permissions Requirements
-
-### IAM Policy
 ```json
 {
   "Version": "2012-10-17",
@@ -172,33 +178,32 @@ spotinfo --type "c5.large" --with-score --region "us-east-1" --region "eu-west-1
 }
 ```
 
-### AWS Organizations (SCP)
-Ensure no Service Control Policy blocks `ec2:GetSpotPlacementScores`. SCPs override IAM permissions.
+In an AWS Organization, check that no Service Control Policy blocks
+`ec2:GetSpotPlacementScores`. An SCP overrides IAM.
 
 ## Troubleshooting
 
-### Common Issues
+**The same machine scores differently in two queries.** Expected — the score describes the
+whole request. See [contextual scoring](#critical-understanding-the-score-is-contextual).
 
-**Different scores for same instance type:**
-- ✅ **Expected behavior** - scores are contextual to the entire request
-- Single vs multiple instance queries will yield different scores
+**Permission errors.** Check the IAM policy above, then check for an SCP.
 
-**Permission errors:**
-- Check IAM policy includes `ec2:GetSpotPlacementScores`
-- Verify no SCP blocks the action (common in AWS Organizations)
+**Timeouts.** Raise `--score-timeout` (1-300 seconds, default 30). There is no fallback to
+raise it *instead* of — see below.
 
-**API timeouts:**
-- Increase timeout: `--score-timeout 60`
-- The tool falls back to embedded data if API unavailable
+### Fallback behaviour
 
-### Fallback Behavior
+**There is none, deliberately.** If the AWS API is unreachable or the permission is missing,
+`spotinfo` reports an error instead of substituting a score. Placement scores drive capacity
+decisions, and an invented number presented as an AWS score is worse than an explicit failure.
+This is the one enrichment that does not degrade to the snapshot: there is nothing in the
+snapshot to degrade to. Machines AWS declines to score are omitted from the answer rather than
+defaulted to zero.
 
-If the AWS API is unavailable, `spotinfo` reports an error rather than substituting a score. Placement scores drive capacity decisions, so an invented number presented as an AWS score is worse than an explicit failure.
+## Data sources
 
-## Data Sources
+- **AWS**: `GetSpotPlacementScores`, live, no fallback.
+- **GCP**: `compute.advice.capacity` (beta), live, needs Application Default Credentials and
+  `--gcp-project`.
 
-Placement scores are fetched from:
-- **Primary**: AWS `GetSpotPlacementScores` API
-- **Fallback**: none. `--with-score` requires AWS credentials and the `ec2:GetSpotPlacementScores` permission, and fails with that message when they are missing. Instance types AWS declines to score are omitted rather than defaulted.
-
-See [Data Sources](data-sources.md) for complete information.
+See [Data sources](data-sources.md) for the full treatment.

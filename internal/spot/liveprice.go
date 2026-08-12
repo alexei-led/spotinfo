@@ -2,14 +2,15 @@ package spot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 )
@@ -35,42 +36,45 @@ type livePriceProvider interface {
 type awsLivePriceProvider struct {
 	// newClient builds the region-scoped EC2 client. Injectable so the response
 	// handling below can be tested without reaching AWS; production leaves it nil
-	// and gets ec2.NewFromConfig.
+	// and gets ec2.NewFromConfig over lazily resolved credentials.
 	newClient func(region string) ec2.DescribeSpotPriceHistoryAPIClient
-	cfg       aws.Config
 }
 
-// historyClient returns the injected client factory, or the real EC2 one.
-func (p *awsLivePriceProvider) historyClient(region string) ec2.DescribeSpotPriceHistoryAPIClient {
+// historyClient returns the injected client factory, or a real EC2 one built
+// from credentials resolved on first use.
+//
+// Lazy on purpose. Resolving them in the constructor charged the credential
+// probe to every invocation, including `--offline`, which then discards this
+// provider entirely — 2 seconds added to a command that makes no request at
+// all. Nothing here is needed until an instance is actually missing a price.
+func (p *awsLivePriceProvider) historyClient(region string) (ec2.DescribeSpotPriceHistoryAPIClient, error) {
 	if p.newClient != nil {
-		return p.newClient(region)
+		return p.newClient(region), nil
 	}
 
-	return ec2.NewFromConfig(p.cfg, func(o *ec2.Options) {
+	cfg, err := awsConfigWithCredentials()
+	if err != nil {
+		return nil, fmt.Errorf("live pricing unavailable: %w", err)
+	}
+
+	return ec2.NewFromConfig(cfg, func(o *ec2.Options) {
 		o.Region = region
-	})
+	}), nil
 }
 
-// newAWSLivePriceProvider creates a provider using the default AWS config.
-func newAWSLivePriceProvider(ctx context.Context) (*awsLivePriceProvider, error) {
-	ctx, cancel := context.WithTimeout(ctx, livePriceTimeout)
-	defer cancel()
-
-	cfg, err := awsconfig.LoadDefaultConfig(ctx,
-		awsconfig.WithRetryMode(aws.RetryModeAdaptive),
-		awsconfig.WithRetryMaxAttempts(maxRetryAttempts),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load AWS config for live pricing: %w", err)
-	}
-
-	return &awsLivePriceProvider{cfg: cfg}, nil
+// newAWSLivePriceProvider creates a provider. Credentials are resolved on first
+// use, in historyClient — see the note there on why not here.
+func newAWSLivePriceProvider(_ context.Context) (*awsLivePriceProvider, error) {
+	return &awsLivePriceProvider{}, nil
 }
 
 // fetchLivePrices calls DescribeSpotPriceHistory for the given instance types in a region.
 // It returns the most recent price per instance type.
 func (p *awsLivePriceProvider) fetchLivePrices(ctx context.Context, region string, instanceTypes []string, os string) (map[string]float64, error) {
-	client := p.historyClient(region)
+	client, err := p.historyClient(region)
+	if err != nil {
+		return nil, err
+	}
 
 	productDesc := osToProductDescription(os)
 
@@ -175,6 +179,8 @@ func enrichMissingPrices(ctx context.Context, advices []Advice, provider livePri
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
+	failures := make(map[string]error, len(regionMissing))
+
 	for region, indices := range regionMissing {
 		wg.Add(1)
 		go func(r string, idxs []int) {
@@ -198,9 +204,10 @@ func enrichMissingPrices(ctx context.Context, advices []Advice, provider livePri
 
 				prices, err := provider.fetchLivePrices(enrichCtx, r, batch, os)
 				if err != nil {
-					slog.Warn("failed to fetch live prices",
-						slog.String("region", r),
-						slog.Any("error", err))
+					mu.Lock()
+					failures[r] = err
+					mu.Unlock()
+
 					return
 				}
 
@@ -218,4 +225,40 @@ func enrichMissingPrices(ctx context.Context, advices []Advice, provider livePri
 	}
 
 	wg.Wait()
+	reportLivePriceFailures(failures)
+}
+
+// reportLivePriceFailures logs what the live-price pass could not read.
+//
+// Missing credentials are reported once, not once per region. Every region
+// resolves the same lazily cached credential chain, so a machine without AWS
+// credentials logged the identical error for every region it queried: a default
+// `spotinfo list` printed twelve copies of a 450-character IMDS failure to
+// stderr on a command that answered correctly from the static feed, which reads
+// as a broken tool. One line, naming what to do about it, is the whole
+// information those twelve carried.
+//
+// Anything else stays per region: a throttled or unreachable region is a fact
+// about that region, and collapsing those would hide which one failed.
+func reportLivePriceFailures(failures map[string]error) {
+	uncredentialed := make([]string, 0, len(failures))
+
+	for region, err := range failures {
+		if errors.Is(err, errNoAWSCredentials) {
+			uncredentialed = append(uncredentialed, region)
+
+			continue
+		}
+
+		slog.Warn("failed to fetch live prices", slog.String("region", region), slog.Any("error", err))
+	}
+
+	if len(uncredentialed) == 0 {
+		return
+	}
+
+	slices.Sort(uncredentialed)
+	slog.Warn("no AWS credentials, so machines missing from the static price feed keep no price; "+
+		"configure AWS credentials to price them, or pass --offline to skip the lookup",
+		slog.Any("regions", uncredentialed))
 }

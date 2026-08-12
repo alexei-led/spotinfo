@@ -1,0 +1,115 @@
+{
+  "schema_version": "spotinfo.source-contract/v1",
+  "provider": "gcp",
+  "review_status": "approved",
+  "reviewer": "alexei-led",
+  "reviewed_at": "2026-08-09",
+  "parser_version": "gcp-pricing-html/1",
+  "update_cadence": "weekly",
+  "terms": {
+    "redistribution_decision": "approved",
+    "evidence_url": "https://developers.google.com/site-policies",
+    "notes": "The committed catalogue republishes factual figures only - machine type, vCPU count, memory in GiB, and USD per instance-hour - with attribution to the exact source URLs recorded in the sidecar manifest. No page markup, styling, prose, or image is redistributed. The machine-architecture reference page is published under the Creative Commons Attribution 4.0 License linked from its footer. The project owner approved this redistribution decision; reconfirm it before each schema change."
+  },
+  "sources": [
+    {
+      "url": "https://cloud.google.com/spot-vms/pricing",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": [
+        "spot-price",
+        "machine-spec"
+      ]
+    },
+    {
+      "url": "https://cloud.google.com/products/compute/pricing/general-purpose",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": [
+        "on-demand-price"
+      ]
+    },
+    {
+      "url": "https://cloud.google.com/products/compute/pricing/compute-optimized",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": [
+        "on-demand-price"
+      ]
+    },
+    {
+      "url": "https://cloud.google.com/products/compute/pricing/memory-optimized",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": [
+        "on-demand-price"
+      ]
+    },
+    {
+      "url": "https://docs.cloud.google.com/compute/docs/machine-resource",
+      "source_type": "official-server-rendered-html",
+      "data_kinds": [
+        "architecture"
+      ]
+    }
+  ],
+  "expected_fields": [
+    "table header cell 0: Machine type",
+    "table header cell 1: Virtual CPUs",
+    "table header cell 2: Memory",
+    "spot table header cell 3: Current Spot pricing (USD)",
+    "on-demand table header cell 3 prefix: Default* (USD)",
+    "machine type cell: ^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$",
+    "memory cell: <number> GiB",
+    "price cell: $<number> / 1 hour",
+    "region selector element: role=option, aria-selected=true, data-value=<City> (<region-id>)"
+  ],
+  "support": {
+    "risk_status": "unavailable",
+    "operating_systems": [
+      "linux"
+    ],
+    "architectures": [
+      "x86_64",
+      "arm64"
+    ],
+    "price_classes": [
+      "spot",
+      "on-demand"
+    ],
+    "regions": [
+      "us-central1"
+    ],
+    "machine_series": [
+      "c2",
+      "c3",
+      "c3d",
+      "c4",
+      "c4a",
+      "c4d",
+      "e2",
+      "m1",
+      "m2",
+      "m3",
+      "n1",
+      "n2",
+      "n2d",
+      "n4",
+      "n4a",
+      "n4d",
+      "t2a",
+      "t2d"
+    ]
+  },
+  "thresholds": {
+    "min_regions": 1,
+    "min_machines": 300,
+    "max_compressed_bytes": 65536,
+    "max_fractional_digits": 9
+  },
+  "no_go_conditions": [
+    "The pricing pages stop rendering their machine-type tables without JavaScript.",
+    "The region selector stops publishing role=option with aria-selected and data-value, so a table can no longer be attributed to a region.",
+    "A contracted header cell is renamed, which empties the parse and trips the coverage floor.",
+    "A published price needs more fractional digits than the contracted maximum.",
+    "A Spot machine has no paired On-Demand price, leaving a savings figure with no denominator.",
+    "Redistribution of the factual pricing figures can no longer be approved.",
+    "The pages stop serving a stable document: two reads moments apart return different bytes, which means a rollout is in flight and a snapshot could mix price generations across pages."
+  ]
+}

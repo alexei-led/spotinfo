@@ -42,9 +42,25 @@ jobs:
     - name: Run tests with coverage
       run: go test -cover -v ./...
       
+    # Separate from the coverage run: -race and -cover instrument the same
+    # binary differently, and the race detector is a gate in its own right.
+    - name: Run tests with the race detector
+      run: make test-race
+
     - name: Run golangci-lint
       run: make lint
-      
+
+    # Full gate: package boundaries plus finding severity. archfit's own verdict
+    # stays "pass" while a Critical Balanced-Coupling advisory stands, so
+    # cmd/archfitcheck fails the build on any open Critical or High finding.
+    #
+    # The target installs archfit itself at the version ARCHFIT_VERSION pins, so
+    # CI and a developer's machine gate on the same tool. A second literal here
+    # would be a pin that can drift from the one the Makefile applies.
+    # GitNexus stays a review-only tool and is deliberately not installed.
+    - name: Verify architecture
+      run: make verify-architecture
+
     - name: Build binary
       run: make build
 

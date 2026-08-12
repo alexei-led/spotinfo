@@ -12,122 +12,124 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"spotinfo/internal/spot"
+	"spotinfo/internal/cloud"
 )
 
-// TestConcurrentSameClient tests concurrent access to the same spot client instance
-// This tests the real shared state in spot.Client (sync.Once, cached data)
-func TestConcurrentSameClient(t *testing.T) {
-	// Use real client to test actual shared state concurrency issues
-	realClient := newEmbeddedClient() // Has internal sync.Once and shared data providers
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+// These tests exist for the shared state inside spot.Client — its sync.Once and
+// its cached feed data — reached through newEmbeddedRegistry. The tools in front
+// of it changed; the state behind them did not, so each test is pointed at the
+// handler that replaced the one it used to drive.
 
-	findTool := NewFindSpotInstancesTool(realClient, logger)
+func raceLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+}
+
+// TestConcurrentSameClient tests concurrent access to the same spot client
+// instance: the real shared state in spot.Client (sync.Once, cached data).
+func TestConcurrentSameClient(t *testing.T) {
+	t.Parallel()
+
+	tool := NewListSpotMachinesTool(newEmbeddedRegistry(), raceLogger())
 
 	const numGoroutines = 20
+
 	var wg sync.WaitGroup
+
 	results := make([]*mcp.CallToolResult, numGoroutines)
 	errors := make([]error, numGoroutines)
 
-	// Test concurrent access with same parameters (realistic production scenario)
 	for i := range numGoroutines {
 		wg.Add(1)
+
 		go func(index int) {
 			defer wg.Done()
+
 			req := createTestCallToolRequest(map[string]any{
-				"regions":        []any{"us-east-1"},
-				"instance_types": "t2.micro",
-				"limit":          5,
+				argRegions: []any{"us-east-1"},
+				argMachine: "t2.micro",
 			})
-			result, err := findTool.Handle(context.Background(), req)
-			results[index] = result
-			errors[index] = err
+			results[index], errors[index] = tool.Handle(context.Background(), req)
 		}(i)
 	}
 
 	wg.Wait()
 
-	// Verify all calls succeeded and returned consistent results
 	for i := range numGoroutines {
 		assert.NoError(t, errors[i], "Goroutine %d should not have errors", i)
 		require.NotNil(t, results[i], "Result %d should not be nil", i)
 		assert.False(t, results[i].IsError, "Result %d should not be an error", i)
 	}
 
-	// Verify all results are consistent (same parameters should give same results)
-	if len(results) > 1 {
-		firstResult := results[0]
-		for i := 1; i < len(results); i++ {
-			assert.Equal(t, len(firstResult.Content), len(results[i].Content),
-				"All results should have same content length")
-		}
+	// The same question asked concurrently must answer the same way.
+	for i := 1; i < numGoroutines; i++ {
+		assert.Len(t, results[i].Content, len(results[0].Content),
+			"All results should have same content length")
 	}
 }
 
 // TestConcurrentDifferentParameters tests concurrent calls with different parameters
 func TestConcurrentDifferentParameters(t *testing.T) {
-	realClient := newEmbeddedClient()
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	findTool := NewFindSpotInstancesTool(realClient, logger)
+	t.Parallel()
+
+	tool := NewListSpotMachinesTool(newEmbeddedRegistry(), raceLogger())
 
 	testCases := []map[string]any{
-		{"regions": []any{"us-east-1"}, "instance_types": "t2.micro", "limit": 5},
-		{"regions": []any{"us-west-2"}, "instance_types": "t2.small", "limit": 3},
-		{"regions": []any{"eu-west-1"}, "instance_types": "t3.micro", "limit": 10},
-		{"regions": []any{"us-east-1", "us-west-2"}, "sort_by": "price", "limit": 8},
+		{argRegions: []any{"us-east-1"}, argMachine: "t2.micro"},
+		{argRegions: []any{"us-west-2"}, argMachine: "t2.small"},
+		{argRegions: []any{"eu-west-1"}, argMachine: "t3.micro"},
+		{argRegions: []any{"us-east-1", "us-west-2"}, argSort: "price"},
 	}
 
 	var wg sync.WaitGroup
+
 	results := make([]*mcp.CallToolResult, len(testCases))
 	errors := make([]error, len(testCases))
 
-	// Run different parameter sets concurrently
 	for i, testCase := range testCases {
 		wg.Add(1)
-		go func(index int, params map[string]any) {
+
+		go func(index int, args map[string]any) {
 			defer wg.Done()
-			req := createTestCallToolRequest(params)
-			result, err := findTool.Handle(context.Background(), req)
-			results[index] = result
-			errors[index] = err
+
+			results[index], errors[index] = tool.Handle(context.Background(), createTestCallToolRequest(args))
 		}(i, testCase)
 	}
 
 	wg.Wait()
 
-	// Verify all calls succeeded
 	for i := range testCases {
 		assert.NoError(t, errors[i], "Test case %d should not have errors", i)
 		require.NotNil(t, results[i], "Result %d should not be nil", i)
+		assert.False(t, results[i].IsError, "Result %d should not be an error", i)
 	}
 }
 
-// TestConcurrentRegionsToolAccess tests concurrent access to regions tool
+// TestConcurrentRegionsToolAccess tests concurrent access to the regions tool
 func TestConcurrentRegionsToolAccess(t *testing.T) {
-	realClient := newEmbeddedClient()
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	regionsTool := NewListSpotRegionsTool(realClient, logger)
+	t.Parallel()
+
+	tool := NewListCloudRegionsTool(newEmbeddedRegistry(), raceLogger())
 
 	const numGoroutines = 15
+
 	var wg sync.WaitGroup
+
 	results := make([]*mcp.CallToolResult, numGoroutines)
 	errors := make([]error, numGoroutines)
 
-	// Test concurrent regions listing (all using same empty parameters)
 	for i := range numGoroutines {
 		wg.Add(1)
+
 		go func(index int) {
 			defer wg.Done()
+
 			req := createTestCallToolRequest(map[string]any{})
-			result, err := regionsTool.Handle(context.Background(), req)
-			results[index] = result
-			errors[index] = err
+			results[index], errors[index] = tool.Handle(context.Background(), req)
 		}(i)
 	}
 
 	wg.Wait()
 
-	// Verify all calls succeeded
 	for i := range numGoroutines {
 		assert.NoError(t, errors[i], "Goroutine %d should not have errors", i)
 		require.NotNil(t, results[i], "Result %d should not be nil", i)
@@ -137,222 +139,166 @@ func TestConcurrentRegionsToolAccess(t *testing.T) {
 
 // TestConcurrentServerCreation tests concurrent MCP server creation
 func TestConcurrentServerCreation(t *testing.T) {
+	t.Parallel()
+
 	const numGoroutines = 10
+
 	var wg sync.WaitGroup
+
 	servers := make([]*Server, numGoroutines)
 	errors := make([]error, numGoroutines)
 
-	// Test concurrent server creation with different spot clients
 	for i := range numGoroutines {
 		wg.Add(1)
+
 		go func(index int) {
 			defer wg.Done()
-			cfg := Config{
-				Version:    "1.0.0",
-				Logger:     slog.Default(),
-				SpotClient: newEmbeddedClient(), // Each gets its own client
-			}
-			server, err := NewServer(cfg)
-			servers[index] = server
-			errors[index] = err
+
+			servers[index], errors[index] = NewServer(Config{
+				Version:   "1.0.0",
+				Logger:    slog.Default(),
+				Providers: newEmbeddedRegistry(), // Each gets its own client
+			})
 		}(i)
 	}
 
 	wg.Wait()
 
-	// Verify all servers were created successfully
 	for i := range numGoroutines {
 		assert.NoError(t, errors[i], "Server creation %d should succeed", i)
 		assert.NotNil(t, servers[i], "Server %d should not be nil", i)
 	}
 }
 
-// TestConcurrentParameterParsing tests concurrent parameter parsing with complex data
-func TestConcurrentParameterParsing(t *testing.T) {
-	// Different parameter sets to test concurrent parsing
-	testArgSets := []map[string]any{
+// TestConcurrentRequestParsing tests concurrent argument parsing with complex data
+func TestConcurrentRequestParsing(t *testing.T) {
+	t.Parallel()
+
+	argSets := []map[string]any{
 		{
-			"regions":        []any{"us-east-1", "eu-west-1"},
-			"instance_types": "m5.large",
-			"limit":          10,
-			"sort_by":        "price",
+			argRegions: []any{"us-east-1", "eu-west-1"},
+			argMachine: "m5.large",
+			argSort:    "price",
 		},
 		{
-			"regions":               []any{"us-west-2"},
-			"min_vcpu":              4,
-			"max_price_per_hour":    0.5,
-			"max_interruption_rate": 15.0,
+			argRegions:  []any{"us-west-2"},
+			argMinVCPU:  4,
+			argMaxPrice: 0.5,
 		},
 		{
-			"regions":       []any{"ap-south-1", "ap-southeast-1"},
-			"sort_by":       "savings",
-			"min_memory_gb": 8,
+			argRegions:      []any{"ap-south-1", "ap-southeast-1"},
+			argSort:         "savings",
+			argOrder:        cloud.OrderDesc,
+			argMinMemoryGiB: 8.0,
 		},
 	}
 
 	const numGoroutines = 30
-	var wg sync.WaitGroup
-	results := make([]*params, numGoroutines)
 
-	// Test concurrent parameter parsing with different arg sets
+	var wg sync.WaitGroup
+
+	queries := make([]*cloud.Query, numGoroutines)
+
 	for i := range numGoroutines {
 		wg.Add(1)
+
 		go func(index int) {
 			defer wg.Done()
-			argSet := testArgSets[index%len(testArgSets)]
-			result := parseParameters(argSet)
-			results[index] = result
+
+			_, query, _, err := parseListRequest(argSets[index%len(argSets)])
+			assert.NoError(t, err)
+			queries[index] = query
 		}(i)
 	}
 
 	wg.Wait()
 
-	// Verify all results are valid and consistent for same inputs
-	for i, result := range results {
-		assert.NotNil(t, result, "Result %d should not be nil", i)
-		assert.NotEmpty(t, result.regions, "Result %d should have regions", i)
+	// Parsing is pure: the same arguments must map onto the same query every
+	// time, whatever else is running.
+	for i, query := range queries {
+		require.NotNil(t, query, "Query %d should not be nil", i)
 
-		// Verify results are consistent for same input set
-		expectedResult := parseParameters(testArgSets[i%len(testArgSets)])
-		assert.Equal(t, expectedResult, result, "Result %d should match expected", i)
+		_, expected, _, err := parseListRequest(argSets[i%len(argSets)])
+		require.NoError(t, err)
+		assert.Equal(t, expected, query, "Query %d should match expected", i)
 	}
 }
 
-// TestConcurrentResponseBuilding tests concurrent response building with shared data
-func TestConcurrentResponseBuilding(t *testing.T) {
-	// Shared test advice data (simulates what would come from spot client)
-	testAdvices := []spot.Advice{
-		{
-			Instance: "t2.micro",
-			Region:   "us-east-1",
-			Price:    0.0116,
-			Savings:  50,
-			Range:    spot.Range{Min: 0, Max: 5, Label: "<5%"},
-			Info:     spot.TypeInfo{Cores: 1, RAM: 1.0},
-		},
-		{
-			Instance: "t2.small",
-			Region:   "us-west-2",
-			Price:    0.023,
-			Savings:  45,
-			Range:    spot.Range{Min: 5, Max: 10, Label: "5-10%"},
-			Info:     spot.TypeInfo{Cores: 1, RAM: 2.0},
-		},
+// TestConcurrentReportBuilding tests concurrent report building with shared data
+func TestConcurrentReportBuilding(t *testing.T) {
+	t.Parallel()
+
+	result := cloud.Result{
+		Provider: cloud.ProviderAWS,
+		Mode:     cloud.DataModeEmbeddedSnapshot,
+		Sources:  testSources(),
+		Candidates: buildCandidates(
+			testCandidate{
+				Machine: "t2.micro", Region: "us-east-1", Price: 0.0116, Savings: 50,
+				RiskLabel: "<5%", RiskMin: 0, RiskMax: 5, VCPU: 1, MemoryGiB: 1,
+			},
+			testCandidate{
+				Machine: "t2.small", Region: "us-west-2", Price: 0.023, Savings: 45,
+				RiskLabel: "5-10%", RiskMin: 5, RiskMax: 10, VCPU: 1, MemoryGiB: 2,
+			},
+		),
 	}
+	query := &cloud.Query{OS: cloud.OSLinux, Regions: []cloud.Region{cloud.RegionAll}}
 
 	const numGoroutines = 25
+
 	var wg sync.WaitGroup
-	responses := make([]map[string]any, numGoroutines)
 
-	startTime := time.Now()
+	reports := make([]*cloud.ListReport, numGoroutines)
 
-	// Test concurrent response building with same data
 	for i := range numGoroutines {
 		wg.Add(1)
+
 		go func(index int) {
 			defer wg.Done()
-			response := buildResponse(testAdvices, startTime, spot.DataSourceEmbedded)
-			responses[index] = response
+
+			report, err := cloud.NewListReport(query, &result)
+			assert.NoError(t, err)
+			reports[index] = report
 		}(i)
 	}
 
 	wg.Wait()
 
-	// Verify all responses have consistent structure and content
-	for i, response := range responses {
-		assert.Contains(t, response, "results", "Response %d should contain results", i)
-		assert.Contains(t, response, "metadata", "Response %d should contain metadata", i)
-
-		results, ok := response["results"].([]map[string]any)
-		require.True(t, ok, "Results should be a slice of maps")
-		assert.Len(t, results, len(testAdvices), "Should have correct number of results")
-
-		// Verify content consistency across all concurrent calls
-		if i > 0 {
-			firstResponse := responses[0]
-			firstResults, ok := firstResponse["results"].([]map[string]any)
-			require.True(t, ok, "First response results should be a slice of maps")
-			for j, result := range results {
-				assert.Equal(t, firstResults[j]["instance_type"], result["instance_type"],
-					"Instance type should be consistent")
-				assert.Equal(t, firstResults[j]["region"], result["region"],
-					"Region should be consistent")
-			}
-		}
+	for i, report := range reports {
+		require.NotNil(t, report, "Report %d should not be nil", i)
+		assert.Equal(t, reports[0], report, "Report %d should match the first", i)
 	}
 }
 
-// TestConcurrentHelperFunctions tests concurrent access to helper functions
-func TestConcurrentHelperFunctions(t *testing.T) {
-	// Shared test arguments
-	testArgs := map[string]any{
-		"test_string": "value",
-		"test_limit":  15,
-		"test_slice":  []any{"a", "b", "c"},
-	}
-
-	const numGoroutines = 50
-	var wg sync.WaitGroup
-
-	// Test all helper functions concurrently
-	for range numGoroutines {
-		wg.Add(3)
-
-		go func() {
-			defer wg.Done()
-			result := getStringWithDefault(testArgs, "test_string", "default")
-			assert.Equal(t, "value", result)
-		}()
-
-		go func() {
-			defer wg.Done()
-			result := getLimitWithDefault(testArgs, "test_limit", 10)
-			assert.Equal(t, 15, result)
-		}()
-
-		go func() {
-			defer wg.Done()
-			result := getStringSliceWithDefault(testArgs, "test_slice", []string{"default"})
-			assert.Equal(t, []string{"a", "b", "c"}, result)
-		}()
-	}
-
-	wg.Wait()
-}
-
-// TestConcurrentDataProviderInitialization tests the critical sync.Once race condition
-// This is the most important race test - targets real shared state in spot.Client
+// TestConcurrentDataProviderInitialization tests the critical sync.Once race
+// condition. This is the most important race test — it targets the real shared
+// state in spot.Client.
 func TestConcurrentDataProviderInitialization(t *testing.T) {
+	t.Parallel()
+
 	const numGoroutines = 50
+
 	var wg sync.WaitGroup
+
 	results := make([]*mcp.CallToolResult, numGoroutines)
 	errors := make([]error, numGoroutines)
 
-	// Create multiple fresh clients to force sync.Once initialization races
 	for i := range numGoroutines {
 		wg.Add(1)
+
 		go func(index int) {
 			defer wg.Done()
 
-			// Create fresh client for each goroutine to trigger initialization race
-			freshClient := newEmbeddedClient()
-			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-			tool := NewFindSpotInstancesTool(freshClient, logger)
-
-			req := createTestCallToolRequest(map[string]any{
-				"regions": []any{"us-east-1"},
-				"limit":   3,
-			})
-
-			result, err := tool.Handle(context.Background(), req)
-			results[index] = result
-			errors[index] = err
+			// A fresh client per goroutine, to trigger the initialization race.
+			tool := NewListSpotMachinesTool(newEmbeddedRegistry(), raceLogger())
+			req := createTestCallToolRequest(map[string]any{argRegions: []any{"us-east-1"}, argMachine: "t2.micro"})
+			results[index], errors[index] = tool.Handle(context.Background(), req)
 		}(i)
 	}
 
 	wg.Wait()
 
-	// Verify all initializations succeeded without race conditions
 	for i := range numGoroutines {
 		assert.NoError(t, errors[i], "Initialization %d should not have errors", i)
 		require.NotNil(t, results[i], "Result %d should not be nil", i)
@@ -361,55 +307,58 @@ func TestConcurrentDataProviderInitialization(t *testing.T) {
 
 // TestConcurrentMixedOperations tests different operations triggering different code paths
 func TestConcurrentMixedOperations(t *testing.T) {
-	sharedClient := newEmbeddedClient()
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	t.Parallel()
 
-	findTool := NewFindSpotInstancesTool(sharedClient, logger)
-	regionsTool := NewListSpotRegionsTool(sharedClient, logger)
+	sharedRegistry := newEmbeddedRegistry()
+	listTool := NewListSpotMachinesTool(sharedRegistry, raceLogger())
+	regionsTool := NewListCloudRegionsTool(sharedRegistry, raceLogger())
+	recommendTool := NewRecommendTool(sharedRegistry, raceLogger())
 
-	const numGoroutines = 30
-	var wg sync.WaitGroup
-	errors := make([]error, numGoroutines)
-
-	// Mix of different operations that stress different code paths
-	operations := []func(int) error{
-		func(i int) error {
+	operations := []func() error{
+		func() error {
 			req := createTestCallToolRequest(map[string]any{
-				"regions": []any{"us-east-1", "us-west-2"},
-				"sort_by": "price",
+				argRegions: []any{"us-east-1", "us-west-2"},
+				argMachine: "t3.*",
+				argSort:    "price",
 			})
-			_, err := findTool.Handle(context.Background(), req)
+			_, err := listTool.Handle(context.Background(), req)
+
 			return err
 		},
-		func(i int) error {
-			req := createTestCallToolRequest(map[string]any{})
-			_, err := regionsTool.Handle(context.Background(), req)
+		func() error {
+			_, err := regionsTool.Handle(context.Background(), createTestCallToolRequest(map[string]any{}))
+
 			return err
 		},
-		func(i int) error {
+		func() error {
 			req := createTestCallToolRequest(map[string]any{
-				"regions":        []any{"eu-west-1"},
-				"instance_types": "t3.*",
-				"min_vcpu":       2,
+				argRegions: []any{"eu-west-1"}, argArchitecture: "x86_64",
+				argMinVCPU: 2, argMinMemoryGiB: 4.0,
 			})
-			_, err := findTool.Handle(context.Background(), req)
+			_, err := recommendTool.Handle(context.Background(), req)
+
 			return err
 		},
 	}
 
-	// Run mixed operations concurrently
+	const numGoroutines = 30
+
+	var wg sync.WaitGroup
+
+	errors := make([]error, numGoroutines)
+
 	for i := range numGoroutines {
 		wg.Add(1)
+
 		go func(index int) {
 			defer wg.Done()
-			op := operations[index%len(operations)]
-			errors[index] = op(index)
+
+			errors[index] = operations[index%len(operations)]()
 		}(i)
 	}
 
 	wg.Wait()
 
-	// Verify all operations succeeded
 	for i, err := range errors {
 		assert.NoError(t, err, "Operation %d should not have errors", i)
 	}
@@ -417,46 +366,40 @@ func TestConcurrentMixedOperations(t *testing.T) {
 
 // TestConcurrentContextCancellation tests concurrent context cancellation scenarios
 func TestConcurrentContextCancellation(t *testing.T) {
-	client := newEmbeddedClient()
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	tool := NewFindSpotInstancesTool(client, logger)
+	t.Parallel()
+
+	tool := NewListSpotMachinesTool(newEmbeddedRegistry(), raceLogger())
 
 	const numGoroutines = 20
+
 	var wg sync.WaitGroup
 
-	// Test mix of cancelled and non-cancelled contexts
 	for i := range numGoroutines {
 		wg.Add(1)
+
 		go func(index int) {
 			defer wg.Done()
 
-			var ctx context.Context
-			var cancel context.CancelFunc
+			var (
+				ctx    context.Context
+				cancel context.CancelFunc
+			)
 
-			if index%3 == 0 {
-				// Some contexts get cancelled immediately
+			switch index % 3 {
+			case 0:
 				ctx, cancel = context.WithCancel(context.Background())
-				cancel() // Cancel immediately
-			} else if index%3 == 1 {
-				// Some get cancelled after short timeout
-				ctx, cancel = context.WithTimeout(context.Background(), 1*time.Millisecond)
+				cancel() // Cancelled before the call.
+			case 1:
+				ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond)
 				defer cancel()
-			} else {
-				// Some don't get cancelled
+			default:
 				ctx = context.Background()
 			}
 
-			req := createTestCallToolRequest(map[string]any{
-				"regions": []any{"us-east-1"},
-				"limit":   5,
-			})
+			req := createTestCallToolRequest(map[string]any{argRegions: []any{"us-east-1"}, argMachine: "t2.micro"})
 
-			// Call should handle context cancellation gracefully
-			_, err := tool.Handle(ctx, req)
-
-			// We expect some to succeed, some to fail due to cancellation
-			// But no panics or races should occur
-			_ = err // Ignore specific errors, just ensure no races
+			// Some succeed and some fail; neither may panic or race.
+			_, _ = tool.Handle(ctx, req)
 		}(i)
 	}
 
@@ -465,46 +408,32 @@ func TestConcurrentContextCancellation(t *testing.T) {
 
 // TestConcurrentLargeDatasets tests concurrent access with realistic large datasets
 func TestConcurrentLargeDatasets(t *testing.T) {
-	client := newEmbeddedClient()
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	tool := NewFindSpotInstancesTool(client, logger)
+	t.Parallel()
+
+	tool := NewListSpotMachinesTool(newEmbeddedRegistry(), raceLogger())
+
+	largeRequests := []map[string]any{
+		{argRegions: []any{"us-east-1", "us-west-1", "us-west-2", "eu-west-1", "eu-central-1"}},
+		{argRegions: []any{string(cloud.RegionAll)}, argMachine: ".*"},
+		{argRegions: []any{"us-east-1", "us-west-2", "eu-west-1"}, argMinVCPU: 1, argMinMemoryGiB: 1.0},
+	}
 
 	const numGoroutines = 15
-	var wg sync.WaitGroup
 
-	// Large dataset requests that stress memory and processing
-	largeRequests := []map[string]any{
-		{
-			"regions": []any{"us-east-1", "us-west-1", "us-west-2", "eu-west-1", "eu-central-1"},
-			"limit":   50, // Large result set
-		},
-		{
-			"regions":        []any{"all"}, // All regions
-			"instance_types": ".*",         // All instance types
-			"limit":          30,
-		},
-		{
-			"regions":       []any{"us-east-1", "us-west-2", "eu-west-1"},
-			"min_vcpu":      1,
-			"min_memory_gb": 1,
-			"limit":         25,
-		},
-	}
+	var wg sync.WaitGroup
 
 	for i := range numGoroutines {
 		wg.Add(1)
+
 		go func(index int) {
 			defer wg.Done()
 
 			req := createTestCallToolRequest(largeRequests[index%len(largeRequests)])
-			result, err := tool.Handle(context.Background(), req)
 
-			// Verify large datasets are handled correctly
+			result, err := tool.Handle(context.Background(), req)
 			assert.NoError(t, err, "Large dataset request %d should succeed", index)
-			if err == nil {
-				assert.NotNil(t, result, "Result should not be nil")
-				assert.False(t, result.IsError, "Result should not be an error")
-			}
+			require.NotNil(t, result, "Result should not be nil")
+			assert.False(t, result.IsError, "Result should not be an error")
 		}(i)
 	}
 

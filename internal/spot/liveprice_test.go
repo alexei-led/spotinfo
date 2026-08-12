@@ -1,8 +1,12 @@
 package spot
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -130,6 +134,61 @@ func TestEnrichMissingPrices_PartialResults(t *testing.T) {
 	assert.True(t, advices[0].LivePrice)
 	assert.Equal(t, 0.0, advices[1].Price)
 	assert.False(t, advices[1].LivePrice)
+}
+
+// A machine with no AWS credentials fails every region with the same cached
+// error. Logging it per region printed twelve copies of a 450-character IMDS
+// failure on a default `spotinfo list`, on a command that answered correctly
+// from the static feed. Serial: slog.SetDefault is process-wide.
+func TestEnrichMissingPricesReportsMissingCredentialsOnce(t *testing.T) {
+	provider := newMocklivePriceProvider(t)
+	provider.EXPECT().fetchLivePrices(mock.Anything, mock.Anything, mock.Anything, "linux").
+		Return(nil, fmt.Errorf("live pricing unavailable: %w", errNoAWSCredentials)).Times(3)
+
+	var logged bytes.Buffer
+
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	advices := []Advice{
+		{Region: "us-east-1", Instance: "m8g.xlarge", Price: 0},
+		{Region: "eu-west-1", Instance: "m8g.xlarge", Price: 0},
+		{Region: "ap-south-1", Instance: "m8g.xlarge", Price: 0},
+	}
+
+	enrichMissingPrices(context.Background(), advices, provider, "linux", 5*time.Second)
+
+	assert.Equal(t, 1, strings.Count(logged.String(), "no AWS credentials"),
+		"three regions, one line")
+	assert.Contains(t, logged.String(), "--offline", "the line must say what to do next")
+	assert.Contains(t, logged.String(), "ap-south-1", "and which regions went unpriced")
+}
+
+// The collapse must not swallow a failure that really is per region, or a
+// throttled region becomes indistinguishable from a healthy one.
+func TestEnrichMissingPricesStillNamesEachNonCredentialFailure(t *testing.T) {
+	provider := newMocklivePriceProvider(t)
+	provider.EXPECT().fetchLivePrices(mock.Anything, "us-east-1", mock.Anything, "linux").
+		Return(nil, errors.New("throttled")).Once()
+	provider.EXPECT().fetchLivePrices(mock.Anything, "eu-west-1", mock.Anything, "linux").
+		Return(nil, errors.New("throttled")).Once()
+
+	var logged bytes.Buffer
+
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	advices := []Advice{
+		{Region: "us-east-1", Instance: "m8g.xlarge", Price: 0},
+		{Region: "eu-west-1", Instance: "m8g.xlarge", Price: 0},
+	}
+
+	enrichMissingPrices(context.Background(), advices, provider, "linux", 5*time.Second)
+
+	assert.Equal(t, 2, strings.Count(logged.String(), "failed to fetch live prices"))
+	assert.NotContains(t, logged.String(), "no AWS credentials")
 }
 
 func TestOsToProductDescription(t *testing.T) {

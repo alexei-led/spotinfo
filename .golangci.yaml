@@ -1,5 +1,4 @@
 version: "2"
-
 linters:
   settings:
     govet:
@@ -64,9 +63,12 @@ linters:
             - $all
           allow:
             - $gostd
-            - spotinfo/internal/spot
+            # One entry for every internal package, deliberately. depguard only
+            # prefix-checks the nearest allow entry in sorted order, so listing
+            # `spotinfo/internal/spot` alongside `spotinfo/internal` silently
+            # denied every package sorting between them (internal/snapshot,
+            # internal/providers). Keep this list free of narrower entries.
             - spotinfo/internal
-            - spotinfo/internal/mcp
             - github.com/jedib0t/go-pretty/v6
             - github.com/urfave/cli/v2
             - github.com/stretchr/testify
@@ -74,8 +76,27 @@ linters:
             - github.com/spf13/cast
             - github.com/bluele/gcache
             - golang.org/x/time
+            # HTML tokenizer for the GCP pricing-page parser. The published
+            # pages are the only contracted GCP source, and the standard library
+            # has no HTML parser.
+            - golang.org/x/net/html
+            # Application Default Credentials for the authenticated GCP
+            # preemption-rate lookup. The canonical ADC implementation: it
+            # resolves a gcloud user credential, a service account, a container
+            # role and the GCE metadata server alike, and hand-rolling that
+            # token refresh is not a thing to do by hand. Only the oauth2
+            # client is taken — not google.golang.org/api, whose generated
+            # compute surface is far larger than the one endpoint we call.
+            - golang.org/x/oauth2
             - github.com/aws/aws-sdk-go-v2
             - github.com/aws/smithy-go
+            # JSON Schema validator, tests only. It validates the documents the
+            # built binary prints against the contract files in
+            # docs/plans/contracts/, which is what makes a schema edit that
+            # outruns the code fail in cmd/spotinfo rather than in a consumer.
+            # Already in the module graph through mcp-go, so it costs the
+            # shipped binary nothing — no non-test file imports it.
+            - github.com/santhosh-tekuri/jsonschema/v6
             - github.com/jedib0t/go-pretty/v6/table
             - github.com/jedib0t/go-pretty/v6/text
     testifylint:
@@ -83,7 +104,6 @@ linters:
     tagalign:
       align: true
       sort: true
-
   # please, do not use `enable-all`: it's deprecated and will be removed soon.
   # inverted configuration with `enable-all` and `disable` is not scalable during updates of golangci-lint
   default: none
@@ -96,7 +116,6 @@ linters:
     - staticcheck # Comprehensive static analysis
     - unused # Unused code
     - errorlint # Error wrapping issues
-
     # Code quality and best practices
     - bodyclose # HTTP response body close check
     - contextcheck # Context usage patterns
@@ -121,10 +140,8 @@ linters:
     - unconvert # Unnecessary conversions
     - unparam # Unused parameters
     - wastedassign # Wasted assignments
-
     # Performance-related
     - prealloc # Slice preallocation
-
     # Additional best practices (keep important ones)
     - durationcheck # Duration multiplication
     - errname # Error naming conventions
@@ -136,7 +153,6 @@ linters:
     - nosprintfhostport # Sprintf host:port misuse
     - reassign # Package variable reassignment
     - forcetypeassert # Type assertion without check
-
   # Explicitly disabled linters with reasons
   # - gochecknoglobals  # Too restrictive for CLI apps that need global flags/config
   # - gocognit          # Redundant with cyclop
@@ -148,12 +164,11 @@ linters:
   # - iface             # Too opinionated
   # - inamedparam       # Too verbose
   # - intrange          # Go 1.22+ feature not always available
-
   exclusions:
     rules:
-      - path: '(.+)\.go$'
+      - path: (.+)\.go$
         text: Using the variable on range scope `tt` in function literal
-      - path: '(.+)_test\.go'
+      - path: (.+)_test\.go
         linters:
           - funlen
           - gocyclo
@@ -172,7 +187,7 @@ linters:
           - staticcheck
           - unused
           - gosec
-      - path: 'mocks_test\.go'
+      - path: mocks_test\.go
         linters:
           - stylecheck
           - revive
@@ -181,13 +196,12 @@ linters:
           - unused
           - deadcode
           - typecheck
-      - path: 'cmd/main\.go'
+      - path: cmd/main\.go
         linters:
           - exhaustruct
       - linters:
           - lll
-        source: "^//go:generate "
-
+        source: '^//go:generate '
 formatters:
   enable:
     - gci
@@ -202,4 +216,3 @@ formatters:
     goimports:
       local-prefixes:
         - spotinfo
-

@@ -1,0 +1,46 @@
+{
+  "BillingCurrency": "USD",
+  "NextPageLink": "",
+  "Count": 3,
+  "Items": [
+    {
+      "currencyCode": "USD",
+      "retailPrice": 0.0412,
+      "armRegionName": "eastus",
+      "effectiveStartDate": "2026-01-01T00:00:00Z",
+      "meterName": "D2s v5 Spot",
+      "productName": "Virtual Machines Dsv5 Series",
+      "skuName": "D2s v5 Spot",
+      "serviceName": "Virtual Machines",
+      "unitOfMeasure": "1 Hour",
+      "type": "Consumption",
+      "armSkuName": "Standard_D2s_v5"
+    },
+    {
+      "currencyCode": "USD",
+      "retailPrice": 0.0412,
+      "armRegionName": "eastus",
+      "effectiveStartDate": "2026-02-01T00:00:00Z",
+      "meterName": "D2s v5 Spot",
+      "productName": "Virtual Machines Dsv5 Series (repeat)",
+      "skuName": "D2s v5 Spot",
+      "serviceName": "Virtual Machines",
+      "unitOfMeasure": "1 Hour",
+      "type": "Consumption",
+      "armSkuName": "Standard_D2s_v5"
+    },
+    {
+      "currencyCode": "USD",
+      "retailPrice": 0.0563,
+      "armRegionName": "eastus",
+      "effectiveStartDate": "2026-03-01T00:00:00Z",
+      "meterName": "D2s v5 Spot",
+      "productName": "Virtual Machines Dsv5 Series (conflict)",
+      "skuName": "D2s v5 Spot",
+      "serviceName": "Virtual Machines",
+      "unitOfMeasure": "1 Hour",
+      "type": "Consumption",
+      "armSkuName": "Standard_D2s_v5"
+    }
+  ]
+}

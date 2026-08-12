@@ -1,0 +1,25 @@
+{
+  "schema_version": "spotinfo.snapshot-manifest/v1",
+  "data_schema_version": "aws.spot-advisor-feed/v1",
+  "parser_version": "aws-spot-advisor-json/1",
+  "provider": "aws",
+  "kind": "interruption-risk",
+  "payload": {
+    "file": "spot-advisor-data.json",
+    "form": "raw-source",
+    "sha256": "158f404cca4a5167a2a035cbd952de8f1886bb14c8cdbc2a55f4871c33735f1a"
+  },
+  "sources": [
+    {
+      "fetched_at": "2026-08-10T06:54:02Z",
+      "observed_at": null,
+      "url": "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json",
+      "sha256": "158f404cca4a5167a2a035cbd952de8f1886bb14c8cdbc2a55f4871c33735f1a"
+    }
+  ],
+  "min_records": {
+    "regions": 25,
+    "machines": 900,
+    "prices": 0
+  }
+}

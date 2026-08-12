@@ -1,0 +1,27 @@
+{
+  "schema_version": "spotinfo.snapshot-manifest/v1",
+  "data_schema_version": "aws.spot-price-feed/v1",
+  "parser_version": "aws-spot-price-json/1",
+  "provider": "aws",
+  "kind": "spot-price",
+  "currency": "USD",
+  "billing_unit": "instance-hour",
+  "payload": {
+    "file": "spot-price-data.json",
+    "form": "raw-source",
+    "sha256": "cafdfff877df03265127b0b7615b92de79bc4e53b20eef3f2bb37181160fdbee"
+  },
+  "sources": [
+    {
+      "fetched_at": "2026-08-10T06:54:02Z",
+      "observed_at": null,
+      "url": "https://website.spot.ec2.aws.a2z.com/spot.json",
+      "sha256": "cafdfff877df03265127b0b7615b92de79bc4e53b20eef3f2bb37181160fdbee"
+    }
+  ],
+  "min_records": {
+    "regions": 30,
+    "machines": 1000,
+    "prices": 25000
+  }
+}

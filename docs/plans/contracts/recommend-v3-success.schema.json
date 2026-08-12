@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alexei-led/spotinfo/schemas/recommend-v3-success.schema.json",
+  "title": "spotinfo.recommend/v3 success payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "request", "ranking_policy", "data_source", "recommendations", "warnings"],
+  "properties": {
+    "schema_version": {"const": "spotinfo.recommend/v3"},
+    "status": {"const": "ok"},
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cloud", "regions", "machine", "architecture", "os", "min_vcpu", "min_memory_gib", "max_price", "workload", "top"],
+      "properties": {
+        "cloud": {"type": "string", "enum": ["aws", "gcp", "azure"]},
+        "regions": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+        "machine": {"type": "string"},
+        "architecture": {"type": "string", "enum": ["x86_64", "arm64"]},
+        "os": {"type": "string", "enum": ["linux", "windows"]},
+        "min_vcpu": {"type": "integer", "minimum": 1},
+        "min_memory_gib": {"type": "number", "exclusiveMinimum": 0},
+        "max_price": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "workload": {"type": "string", "enum": ["cost", "web", "ci", "batch"]},
+        "top": {"type": "integer", "minimum": 1, "maximum": 50}
+      }
+    },
+    "ranking_policy": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "data_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "mode", "sources", "sources_omitted"],
+      "properties": {
+        "provider": {"type": "string", "enum": ["aws", "gcp", "azure"]},
+        "mode": {"type": "string", "enum": ["embedded-snapshot", "live", "cached"]},
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["url", "fetched_at", "observed_at", "content_sha256", "parser_version", "schema_version"],
+            "properties": {
+              "url": {"type": "string", "format": "uri"},
+              "fetched_at": {"type": "string", "format": "date-time"},
+              "observed_at": {"type": ["string", "null"], "format": "date-time"},
+              "content_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+              "parser_version": {"type": "string", "minLength": 1},
+              "schema_version": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "sources_omitted": {"type": "integer", "minimum": 0}
+      }
+    },
+    "recommendations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rank", "cloud", "region", "machine", "architecture", "os", "vcpu", "memory_gib", "spot_usd_per_hour", "on_demand_usd_per_hour", "savings_percent", "risk", "rationale_codes"],
+        "properties": {
+          "rank": {"type": "integer", "minimum": 1},
+          "cloud": {"type": "string", "enum": ["aws", "gcp", "azure"]},
+          "region": {"type": "string", "minLength": 1},
+          "machine": {"type": "string", "minLength": 1},
+          "architecture": {"type": "string", "enum": ["x86_64", "arm64"]},
+          "os": {"type": "string", "enum": ["linux", "windows"]},
+          "vcpu": {"type": "integer", "minimum": 1},
+          "memory_gib": {"type": "number", "exclusiveMinimum": 0},
+          "spot_usd_per_hour": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.[0-9]{9}$"},
+          "on_demand_usd_per_hour": {"type": ["string", "null"], "pattern": "^(0|[1-9][0-9]*)\\.[0-9]{9}$"},
+          "savings_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+          "risk": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status", "kind", "label", "min_percent", "max_percent", "window_days", "source_url", "observed_at"],
+            "properties": {
+              "status": {"type": "string", "enum": ["available", "unavailable", "unsupported", "unknown"]},
+              "kind": {"enum": [null, "interruption_bucket", "preemption_rate", "eviction_rate"]},
+              "label": {"type": ["string", "null"]},
+              "min_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+              "max_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+              "window_days": {"type": ["integer", "null"], "minimum": 1},
+              "source_url": {"type": ["string", "null"], "format": "uri"},
+              "observed_at": {"type": ["string", "null"], "format": "date-time"}
+            }
+          },
+          "rationale_codes": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+          "region_score": {"type": "integer", "minimum": 1, "maximum": 10},
+          "zone_scores": {
+            "type": "object",
+            "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 10}
+          },
+          "score_fetched_at": {"type": "string", "format": "date-time"},
+          "region_obtainability": {"type": "number", "minimum": 0, "maximum": 1},
+          "zone_obtainability": {
+            "type": "object",
+            "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}
+          },
+          "region_estimated_uptime_seconds": {"type": "number", "exclusiveMinimum": 0},
+          "placement_status": {"type": "string", "enum": ["unavailable"]}
+        }
+      }
+    },
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  }
+}

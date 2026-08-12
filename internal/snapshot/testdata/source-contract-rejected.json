@@ -1,0 +1,37 @@
+{
+  "schema_version": "spotinfo.source-contract/v1",
+  "provider": "azure",
+  "review_status": "pending",
+  "reviewer": "example-maintainer",
+  "reviewed_at": "2026-08-07",
+  "sources": [
+    {
+      "url": "https://prices.azure.com/api/retail/prices",
+      "source_type": "documented-rest-api",
+      "data_kinds": ["spot-price", "on-demand-price"]
+    }
+  ],
+  "terms": {
+    "redistribution_decision": "undecided",
+    "evidence_url": "https://example.invalid/terms-review",
+    "notes": "Synthetic fixture. Redistribution was never decided, so no data may be committed."
+  },
+  "expected_fields": ["armRegionName", "armSkuName", "retailPrice", "priceType"],
+  "support": {
+    "risk_status": "unavailable",
+    "operating_systems": ["linux"],
+    "architectures": ["x86_64"],
+    "price_classes": ["spot", "on-demand"],
+    "regions": ["eastus"],
+    "machine_series": ["Dv5"]
+  },
+  "thresholds": {
+    "min_regions": 1,
+    "min_machines": 5,
+    "max_compressed_bytes": 1048576,
+    "max_fractional_digits": 9
+  },
+  "parser_version": "azure-retail-prices/1",
+  "update_cadence": "weekly",
+  "no_go_conditions": ["Redistribution is not approved."]
+}

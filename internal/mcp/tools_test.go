@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"os"
 	"testing"
@@ -11,691 +10,719 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"spotinfo/internal/cloud"
 	"spotinfo/internal/spot"
 )
 
-func TestParseParameters(t *testing.T) {
-	tests := []struct {
-		name     string
-		args     any
-		expected *params
-	}{
-		{
-			name: "complete parameters including score options",
-			args: map[string]any{
-				"regions":               []any{"us-east-1", "eu-west-1"},
-				"instance_types":        "m5.large",
-				"min_vcpu":              4,
-				"min_memory_gb":         8,
-				"max_price_per_hour":    0.5,
-				"max_interruption_rate": 20.0,
-				"sort_by":               "price",
-				"limit":                 5,
-				"with_score":            true,
-				"min_score":             7,
-				"az":                    true,
-				"score_timeout":         30,
-			},
-			expected: &params{
-				regions:         []string{"us-east-1", "eu-west-1"},
-				instanceTypes:   "m5.large",
-				minVCPU:         4,
-				minMemoryGB:     8,
-				maxPrice:        0.5,
-				maxInterruption: 20.0,
-				sortBy:          "price",
-				limit:           5,
-				withScore:       true,
-				minScore:        7,
-				az:              true,
-				scoreTimeout:    30,
-			},
-		},
-		{
-			name: "empty parameters use defaults",
-			args: map[string]any{},
-			expected: &params{
-				regions:         []string{"all"},
-				instanceTypes:   "",
-				minVCPU:         0,
-				minMemoryGB:     0,
-				maxPrice:        0,
-				maxInterruption: 0,
-				sortBy:          "reliability",
-				limit:           defaultLimit,
-				withScore:       false,
-				minScore:        0,
-				az:              false,
-				scoreTimeout:    0,
-			},
-		},
-		{
-			name: "score sorting option",
-			args: map[string]any{
-				"sort_by":    "score",
-				"with_score": true,
-			},
-			expected: &params{
-				regions:         []string{"all"},
-				instanceTypes:   "",
-				minVCPU:         0,
-				minMemoryGB:     0,
-				maxPrice:        0,
-				maxInterruption: 0,
-				sortBy:          "score",
-				limit:           defaultLimit,
-				withScore:       true,
-				minScore:        0,
-				az:              false,
-				scoreTimeout:    0,
-			},
-		},
-		{
-			name: "limit exceeds maximum",
-			args: map[string]any{
-				"limit": 100,
-			},
-			expected: &params{
-				regions:         []string{"all"},
-				instanceTypes:   "",
-				minVCPU:         0,
-				minMemoryGB:     0,
-				maxPrice:        0,
-				maxInterruption: 0,
-				sortBy:          "reliability",
-				limit:           maxLimit,
-				withScore:       false,
-				minScore:        0,
-				az:              false,
-				scoreTimeout:    0,
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := parseParameters(tt.args)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 }
 
-func TestConvertSortParams(t *testing.T) {
-	tests := []struct {
-		name         string
-		sortBy       string
-		expectedSort spot.SortBy
-		expectedDesc bool
-	}{
-		{"price", "price", spot.SortByPrice, false},
-		{"reliability", "reliability", spot.SortByRange, false},
-		{"savings", "savings", spot.SortBySavings, true},
-		{"score", "score", spot.SortByScore, false},
-		{"default", "unknown", spot.SortByRange, false},
-		{"empty", "", spot.SortByRange, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sortBy, sortDesc := convertSortParams(tt.sortBy)
-			assert.Equal(t, tt.expectedSort, sortBy)
-			assert.Equal(t, tt.expectedDesc, sortDesc)
-		})
-	}
+func listTool(providers providerRegistry) *ListSpotMachinesTool {
+	return NewListSpotMachinesTool(providers, testLogger())
 }
 
-func TestFilterByInterruption(t *testing.T) {
-	testAdvices := []spot.Advice{
-		{Range: spot.Range{Min: 0, Max: 5}},   // avg = 2.5
-		{Range: spot.Range{Min: 10, Max: 20}}, // avg = 15
-		{Range: spot.Range{Min: 30, Max: 40}}, // avg = 35
-	}
-
-	tests := []struct {
-		name            string
-		advices         []spot.Advice
-		maxInterruption float64
-		expectedCount   int
-	}{
-		{
-			name:            "filter by 10 - should keep 1",
-			advices:         testAdvices,
-			maxInterruption: 10,
-			expectedCount:   1,
-		},
-		{
-			name:            "filter by 25 - should keep 2",
-			advices:         testAdvices,
-			maxInterruption: 25,
-			expectedCount:   2,
-		},
-		{
-			name:            "no filter (0) - should keep all",
-			advices:         testAdvices,
-			maxInterruption: 0,
-			expectedCount:   3,
-		},
-		{
-			name:            "no filter (>=100) - should keep all",
-			advices:         testAdvices,
-			maxInterruption: 100,
-			expectedCount:   3,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := filterByInterruption(tt.advices, tt.maxInterruption)
-			assert.Len(t, result, tt.expectedCount)
-		})
-	}
+func regionsTool(providers providerRegistry) *ListCloudRegionsTool {
+	return NewListCloudRegionsTool(providers, testLogger())
 }
 
-func TestBuildResponse(t *testing.T) {
-	startTime := time.Now()
-	scoreValue := 8
-	scoreTime := time.Now()
-	testAdvices := []spot.Advice{
-		{
-			Instance:       "m5.large",
-			Region:         "us-east-1",
-			Price:          0.0928,
-			Savings:        70,
-			Range:          spot.Range{Min: 5, Max: 10, Label: "5-10%"},
-			Info:           spot.TypeInfo{Cores: 2, RAM: 8.0},
-			RegionScore:    &scoreValue,
-			ScoreFetchedAt: &scoreTime,
-		},
-		{
-			Instance: "t3.medium",
-			Region:   "eu-west-1",
-			Price:    0.0416,
-			Savings:  65,
-			Range:    spot.Range{Min: 10, Max: 15, Label: "10-15%"},
-			Info:     spot.TypeInfo{Cores: 2, RAM: 4.0},
-			ZoneScores: map[string]int{
-				"eu-west-1a": 7,
-				"eu-west-1b": 9,
-			},
-			ScoreFetchedAt: &scoreTime,
-		},
-	}
+func callTool(t *testing.T,
+	handle func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error), args map[string]any,
+) *mcp.CallToolResult {
+	t.Helper()
 
-	response := buildResponse(testAdvices, startTime, spot.DataSourceEmbedded)
+	result, err := handle(t.Context(), mcp.CallToolRequest{Params: mcp.CallToolParams{Arguments: args}})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, result.Content, 1)
 
-	// Check response structure
-	assert.Contains(t, response, "results")
-	assert.Contains(t, response, "metadata")
-
-	// Check results
-	results, ok := response["results"].([]map[string]any)
-	assert.True(t, ok, "results should be a slice of maps")
-	assert.Len(t, results, 2)
-
-	// Check first result with region score
-	firstResult := results[0]
-	assert.Equal(t, "m5.large", firstResult["instance_type"])
-	assert.Equal(t, "us-east-1", firstResult["region"])
-	assert.Equal(t, 0.0928, firstResult["spot_price_per_hour"])
-	assert.Equal(t, 70, firstResult["savings_percentage"])
-	assert.Equal(t, 7.5, firstResult["interruption_rate"]) // (5+10)/2
-	assert.Equal(t, 92, firstResult["reliability_score"])  // 100-7.5
-
-	// Check metadata
-	metadata, ok := response["metadata"].(map[string]any)
-	assert.True(t, ok, "metadata should be a map")
-	assert.Equal(t, 2, metadata["total_results"])
-	assert.Equal(t, "embedded", metadata["data_source"])
+	return result
 }
 
-func TestCalculateAvgInterruption(t *testing.T) {
-	tests := []struct {
-		name     string
-		r        spot.Range
-		expected float64
-	}{
-		{"normal range", spot.Range{Min: 10, Max: 20}, 15.0},
-		{"zero range", spot.Range{Min: 0, Max: 0}, 0.0},
-		{"single value", spot.Range{Min: 5, Max: 5}, 5.0},
-	}
+func decodeListReport(t *testing.T, result *mcp.CallToolResult) cloud.ListReport {
+	t.Helper()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := calculateAvgInterruption(tt.r)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
+	require.False(t, result.IsError, "expected an answer, got %s", payloadOf(t, result))
+
+	var report cloud.ListReport
+	require.NoError(t, json.Unmarshal(payloadOf(t, result), &report))
+
+	return report
 }
 
-func TestCalculateReliabilityScore(t *testing.T) {
-	tests := []struct {
-		name            string
-		avgInterruption float64
-		expected        int
-	}{
-		{"low interruption", 10.0, 90},
-		{"high interruption", 80.0, 20},
-		{"zero interruption", 0.0, 100},
-		{"above max", 110.0, 0},
-	}
+func decodeRegionsReport(t *testing.T, result *mcp.CallToolResult) cloud.RegionsReport {
+	t.Helper()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := calculateReliabilityScore(tt.avgInterruption)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
+	require.False(t, result.IsError, "expected an answer, got %s", payloadOf(t, result))
+
+	var report cloud.RegionsReport
+	require.NoError(t, json.Unmarshal(payloadOf(t, result), &report))
+
+	return report
 }
 
-//nolint:maintidx // Complex table-driven test with multiple scenarios
-func TestFindSpotInstancesTool_Handle(t *testing.T) {
-	tests := []struct {
-		name           string
-		arguments      any
-		mockSetup      func(*mockspotClient)
-		validateResult func(*testing.T, *mcp.CallToolResult)
-	}{
-		{
-			name: "basic request with price sorting",
-			arguments: map[string]any{
-				"regions":        []any{"us-east-1"},
-				"instance_types": "t3.micro",
-				"sort_by":        "price",
-			},
-			mockSetup: func(m *mockspotClient) {
-				advices := []spot.Advice{
-					{
-						Instance: "t3.micro",
-						Region:   "us-east-1",
-						Price:    0.0104,
-						Savings:  68,
-						Range:    spot.Range{Min: 0, Max: 5, Label: "<5%"},
-						Info:     spot.TypeInfo{Cores: 2, RAM: 1.0},
-					},
-				}
-				// We can't match the exact options, so we use mock.Anything
-				// The test validates behavior through the returned data
-				m.EXPECT().GetSpotSavings(
-					mock.Anything,
-					mock.Anything,
-				).Return(advices, nil).Once()
-			},
-			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
-				require.False(t, result.IsError)
-				require.Len(t, result.Content, 1)
-				textContent, ok := result.Content[0].(mcp.TextContent)
-				require.True(t, ok)
+func registryOf(fixtures ...testCandidate) providerRegistry {
+	_, registry := awsStub(buildCandidates(fixtures...)...)
 
-				var response map[string]any
-				err := json.Unmarshal([]byte(textContent.Text), &response)
-				require.NoError(t, err)
-
-				results, ok := response["results"].([]any)
-				require.True(t, ok)
-				assert.Len(t, results, 1)
-
-				firstResult, ok := results[0].(map[string]any)
-				require.True(t, ok)
-				assert.Equal(t, "t3.micro", firstResult["instance_type"])
-				assert.Equal(t, "$0.0104/hour", firstResult["spot_price"])
-			},
-		},
-		{
-			name: "request with score enrichment",
-			arguments: map[string]any{
-				"regions":        []any{"us-west-2"},
-				"instance_types": "m5.large",
-				"with_score":     true,
-				"min_score":      7,
-				"sort_by":        "score",
-			},
-			mockSetup: func(m *mockspotClient) {
-				score8 := 8
-				score5 := 5
-				now := time.Now()
-				advices := []spot.Advice{
-					{
-						Instance:       "m5.large",
-						Region:         "us-west-2",
-						Price:          0.096,
-						Savings:        70,
-						Range:          spot.Range{Min: 5, Max: 10, Label: "5-10%"},
-						Info:           spot.TypeInfo{Cores: 2, RAM: 8.0},
-						RegionScore:    &score8,
-						ScoreFetchedAt: &now,
-					},
-					{
-						Instance:       "m5.large",
-						Region:         "us-west-2",
-						Price:          0.092,
-						Savings:        72,
-						Range:          spot.Range{Min: 10, Max: 15, Label: "10-15%"},
-						Info:           spot.TypeInfo{Cores: 2, RAM: 8.0},
-						RegionScore:    &score5, // This should be filtered out by min_score
-						ScoreFetchedAt: &now,
-					},
-				}
-				m.EXPECT().GetSpotSavings(
-					mock.Anything,
-					mock.Anything,
-				).Return(advices, nil).Once()
-			},
-			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
-				require.False(t, result.IsError)
-
-				var response map[string]any
-				textContent, ok := result.Content[0].(mcp.TextContent)
-				require.True(t, ok)
-				err := json.Unmarshal([]byte(textContent.Text), &response)
-				require.NoError(t, err)
-
-				// No results because filterByMinScore is not implemented in tools.go
-				// This test verifies the parameters are parsed correctly
-				results, ok := response["results"].([]any)
-				require.True(t, ok)
-				assert.Len(t, results, 2) // Both should be returned since filtering happens in client
-			},
-		},
-		{
-			name: "request with AZ-level scores",
-			arguments: map[string]any{
-				"regions":       []any{"eu-west-1"},
-				"with_score":    true,
-				"az":            true,
-				"score_timeout": 60,
-			},
-			mockSetup: func(m *mockspotClient) {
-				now := time.Now()
-				advices := []spot.Advice{
-					{
-						Instance: "t3.small",
-						Region:   "eu-west-1",
-						Price:    0.0208,
-						Savings:  68,
-						Range:    spot.Range{Min: 5, Max: 10, Label: "5-10%"},
-						Info:     spot.TypeInfo{Cores: 2, RAM: 2.0},
-						ZoneScores: map[string]int{
-							"eu-west-1a": 9,
-							"eu-west-1b": 7,
-							"eu-west-1c": 8,
-						},
-						ScoreFetchedAt: &now,
-					},
-				}
-				m.EXPECT().GetSpotSavings(
-					mock.Anything,
-					mock.Anything,
-				).Return(advices, nil).Once()
-			},
-			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
-				require.False(t, result.IsError)
-
-				var response map[string]any
-				textContent, ok := result.Content[0].(mcp.TextContent)
-				require.True(t, ok)
-				err := json.Unmarshal([]byte(textContent.Text), &response)
-				require.NoError(t, err)
-
-				results, ok := response["results"].([]any)
-				require.True(t, ok)
-				assert.Len(t, results, 1)
-			},
-		},
-		{
-			name: "interruption rate filtering",
-			arguments: map[string]any{
-				"regions":               []any{"us-east-1"},
-				"max_interruption_rate": 7.5,
-			},
-			mockSetup: func(m *mockspotClient) {
-				advices := []spot.Advice{
-					{
-						Instance: "t3.micro",
-						Region:   "us-east-1",
-						Range:    spot.Range{Min: 0, Max: 5}, // avg = 2.5, should pass
-						Price:    0.01,
-						Info:     spot.TypeInfo{Cores: 2, RAM: 1.0},
-					},
-					{
-						Instance: "t3.small",
-						Region:   "us-east-1",
-						Range:    spot.Range{Min: 10, Max: 20}, // avg = 15, should be filtered
-						Price:    0.02,
-						Info:     spot.TypeInfo{Cores: 2, RAM: 2.0},
-					},
-				}
-				m.EXPECT().GetSpotSavings(
-					mock.Anything,
-					mock.Anything,
-				).Return(advices, nil).Once()
-			},
-			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
-				require.False(t, result.IsError)
-
-				var response map[string]any
-				textContent, ok := result.Content[0].(mcp.TextContent)
-				require.True(t, ok)
-				err := json.Unmarshal([]byte(textContent.Text), &response)
-				require.NoError(t, err)
-
-				results, ok := response["results"].([]any)
-				require.True(t, ok)
-				assert.Len(t, results, 1, "Should filter out high interruption instances")
-
-				firstResult, ok := results[0].(map[string]any)
-				require.True(t, ok)
-				assert.Equal(t, "t3.micro", firstResult["instance_type"])
-			},
-		},
-		{
-			name:      "error handling",
-			arguments: map[string]any{"regions": []any{"invalid-region"}},
-			mockSetup: func(m *mockspotClient) {
-				m.EXPECT().GetSpotSavings(
-					mock.Anything,
-					mock.Anything,
-				).Return(nil, errors.New("AWS API error: invalid region")).Once()
-			},
-			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
-				assert.True(t, result.IsError)
-				textContent, ok := result.Content[0].(mcp.TextContent)
-				require.True(t, ok)
-				assert.Contains(t, textContent.Text, "Failed to get spot recommendations")
-				assert.Contains(t, textContent.Text, "AWS API error")
-			},
-		},
-		{
-			name:      "empty results",
-			arguments: map[string]any{"instance_types": "z99.mega"},
-			mockSetup: func(m *mockspotClient) {
-				m.EXPECT().GetSpotSavings(
-					mock.Anything,
-					mock.Anything,
-				).Return([]spot.Advice{}, nil).Once()
-			},
-			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
-				require.False(t, result.IsError)
-
-				var response map[string]any
-				textContent, ok := result.Content[0].(mcp.TextContent)
-				require.True(t, ok)
-				err := json.Unmarshal([]byte(textContent.Text), &response)
-				require.NoError(t, err)
-
-				results, ok := response["results"].([]any)
-				require.True(t, ok)
-				assert.Empty(t, results)
-
-				metadata, ok := response["metadata"].(map[string]any)
-				require.True(t, ok)
-				assert.Equal(t, float64(0), metadata["total_results"])
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockClient := newMockspotClient(t)
-			mockClient.EXPECT().DataSource().Return(spot.DataSourceEmbedded).Maybe()
-			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-			tool := NewFindSpotInstancesTool(mockClient, logger)
-
-			if tt.mockSetup != nil {
-				tt.mockSetup(mockClient)
-			}
-
-			req := mcp.CallToolRequest{
-				Params: mcp.CallToolParams{
-					Arguments: tt.arguments,
-				},
-			}
-
-			result, err := tool.Handle(context.Background(), req)
-
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			tt.validateResult(t, result)
-		})
-	}
+	return registry
 }
 
-func TestListSpotRegionsTool_Handle(t *testing.T) {
-	tests := []struct {
-		name           string
-		mockSetup      func(*mockspotClient)
-		validateResult func(*testing.T, *mcp.CallToolResult)
-	}{
-		{
-			name: "successful regions list",
-			mockSetup: func(m *mockspotClient) {
-				advices := []spot.Advice{
-					{Region: "us-east-1", Instance: "t3.micro"},
-					{Region: "us-west-2", Instance: "t3.small"},
-					{Region: "us-east-1", Instance: "m5.large"}, // duplicate region
-					{Region: "eu-west-1", Instance: "t3.medium"},
-					{Region: "ap-south-1", Instance: "t3.large"},
-				}
-				m.EXPECT().GetSpotSavings(
-					mock.Anything,
-					mock.Anything,
-				).Return(advices, nil).Once()
-			},
-			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
-				require.False(t, result.IsError)
+func scorePtr(score int) *int { return &score }
 
-				var response map[string]any
-				textContent, ok := result.Content[0].(mcp.TextContent)
-				require.True(t, ok)
-				err := json.Unmarshal([]byte(textContent.Text), &response)
-				require.NoError(t, err)
-
-				regions, ok := response["regions"].([]any)
-				require.True(t, ok)
-				assert.Len(t, regions, 4, "Should deduplicate regions")
-
-				regionStrs := make([]string, len(regions))
-				for i, r := range regions {
-					regionStrs[i], _ = r.(string)
-				}
-
-				assert.Contains(t, regionStrs, "us-east-1")
-				assert.Contains(t, regionStrs, "us-west-2")
-				assert.Contains(t, regionStrs, "eu-west-1")
-				assert.Contains(t, regionStrs, "ap-south-1")
-
-				assert.Equal(t, float64(4), response["total"])
-			},
-		},
-		{
-			name: "empty regions",
-			mockSetup: func(m *mockspotClient) {
-				m.EXPECT().GetSpotSavings(
-					mock.Anything,
-					mock.Anything,
-				).Return([]spot.Advice{}, nil).Once()
-			},
-			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
-				require.False(t, result.IsError)
-
-				var response map[string]any
-				textContent, ok := result.Content[0].(mcp.TextContent)
-				require.True(t, ok)
-				err := json.Unmarshal([]byte(textContent.Text), &response)
-				require.NoError(t, err)
-
-				regions, ok := response["regions"].([]any)
-				require.True(t, ok)
-				assert.Empty(t, regions)
-				assert.Equal(t, float64(0), response["total"])
-			},
-		},
-		{
-			name: "error handling",
-			mockSetup: func(m *mockspotClient) {
-				m.EXPECT().GetSpotSavings(
-					mock.Anything,
-					mock.Anything,
-				).Return(nil, errors.New("network timeout")).Once()
-			},
-			validateResult: func(t *testing.T, result *mcp.CallToolResult) {
-				assert.True(t, result.IsError)
-				textContent, ok := result.Content[0].(mcp.TextContent)
-				require.True(t, ok)
-				assert.Contains(t, textContent.Text, "Failed to retrieve regions")
-				assert.Contains(t, textContent.Text, "network timeout")
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockClient := newMockspotClient(t)
-			mockClient.EXPECT().DataSource().Return(spot.DataSourceEmbedded).Maybe()
-			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-			tool := NewListSpotRegionsTool(mockClient, logger)
-
-			if tt.mockSetup != nil {
-				tt.mockSetup(mockClient)
-			}
-
-			req := mcp.CallToolRequest{
-				Params: mcp.CallToolParams{
-					Arguments: map[string]any{},
-				},
-			}
-
-			result, err := tool.Handle(context.Background(), req)
-
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			tt.validateResult(t, result)
-		})
-	}
-}
-
-// Freshness is derived from the data source, never asserted. Metadata claiming
-// "current" while serving a months-old embedded snapshot is worse than none.
-func TestFreshnessFor(t *testing.T) {
+// Every acquisition-shaping argument must reach the provider. Asserting the
+// answer alone would pass even if the score, zone, ordering and price arguments
+// were dropped, because a fixture can carry scores the request never asked for.
+func TestListArgumentsReachTheProviderQuery(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		source string
-		want   string
-	}{
-		{name: "live AWS data", source: spot.DataSourceAWS, want: dataFreshnessLive},
-		{name: "embedded snapshot", source: spot.DataSourceEmbedded, want: dataFreshnessSnapshot},
-		{name: "unknown source is not claimed as live", source: "something-else", want: dataFreshnessSnapshot},
-	}
+	provider, registry := awsStub()
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	result := callTool(t, listTool(registry).Handle, map[string]any{
+		argRegions:      []any{"us-east-1", "eu-west-1"},
+		argMachine:      "m5.*",
+		argArchitecture: "arm64",
+		argOS:           "windows",
+		argMinVCPU:      4,
+		argMinMemoryGiB: 16.0,
+		argMaxPrice:     0.25,
+		argSort:         "savings",
+		argOrder:        cloud.OrderDesc,
+		argWithScore:    true,
+		argMinScore:     7,
+		argAZ:           true,
+		argScoreTimeout: 60,
+	})
+	require.False(t, result.IsError, string(payloadOf(t, result)))
+
+	query := provider.lastQuery()
+	assert.Equal(t, []cloud.Region{"us-east-1", "eu-west-1"}, query.Regions)
+	assert.Equal(t, "m5.*", query.MachinePattern)
+	assert.Equal(t, cloud.ArchitectureARM64, query.Architecture)
+	assert.Equal(t, cloud.OSWindows, query.OS)
+	assert.Equal(t, 4, query.MinVCPU)
+	assert.InDelta(t, 16.0, query.MinMemoryGiB, 0)
+	require.NotNil(t, query.MaxPrice)
+	assert.Equal(t, "0.250000000", query.MaxPrice.String())
+	assert.Equal(t, cloud.SortOrder{Key: cloud.SortBySavings, Descending: true}, query.Sort)
+	assert.Equal(t, cloud.PlacementRequest{
+		Timeout:    60 * time.Second,
+		MinScore:   7,
+		SingleZone: true,
+		Enabled:    true,
+	}, query.Placement)
+}
+
+// Every documented default is applied by the handler, so a minimal request is
+// answered exactly as the advertised schema describes — and with the same
+// values the CLI uses, because both read them from internal/cloud.
+func TestListAppliesTheDocumentedDefaults(t *testing.T) {
+	t.Parallel()
+
+	provider, registry := awsStub(buildCandidates(testCandidate{
+		Region: "us-east-1", Machine: "m6i.large", Price: 0.0416, Savings: 72,
+		RiskLabel: "<5%", RiskMin: 0, RiskMax: 5, VCPU: 2, MemoryGiB: 8,
+	})...)
+
+	report := decodeListReport(t, callTool(t, listTool(registry).Handle, map[string]any{}))
+
+	assert.Equal(t, cloud.SchemaVersionListV1, report.SchemaVersion)
+	assert.Equal(t, cloud.ProviderAWS, report.Request.Cloud, "cloud defaults to aws")
+	assert.Equal(t, []cloud.Region{cloud.RegionAll}, report.Request.Regions, "regions default to all")
+	assert.Equal(t, cloud.OSLinux, report.Request.OS)
+	assert.Equal(t, cloud.OrderAsc, report.Request.Order)
+	assert.Empty(t, report.Request.Sort, "an omitted sort leaves the order to the provider")
+	assert.Empty(t, report.Request.Machine)
+	assert.Nil(t, report.Request.MaxPrice, "an omitted ceiling is null, not zero")
+	require.Len(t, report.Candidates, 1)
+
+	query := provider.lastQuery()
+	assert.Equal(t, cloud.PlacementRequest{}, query.Placement, "scores are off unless asked for")
+}
+
+// The list tool and `spotinfo list --output json` publish the same document:
+// same schema, same candidate block, same provenance. That is what makes the
+// two surfaces answer one question one way.
+func TestListToolPublishesTheSameDocumentAsTheCLI(t *testing.T) {
+	t.Parallel()
+
+	candidates := buildCandidates(testCandidate{
+		Region: "us-east-1", Machine: "m6i.large", Price: 0.0416, Savings: 72, Live: true,
+		RiskLabel: "<5%", RiskMin: 0, RiskMax: 5, VCPU: 2, MemoryGiB: 8,
+	})
+
+	provider, registry := awsStub(candidates...)
+
+	report := decodeListReport(t, callTool(t, listTool(registry).Handle, map[string]any{
+		argRegions: []any{"us-east-1"},
+	}))
+
+	expected, err := cloud.NewListReport(ptr(provider.lastQuery()), &cloud.Result{
+		Provider:   cloud.ProviderAWS,
+		Mode:       cloud.DataModeEmbeddedSnapshot,
+		Sources:    testSources(),
+		Candidates: candidates,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, *expected, report)
+}
+
+func ptr[T any](value T) *T { return &value }
+
+// A cloud that publishes no interruption figure reports that absence. Reading
+// its silence as zero would rank an unmeasured machine as the safest one.
+func TestListReportsUnavailableRiskExplicitly(t *testing.T) {
+	t.Parallel()
+
+	registry := newStubRegistry(offlineProvider(cloud.ProviderGCP, gcpCandidates()))
+
+	report := decodeListReport(t, callTool(t, listTool(registry).Handle, map[string]any{argCloud: "gcp"}))
+	require.NotEmpty(t, report.Candidates)
+
+	risk := report.Candidates[0].Risk
+	assert.Equal(t, cloud.RiskStatusUnavailable, risk.Status)
+	assert.Nil(t, risk.Kind)
+	assert.Nil(t, risk.MinPercent)
+	assert.Nil(t, risk.MaxPercent)
+}
+
+// The AWS adapter is driven for real here, over fixed spot.Advice: the whole
+// spot.Advice -> cloud.Candidate conversion sits between what a caller asks and
+// what this tool publishes, and a stub provider bypasses all of it.
+func TestListToolAnswersThroughTheProductionAWSAdapter(t *testing.T) {
+	t.Parallel()
+
+	regionScore := 8
+	registry := awsAdapterRegistry(t, []spot.Advice{
+		{
+			Region: "us-east-1", Instance: "m6i.large", Price: 0.0416, Savings: 72,
+			Info:  spot.TypeInfo{Cores: 2, RAM: 8},
+			Range: spot.Range{Label: "<5%", Min: 0, Max: 5},
+		},
+		{
+			Region: "us-west-2", Instance: "m5.xlarge", Price: 0.1234, Savings: 65, LivePrice: true,
+			Info:        spot.TypeInfo{Cores: 4, RAM: 16},
+			Range:       spot.Range{Label: "5-10%", Min: 5, Max: 11},
+			RegionScore: &regionScore,
+		},
+	})
+
+	report := decodeListReport(t, callTool(t, listTool(registry).Handle, map[string]any{}))
+	require.Len(t, report.Candidates, 2)
+
+	first := report.Candidates[0]
+	assert.Equal(t, cloud.MachineID("m6i.large"), first.Machine)
+	require.NotNil(t, first.SpotUSDPerHour)
+	assert.Equal(t, "0.041600000", *first.SpotUSDPerHour)
+	require.NotNil(t, first.SavingsPercent)
+	assert.InDelta(t, 72.0, *first.SavingsPercent, 0)
+	assert.False(t, first.LivePrice)
+
+	second := report.Candidates[1]
+	assert.True(t, second.LivePrice, "a price the EC2 API supplied must say so")
+	require.NotNil(t, second.RegionScore)
+	assert.Equal(t, regionScore, *second.RegionScore)
+}
+
+// The capability gate runs before acquisition, so a provider that cannot answer
+// the request costs no I/O. The error alone would not prove that — the stub
+// records every call, so a zero call count is the proof.
+func TestListRejectsAnUnsupportedCapabilityBeforeAcquisition(t *testing.T) {
+	t.Parallel()
+
+	// An offline Linux-only provider is the shape GCP and Azure have: no risk,
+	// no scores, no zone detail.
+	provider := &stubProvider{id: cloud.ProviderGCP, capabilities: offlineLinuxCapabilities()}
+	registry := newStubRegistry(provider)
+
+	for name, args := range map[string]map[string]any{
+		"sorting by an unpublished risk figure": {argCloud: "gcp", argSort: "risk"},
+		"asking for placement scores":           {argCloud: "gcp", argWithScore: true},
+		"asking for zone detail":                {argCloud: "gcp", argWithScore: true, argAZ: true},
+		"an operating system it does not price": {argCloud: "gcp", argOS: "windows"},
+	} {
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, freshnessFor(tc.source))
+			result := callTool(t, listTool(registry).Handle, args)
+			assert.Equal(t, cloud.CodeUnsupportedCapability, decodeError(t, result).Code)
+			assert.Zero(t, provider.callCount(), "the capability check must run before acquisition")
 		})
 	}
+}
+
+// Every failure is a published spotinfo.error/v1 body with a stable code, and
+// no failure carries candidates.
+func TestListErrorContract(t *testing.T) {
+	t.Parallel()
+
+	riskFree := newStubRegistry(offlineProvider(cloud.ProviderGCP, gcpCandidates()))
+
+	for _, test := range []struct {
+		name      string
+		registry  providerRegistry
+		args      map[string]any
+		wantCode  cloud.ErrorCode
+		wantCloud *string
+	}{
+		{
+			name: "unknown cloud", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "ibm"}, wantCloud: stringPtr("ibm"),
+		},
+		{
+			name: "unparsable cloud argument", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: 42},
+		},
+		{
+			name: "explicit empty cloud", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: ""},
+		},
+		{
+			// Misspelled, it would return machines with no ceiling applied and
+			// status ok, which only a client diffing the echoed request would see.
+			name: "undeclared argument", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", "budget": 0.05}, wantCloud: stringPtr("gcp"),
+		},
+		{
+			// The retired v1 names have no successor on this tool and must not be
+			// silently accepted either.
+			name: "retired v1 argument", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", "instance_types": "n2-*"}, wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "unknown sort key", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", argSort: "interruption"}, wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "unknown order", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", argOrder: "descending"}, wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "unknown architecture", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", argArchitecture: "riscv64"}, wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "negative minimum vcpu", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", argMinVCPU: -1}, wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "negative minimum memory", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", argMinMemoryGiB: -1.0}, wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "zero price ceiling", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", argMaxPrice: 0}, wantCloud: stringPtr("gcp"),
+		},
+		{
+			// ParseFloat accepts these from a quoted argument, and neither is a
+			// ceiling: a NaN comparison drops every candidate, an infinite one
+			// filters nothing while the caller believes it did.
+			name: "quoted non-finite price ceiling", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", argMaxPrice: "NaN"}, wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "minimum score without with_score", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", argMinScore: 7}, wantCloud: stringPtr("gcp"),
+		},
+		{
+			// az and score_timeout used to be accepted here and answered ok —
+			// az set SingleZone on a request that fetched nothing, and the
+			// budget was dropped. The CLI has refused both since task 8.
+			name: "zone detail without with_score", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", argAZ: true}, wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "score timeout without with_score", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", argScoreTimeout: 20}, wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "score timeout out of range", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", argWithScore: true, argScoreTimeout: 0}, wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "with_score given as a string", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", argWithScore: "true"}, wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "regions given as a bare string", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", argRegions: "us-central1 us-east1"}, wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "empty regions array", registry: riskFree, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", argRegions: []any{}}, wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "unregistered cloud", registry: riskFree, wantCode: cloud.CodeDataUnavailable,
+			args: map[string]any{argCloud: "azure"}, wantCloud: stringPtr("azure"),
+		},
+		{
+			name: "acquisition failure", registry: failingAWSStub(errAcquisition),
+			wantCode: cloud.CodeInternal, args: map[string]any{}, wantCloud: stringPtr("aws"),
+		},
+		{
+			// A binary composed without a registry still registers every tool.
+			// The handler must report that, not dereference nil: a panic takes
+			// the stdio process down for every connected client.
+			name: "no provider registry", registry: nil, wantCode: cloud.CodeDataUnavailable,
+			args: map[string]any{}, wantCloud: stringPtr("aws"),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := callTool(t, listTool(test.registry).Handle, test.args)
+
+			report := decodeError(t, result)
+			assert.Equal(t, cloud.SchemaVersionErrorV1, report.SchemaVersion)
+			assert.Equal(t, test.wantCode, report.Code)
+			assert.NotEmpty(t, report.Message)
+			assert.Equal(t, test.wantCloud, report.Cloud)
+			assert.NotContains(t, string(payloadOf(t, result)), "candidates")
+		})
+	}
+}
+
+// offline and refresh must reach the acquisition client, not merely be
+// accepted. A tool that takes a data policy and drops it is indistinguishable
+// from one that honours it — which is exactly the defect the retired
+// include_names parameter was, and the reason the stub registry records what
+// each lookup asked for.
+func TestTheDataPolicyReachesAcquisition(t *testing.T) {
+	t.Parallel()
+
+	candidates := buildCandidates(testCandidate{
+		Region: "us-east-1", Machine: "m6i.large", Price: 0.0416, VCPU: 2, MemoryGiB: 8,
+	})
+
+	for name, test := range map[string]struct {
+		args map[string]any
+		want cloud.FetchPolicy
+	}{
+		"omitted": {args: map[string]any{}, want: cloud.FetchPolicy{}},
+		"offline": {args: map[string]any{argOffline: true}, want: cloud.FetchPolicy{Offline: true}},
+		"refresh": {args: map[string]any{argRefresh: true}, want: cloud.FetchPolicy{Refresh: true}},
+		"both":    {args: map[string]any{argOffline: true, argRefresh: true}, want: cloud.FetchPolicy{Offline: true, Refresh: true}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			t.Run(listToolName, func(t *testing.T) {
+				t.Parallel()
+
+				_, registry := awsStub(candidates...)
+				require.False(t, callTool(t, listTool(registry).Handle, test.args).IsError)
+				assert.Equal(t, test.want, registry.lastPolicy())
+			})
+
+			t.Run(recommendToolName, func(t *testing.T) {
+				t.Parallel()
+
+				_, registry := awsStub(candidates...)
+
+				args := map[string]any{argArchitecture: "x86_64", argMinVCPU: 2, argMinMemoryGiB: 8.0}
+				for key, value := range test.args {
+					args[key] = value
+				}
+
+				require.False(t, callTool(t, recommendTool(registry).Handle, args).IsError)
+				assert.Equal(t, test.want, registry.lastPolicy())
+			})
+		})
+	}
+}
+
+// A mistyped data policy is refused rather than read as off: `offline: "true"`
+// would otherwise fetch, which is the opposite of what the caller asked.
+func TestAMistypedDataPolicyIsRefused(t *testing.T) {
+	t.Parallel()
+
+	provider, registry := awsStub()
+
+	report := decodeError(t, callTool(t, listTool(registry).Handle, map[string]any{argOffline: "true"}))
+	assert.Equal(t, cloud.CodeInvalidArgument, report.Code)
+	assert.Contains(t, report.Message, argOffline)
+	assert.Zero(t, provider.callCount(), "the argument check must run before acquisition")
+}
+
+// A price ceiling finer than the fixed-point scale still filters. A caller
+// computing a budget — a monthly figure divided by 720 hours — sends one of
+// these routinely, and dropping it would hand back machines above the ceiling
+// with no error and no warning.
+func TestFinerThanScalePriceCeilingStillFilters(t *testing.T) {
+	t.Parallel()
+
+	for name, test := range map[string]struct {
+		price float64
+		want  string
+	}{
+		"within the scale":       {price: 0.04, want: "0.040000000"},
+		"exactly at the scale":   {price: 0.040000001, want: "0.040000001"},
+		"one digit past":         {price: 0.0400000001, want: "0.040000000"},
+		"monthly budget an hour": {price: 30.0 / 720.0, want: "0.041666666"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			provider, registry := awsStub()
+
+			result := callTool(t, listTool(registry).Handle, map[string]any{argMaxPrice: test.price})
+			require.False(t, result.IsError, string(payloadOf(t, result)))
+
+			query := provider.lastQuery()
+			require.NotNil(t, query.MaxPrice, "the caller's ceiling must reach the provider")
+			assert.Equal(t, test.want, query.MaxPrice.String())
+		})
+	}
+}
+
+// An empty match is a real answer, not a failure: nothing there is what the
+// caller asked about.
+func TestListPublishesAnEmptyAnswerRatherThanAnError(t *testing.T) {
+	t.Parallel()
+
+	report := decodeListReport(t, callTool(t, listTool(registryOf()).Handle,
+		map[string]any{argMachine: "z99.mega"}))
+
+	assert.Empty(t, report.Candidates)
+	assert.NotEmpty(t, report.DataSource.Sources, "an empty answer still says where it looked")
+}
+
+// list_cloud_regions answers for every registered cloud, from the same neutral
+// seam — no cloud is baked into the tool.
+func TestListCloudRegionsAnswersForEveryCloud(t *testing.T) {
+	t.Parallel()
+
+	registry := newStubRegistry(
+		awsProviderStub(),
+		offlineProvider(cloud.ProviderGCP, gcpCandidates()),
+		offlineProvider(cloud.ProviderAzure, buildCandidates(
+			testCandidate{Region: "westeurope", Machine: "Standard_D2s_v5", Price: 0.0192, VCPU: 2, MemoryGiB: 8},
+			testCandidate{Region: "eastus", Machine: "Standard_D2s_v5", Price: 0.0180, VCPU: 2, MemoryGiB: 8},
+		)),
+	)
+
+	for _, test := range []struct {
+		cloudID cloud.ProviderID
+		want    []cloud.Region
+	}{
+		{cloudID: cloud.ProviderAWS, want: []cloud.Region{"eu-west-1", "us-east-1", "us-west-2"}},
+		{cloudID: cloud.ProviderGCP, want: []cloud.Region{"europe-west1", "us-central1"}},
+		{cloudID: cloud.ProviderAzure, want: []cloud.Region{"eastus", "westeurope"}},
+	} {
+		t.Run(string(test.cloudID), func(t *testing.T) {
+			t.Parallel()
+
+			report := decodeRegionsReport(t, callTool(t, regionsTool(registry).Handle,
+				map[string]any{argCloud: string(test.cloudID)}))
+
+			assert.Equal(t, cloud.SchemaVersionRegionsV1, report.SchemaVersion)
+			assert.Equal(t, test.cloudID, report.Cloud)
+			assert.Equal(t, test.want, report.Regions, "regions are deduplicated and sorted")
+		})
+	}
+}
+
+// The whole point of the tool beside the regions: it publishes every source the
+// cloud was read from, so the sources_omitted count a trimmed list or recommend
+// answer carries is resolvable rather than merely visible.
+func TestListCloudRegionsPublishesEverySourceUntrimmed(t *testing.T) {
+	t.Parallel()
+
+	// Two sources, each scoped to one region, so a trimmed answer would drop one.
+	sources := []cloud.SourceRef{
+		scopedSource("https://example.invalid/prices?region=us-east-1", cloud.Region("us-east-1")),
+		scopedSource("https://example.invalid/prices?region=eu-west-1", cloud.Region("eu-west-1")),
+	}
+
+	provider := &stubProvider{
+		id:           cloud.ProviderAWS,
+		capabilities: awsCapabilities(),
+		result: cloud.Result{
+			Provider: cloud.ProviderAWS,
+			Mode:     cloud.DataModeEmbeddedSnapshot,
+			Sources:  sources,
+			Candidates: buildCandidates(testCandidate{
+				Region: "us-east-1", Machine: "m6i.large", Price: 0.0416, VCPU: 2, MemoryGiB: 8,
+			}),
+		},
+	}
+	registry := newStubRegistry(provider)
+
+	// The browse answer carries only the us-east-1 row, so it publishes one
+	// source and counts the other as omitted.
+	listed := decodeListReport(t, callTool(t, listTool(registry).Handle, map[string]any{}))
+	require.Len(t, listed.DataSource.Sources, 1)
+	assert.Equal(t, 1, listed.DataSource.SourcesOmitted)
+
+	// The region answer is about the cloud, not a row set, so nothing is trimmed
+	// and the omitted entry is recoverable here.
+	regions := decodeRegionsReport(t, callTool(t, regionsTool(registry).Handle, map[string]any{}))
+	assert.Len(t, regions.DataSource.Sources, len(sources))
+	assert.Equal(t, 0, regions.DataSource.SourcesOmitted)
+
+	published := make([]string, 0, len(regions.DataSource.Sources))
+	for _, source := range regions.DataSource.Sources {
+		published = append(published, source.URL)
+	}
+
+	assert.ElementsMatch(t, []string{sources[0].URL, sources[1].URL}, published)
+}
+
+// list_cloud_regions reports its failures in the same structured body as the
+// other two tools.
+func TestListCloudRegionsErrorContract(t *testing.T) {
+	t.Parallel()
+
+	registry := newStubRegistry(offlineProvider(cloud.ProviderGCP, gcpCandidates()))
+
+	for _, test := range []struct {
+		name      string
+		registry  providerRegistry
+		args      map[string]any
+		wantCode  cloud.ErrorCode
+		wantCloud *string
+	}{
+		{
+			name: "unknown cloud", registry: registry, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "ibm"}, wantCloud: stringPtr("ibm"),
+		},
+		{
+			name: "undeclared argument", registry: registry, wantCode: cloud.CodeInvalidArgument,
+			args: map[string]any{argCloud: "gcp", argRegions: []any{"us-central1"}}, wantCloud: stringPtr("gcp"),
+		},
+		{
+			name: "unregistered cloud", registry: registry, wantCode: cloud.CodeDataUnavailable,
+			args: map[string]any{argCloud: "azure"}, wantCloud: stringPtr("azure"),
+		},
+		{
+			name: "acquisition failure", registry: failingAWSStub(errAcquisition),
+			wantCode: cloud.CodeInternal, args: map[string]any{}, wantCloud: stringPtr("aws"),
+		},
+		{
+			name: "no provider registry", registry: nil, wantCode: cloud.CodeDataUnavailable,
+			args: map[string]any{}, wantCloud: stringPtr("aws"),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			report := decodeError(t, callTool(t, regionsTool(test.registry).Handle, test.args))
+			assert.Equal(t, cloud.SchemaVersionErrorV1, report.SchemaVersion)
+			assert.Equal(t, test.wantCode, report.Code)
+			assert.NotEmpty(t, report.Message)
+			assert.Equal(t, test.wantCloud, report.Cloud)
+		})
+	}
+}
+
+// Placement scores survive the seam: with_score fetches them, az splits them
+// per zone, and both shapes reach the published document.
+func TestListPublishesPlacementScores(t *testing.T) {
+	t.Parallel()
+
+	fetchedAt := time.Date(2026, time.August, 6, 8, 58, 27, 0, time.UTC)
+	registry := registryOf(testCandidate{
+		Machine: "m5.large", Region: "us-west-2", Price: 0.096, Savings: 70,
+		RiskLabel: "5-10%", RiskMin: 5, RiskMax: 10, VCPU: 2, MemoryGiB: 8,
+		RegionScore: scorePtr(8), ZoneScores: map[string]int{"us-west-2a": 9, "us-west-2b": 7},
+		ScoreFetchedAt: &fetchedAt,
+	})
+
+	report := decodeListReport(t, callTool(t, listTool(registry).Handle, map[string]any{
+		argWithScore: true, argAZ: true, argMinScore: 5,
+	}))
+	require.Len(t, report.Candidates, 1)
+
+	candidate := report.Candidates[0]
+	require.NotNil(t, candidate.RegionScore)
+	assert.Equal(t, 8, *candidate.RegionScore)
+	assert.Equal(t, map[string]int{"us-west-2a": 9, "us-west-2b": 7}, candidate.ZoneScores)
+	require.NotNil(t, candidate.ScoreFetchedAt)
+	assert.Equal(t, "2026-08-06T08:58:27Z", *candidate.ScoreFetchedAt)
+}
+
+// min_score is an integer floor and only the AWS placement score is an integer
+// scale. The MCP surface refuses it against another measurement for the same
+// reason the CLI does: reading 8 as a 0.8 probability would be this server
+// inventing a correspondence between two vendors' figures.
+//
+// The refusal runs before acquisition, beside the capability gate.
+func TestAnIntegerScoreFloorIsRefusedAgainstAnotherPlacementKind(t *testing.T) {
+	t.Parallel()
+
+	capabilities := offlineLinuxCapabilities()
+	capabilities.PlacementScore = true
+	capabilities.PlacementKind = cloud.PlacementKindObtainability
+
+	provider := stubFor(cloud.ProviderGCP, capabilities, []cloud.Candidate{})
+	registry := newStubRegistry(provider)
+
+	result := callTool(t, listTool(registry).Handle, map[string]any{
+		argCloud: string(cloud.ProviderGCP), argWithScore: true, argMinScore: 5,
+	})
+
+	payload := decodeError(t, result)
+	assert.Equal(t, cloud.CodeUnsupportedCapability, payload.Code)
+	assert.Contains(t, payload.Message, string(cloud.PlacementKindObtainability),
+		"the refusal names the measurement the floor cannot be applied to")
+	assert.Zero(t, provider.callCount(), "a refusal costs no acquisition")
+}
+
+// A companion score argument sent without with_score is refused rather than
+// answered, on this surface as on the CLI. az and score_timeout used to be
+// accepted here and answered ok — az set SingleZone on a request that fetched
+// nothing, score_timeout was read, range-checked and dropped — so the same
+// question was refused on one surface and silently ignored on the other.
+//
+// The refusal runs while the arguments are read, so it costs no acquisition.
+func TestACompanionScoreArgumentIsRefusedRatherThanIgnored(t *testing.T) {
+	t.Parallel()
+
+	for _, companion := range scoreCompanions {
+		t.Run(companion.arg, func(t *testing.T) {
+			t.Parallel()
+
+			provider := stubFor(cloud.ProviderGCP, offlineLinuxCapabilities(), []cloud.Candidate{})
+			registry := newStubRegistry(provider)
+
+			var value any = true
+			if companion.arg != argAZ {
+				value = 5
+			}
+
+			payload := decodeError(t, callTool(t, listTool(registry).Handle, map[string]any{
+				argCloud: string(cloud.ProviderGCP), companion.arg: value,
+			}))
+
+			assert.Equal(t, cloud.CodeInvalidArgument, payload.Code)
+			assert.Contains(t, payload.Message, companion.arg)
+			assert.Contains(t, payload.Message, argWithScore,
+				"the refusal names the argument that would make this one act")
+			assert.Zero(t, provider.callCount(), "a refusal costs no acquisition")
+		})
+	}
+}
+
+// scopedSource builds a region-scoped provenance entry.
+func scopedSource(url string, region cloud.Region) cloud.SourceRef {
+	return cloud.SourceRef{
+		FetchedAt:     time.Date(2026, time.August, 6, 8, 58, 27, 0, time.UTC),
+		URL:           url,
+		ParserVersion: "test/1",
+		SchemaVersion: "test/v1",
+		Scope:         cloud.SourceScope{Region: region},
+	}
+}
+
+// awsProviderStub is an AWS provider with candidates in three regions.
+func awsProviderStub() *stubProvider {
+	provider, _ := awsStub(buildCandidates(
+		testCandidate{Region: "us-east-1", Machine: "t3.micro", Price: 0.0104, VCPU: 2, MemoryGiB: 1},
+		testCandidate{Region: "us-west-2", Machine: "t3.small", Price: 0.0208, VCPU: 2, MemoryGiB: 2},
+		testCandidate{Region: "us-east-1", Machine: "m5.large", Price: 0.0960, VCPU: 2, MemoryGiB: 8},
+		testCandidate{Region: "eu-west-1", Machine: "t3.medium", Price: 0.0416, VCPU: 2, MemoryGiB: 4},
+	)...)
+
+	return provider
 }

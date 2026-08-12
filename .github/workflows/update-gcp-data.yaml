@@ -1,0 +1,144 @@
+name: Update embedded GCP data
+# Refreshes the embedded GCP catalogue and opens a PR when it changes.
+#
+# The updater is anonymous: no credential, token, or cloud account is used or
+# needed. It writes nothing unless every gate passes, so a failed run leaves the
+# reviewed snapshot exactly as it was. Build, test and release workflows never
+# refresh it.
+on:
+  schedule:
+    # Weekly, Monday 06:30 UTC — after the AWS refresh, so the two PRs do not
+    # land in the same minute.
+    - cron: 30 6 * * 1
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+# A second run must not race the first for the shared bot branch.
+concurrency:
+  group: update-gcp-data
+  cancel-in-progress: false
+jobs:
+  update:
+    name: Refresh GCP catalogue
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+      # Fails closed on a renamed header, a moved region selector, a price that
+      # needs more precision than the contract allows, or coverage below the
+      # reviewed floor. Google occasionally serves a partially rendered page;
+      # the coverage floor is what turns that into a failed run rather than a
+      # silently shrunken catalogue.
+      # Two refusals to write, both correct, asking opposite things of whoever
+      # reads the run. Exit 75 means Google is mid-rollout and served two
+      # different documents moments apart: nothing to fix, retry next week. Any
+      # other non-zero exit means a renamed header, a moved region selector, a
+      # price needing more precision than the contract allows, or coverage below
+      # the reviewed floor — all of which need a person. Collapsing the two would
+      # make this job red most weeks for a reason nobody must act on, and the one
+      # week it goes red for a real reason is the week it gets ignored.
+      - name: Refresh catalogue
+        id: refresh
+        run: |
+          # The binary directly, not `make`: `go run` collapses every non-zero
+          # exit to 1 and make reports its own 2, so exit 75 would never survive
+          # either wrapper.
+          go build -o .bin/update-gcp-data ./cmd/update-gcp-data
+          set +e
+          .bin/update-gcp-data
+          status=$?
+          set -e
+          if [ "$status" -eq 75 ]; then
+            echo "unstable=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::GCP pricing pages are mid-rollout and served different bytes to two reads. Nothing was written; the next scheduled run will retry."
+            exit 0
+          fi
+          exit "$status"
+      - name: Verify embedded data, manifests and parser contracts
+        if: steps.refresh.outputs.unstable != 'true'
+        run: make verify-data
+      - name: Run tests
+        if: steps.refresh.outputs.unstable != 'true'
+        run: go test ./... -count=1
+      - name: Open or update pull request
+        if: steps.refresh.outputs.unstable != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- internal/providers/gcp/data/; then
+            echo "GCP catalogue unchanged, nothing to do."
+            exit 0
+          fi
+
+          # One long-lived bot branch, so there is a single PR that always
+          # carries the latest data rather than a new PR every week.
+          branch="chore/update-gcp-data"
+
+          # Single definition: the commit identity and the guard below must
+          # agree, or the workflow refuses its own branch forever.
+          bot_name="github-actions[bot]"
+
+          git config user.name  "$bot_name"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add internal/providers/gcp/data/
+          git commit -m "chore: refresh embedded GCP catalogue"
+
+          # actions/checkout leaves a single-branch refspec, so the explicit
+          # refspec is what creates refs/remotes/origin/$branch and lets the
+          # author guard below run at all.
+          git fetch origin "+refs/heads/$branch:refs/remotes/origin/$branch" 2>/dev/null || true
+
+          if remote_sha=$(git rev-parse --verify -q "refs/remotes/origin/$branch"); then
+            tip_author=$(git log -1 --format='%an' "$remote_sha")
+            if [ "$tip_author" != "$bot_name" ]; then
+              echo "::warning::$branch tip is authored by '$tip_author', not this workflow. Refusing to overwrite it — merge or close the open PR first."
+              exit 0
+            fi
+            git push --force origin "HEAD:refs/heads/$branch"
+          else
+            git push origin "HEAD:refs/heads/$branch"
+          fi
+
+          state=$(gh pr view "$branch" --json state --jq .state 2>/dev/null || echo "")
+          if [ "$state" = "OPEN" ]; then
+            echo "PR already open for $branch; pushed the latest catalogue to it."
+            exit 0
+          fi
+
+          cat > "${RUNNER_TEMP}/pr-body.md" <<'EOF'
+          Automated refresh of the embedded GCP catalogue.
+
+          Sources are the ones enumerated in
+          `internal/providers/gcp/data/source-contract.json`:
+
+          - https://cloud.google.com/spot-vms/pricing
+          - https://cloud.google.com/products/compute/pricing/general-purpose
+          - https://cloud.google.com/products/compute/pricing/compute-optimized
+          - https://cloud.google.com/products/compute/pricing/memory-optimized
+
+          The pages render prices for `us-central1` only, so that is the region
+          the catalogue covers. Every table is matched to the region its own
+          selector reports; a table rendered for another region is skipped.
+
+          The catalogue was validated against its source contract, its manifest
+          and the coverage floor, and the full test suite passed, before this PR
+          was opened.
+
+          Review the diff for machine types entering or leaving the catalogue,
+          and spot-check one Spot and one On-Demand price against the source.
+
+          Note: PRs opened with `GITHUB_TOKEN` do not trigger CI workflows, so the
+          checks below may appear empty. The data was validated by this workflow.
+          EOF
+
+          gh pr create \
+            --head "$branch" \
+            --title "chore: refresh embedded GCP catalogue" \
+            --body-file "${RUNNER_TEMP}/pr-body.md"

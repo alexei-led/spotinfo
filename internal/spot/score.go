@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/bluele/gcache"
 	"golang.org/x/time/rate"
@@ -28,21 +27,24 @@ const (
 	rateLimitInterval = 100 * time.Millisecond
 
 	// AWS API configuration
-	defaultTargetCapacity      = 1
-	defaultMaxResults          = 30
-	maxRetryAttempts           = 5
-	DefaultScoreTimeoutSeconds = 30
-	defaultScoreTimeout        = DefaultScoreTimeoutSeconds * time.Second
+	defaultTargetCapacity = 1
+	defaultMaxResults     = 30
+	maxRetryAttempts      = 5
+	// defaultScoreTimeout bounds a lookup this client was given no timeout for.
+	// It is the client's own fallback, not a surface default: the value the CLI
+	// flag and the MCP argument advertise is cloud.DefaultScoreTimeoutSeconds,
+	// which is where a caller-facing default belongs.
+	defaultScoreTimeout = 30 * time.Second
 )
 
 // errScoreProviderUnavailable wraps every placement-score failure. Reported
 // rather than substituted: a synthetic score is indistinguishable from a real
 // one and would silently misinform capacity decisions.
 //
-// It wraps rather than replaces the cause. LoadDefaultConfig succeeds without
-// credentials — it only fails on a malformed config file — so the real failure
-// almost always surfaces later as an SDK authorization error, and this guidance
-// would never be seen if it were reachable only from a nil provider.
+// It is reported bare when the credential probe found nothing — the common
+// case, and now the fast one — and wrapped around the cause when a request that
+// did carry credentials was refused, which is where the permission half of the
+// message earns its place.
 var errScoreProviderUnavailable = errors.New(
 	"spot placement scores unavailable: requires AWS credentials and the ec2:GetSpotPlacementScores permission")
 
@@ -68,20 +70,29 @@ type awsAPIProvider interface {
 type awsScoreProvider struct {
 	// newClient builds the region-scoped EC2 client. Injectable so the response
 	// handling below can be tested without reaching AWS; production leaves it nil
-	// and gets ec2.NewFromConfig.
+	// and gets ec2.NewFromConfig over lazily resolved credentials.
 	newClient func(region string) ec2.GetSpotPlacementScoresAPIClient
-	cfg       aws.Config
 }
 
-// scoresClient returns the injected client factory, or the real EC2 one.
-func (p *awsScoreProvider) scoresClient(region string) ec2.GetSpotPlacementScoresAPIClient {
+// scoresClient returns the injected client factory, or a real EC2 one built
+// from credentials resolved on first use.
+//
+// Lazy for the same reason as the live-price client: resolving credentials in
+// the constructor charged the probe to every invocation, including the ones
+// that never ask for a score.
+func (p *awsScoreProvider) scoresClient(region string) (ec2.GetSpotPlacementScoresAPIClient, error) {
 	if p.newClient != nil {
-		return p.newClient(region)
+		return p.newClient(region), nil
 	}
 
-	return ec2.NewFromConfig(p.cfg, func(o *ec2.Options) {
+	cfg, err := awsConfigWithCredentials()
+	if err != nil {
+		return nil, err
+	}
+
+	return ec2.NewFromConfig(cfg, func(o *ec2.Options) {
 		o.Region = region
-	})
+	}), nil
 }
 
 // CachedScoreData wraps scores with timestamp for freshness tracking.
@@ -163,25 +174,18 @@ func createAPIProvider() awsAPIProvider {
 	return provider
 }
 
-// newAWSScoreProvider creates a new AWS score provider with proper configuration.
-func newAWSScoreProvider(ctx context.Context) (*awsScoreProvider, error) {
-	ctx, cancel := context.WithTimeout(ctx, defaultScoreTimeout)
-	defer cancel()
-
-	cfg, err := awsconfig.LoadDefaultConfig(ctx,
-		awsconfig.WithRetryMode(aws.RetryModeAdaptive),
-		awsconfig.WithRetryMaxAttempts(maxRetryAttempts),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load AWS config: %w", err)
-	}
-
-	return &awsScoreProvider{cfg: cfg}, nil
+// newAWSScoreProvider creates a new AWS score provider. Credentials are
+// resolved on first use, in scoresClient — see the note there on why not here.
+func newAWSScoreProvider(_ context.Context) (*awsScoreProvider, error) {
+	return &awsScoreProvider{}, nil
 }
 
 // fetchScores implements awsAPIProvider for AWS API calls.
 func (p *awsScoreProvider) fetchScores(ctx context.Context, region string, instanceTypes []string, singleAZ bool) ([]placementScore, error) {
-	client := p.scoresClient(region)
+	client, err := p.scoresClient(region)
+	if err != nil {
+		return nil, err
+	}
 
 	input := &ec2.GetSpotPlacementScoresInput{
 		InstanceTypes:          instanceTypes,

@@ -1,0 +1,72 @@
+{
+  "data_source": {
+    "mode": "embedded-snapshot",
+    "provider": "aws",
+    "sources": [
+      {
+        "content_sha256": "f42df66cd52c9dc3ac28b6bb7e525627696eec60692d5cf56658c679f0012393",
+        "fetched_at": "2026-08-06T08:58:27Z",
+        "observed_at": null,
+        "parser_version": "aws-spot-advisor-json/1",
+        "schema_version": "aws.spot-advisor-feed/v1",
+        "url": "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json"
+      }
+    ],
+    "sources_omitted": 0
+  },
+  "ranking_policy": [
+    "spot_price_ascending",
+    "excess_vcpu_ascending",
+    "excess_memory_gib_ascending",
+    "region_ascending",
+    "machine_ascending"
+  ],
+  "recommendations": [
+    {
+      "architecture": "x86_64",
+      "cloud": "aws",
+      "machine": "m6i.large",
+      "memory_gib": 8,
+      "on_demand_usd_per_hour": null,
+      "os": "linux",
+      "rank": 1,
+      "rationale_codes": [
+        "ARCHITECTURE_MATCH",
+        "KNOWN_POSITIVE_PRICE",
+        "RESOURCE_MINIMUMS_MET",
+        "WORKLOAD_WEB_CAP_MET"
+      ],
+      "region": "us-east-1",
+      "risk": {
+        "kind": "interruption_bucket",
+        "label": "\u003c5%",
+        "max_percent": 5,
+        "min_percent": 0,
+        "observed_at": null,
+        "source_url": "https://spot-bid-advisor.s3.amazonaws.com/spot-advisor-data.json",
+        "status": "available",
+        "window_days": 30
+      },
+      "savings_percent": 72,
+      "spot_usd_per_hour": "0.041600000",
+      "vcpu": 2
+    }
+  ],
+  "request": {
+    "architecture": "x86_64",
+    "cloud": "aws",
+    "machine": "",
+    "max_price": null,
+    "min_memory_gib": 8,
+    "min_vcpu": 2,
+    "os": "linux",
+    "regions": [
+      "us-east-1"
+    ],
+    "top": 3,
+    "workload": "web"
+  },
+  "schema_version": "spotinfo.recommend/v3",
+  "status": "ok",
+  "warnings": []
+}

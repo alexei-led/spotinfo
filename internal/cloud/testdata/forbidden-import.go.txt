@@ -1,0 +1,12 @@
+// Fixture for TestForbiddenImportIsDetected. Kept as .go.txt so the Go tool
+// chain never compiles it: it exists only to prove the import check reports a
+// violation, rather than passing because it found nothing to look at.
+package cloud
+
+import (
+	"context"
+
+	"spotinfo/internal/spot"
+)
+
+func query(ctx context.Context) ([]spot.Advice, error) { return nil, nil }
