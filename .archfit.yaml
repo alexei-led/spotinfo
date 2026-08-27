@@ -1,4 +1,4 @@
-version: 1
+version: 2
 # Balanced-Coupling advisory tuning.
 coupling:
   # Minimum severity for a coupling advisory: low|medium|high|critical
