@@ -5,7 +5,7 @@
 #
 # Pinned to an explicit alpine minor so the toolchain does not shift underneath a
 # rebuild, while still receiving patch updates within that line.
-FROM --platform=${BUILDPLATFORM} golang:1.26-alpine3.24 AS builder
+FROM --platform=${BUILDPLATFORM} golang:1.27-alpine3.24 AS builder
 
 # make drives the build; ca-certificates is copied into the final scratch image.
 # git is deliberately absent: .git is no longer in the build context, so there is
