@@ -13,490 +13,490 @@
   },
   "sources": [
     {
-      "fetched_at": "2026-08-11T15:59:45.598102Z",
+      "fetched_at": "2026-08-31T15:19:35.363488525Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27australiacentral%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "216bc80e21a48a784336f3cd869a10bf70bd5f540436a2f5d437790287a6799a"
+      "sha256": "ad31036a6f7a0a68fcc238283cbd591fcb581cb9827fb9783b3e629c0e0ad01d"
     },
     {
-      "fetched_at": "2026-08-11T15:59:47.097621Z",
+      "fetched_at": "2026-08-31T15:19:37.473914017Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27australiacentral2%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "3564eba9e24190ea43676d2e32b0ae5fcae4d4bafad62c01502753dfd0025c49"
+      "sha256": "2b0512e6e9fa05c17dc7faf26c45fc46ae317e14a0fbaf6000c2b20da9bade8d"
     },
     {
-      "fetched_at": "2026-08-11T15:59:48.302562Z",
+      "fetched_at": "2026-08-31T15:19:39.233731584Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27australiaeast%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "7e12f05e3e45a2d1d25515ef92b1c2d75b6c868856a13ee9f8f7c91e5e67b399"
+      "sha256": "2471b8f207c40236c1490cd4e9e300c2812ee4029f0d05fec549408b34b1a0a3"
     },
     {
-      "fetched_at": "2026-08-11T15:59:50.188285Z",
+      "fetched_at": "2026-08-31T15:19:42.696600196Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27australiasoutheast%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "79ffdff19e505f49f3cfb99c93541d1db506bc8f7e5056d4e4df7f287933f11d"
+      "sha256": "30659d01d4d9218ac45602beef29edc9e8eb48d1f657d6bc7615570c40dd4fb9"
     },
     {
-      "fetched_at": "2026-08-11T15:59:51.383625Z",
+      "fetched_at": "2026-08-31T15:19:44.722273551Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27austriaeast%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "2aa1e4e103858037d1f23b67bf66bf119d1ca2384ee3c98a8e1b7fc8547db75a"
+      "sha256": "660fa56ff3153f10a37db890563f4486d15d35337d91b632b3a86abd8e16d9ee"
     },
     {
-      "fetched_at": "2026-08-11T15:59:52.276599Z",
+      "fetched_at": "2026-08-31T15:19:46.136270491Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27belgiumcentral%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "a898b33377e24fbb903cabcb3d6e94bf23a13c5f935be2b76d6fe8e53e1d46d6"
+      "sha256": "8539864e6bdbe2b6297f36944578b1dc97de870cd8d4556fe750a3f00f911c8e"
     },
     {
-      "fetched_at": "2026-08-11T15:59:53.4182Z",
+      "fetched_at": "2026-08-31T15:19:46.725217439Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27brazilsouth%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "ef0d8c132ef4c17ad4bc0ccd05b9df412ce723684f9c651c1cf63db402b35e3f"
+      "sha256": "29484a094a31896241dbf5918c9653860f3264e905d1665165db070389610918"
     },
     {
-      "fetched_at": "2026-08-11T15:59:54.989333Z",
+      "fetched_at": "2026-08-31T15:19:48.164522956Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27brazilsoutheast%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "4ab62da79848c36489652481bcad60a7779848ca8528037b3d4612b55875539d"
+      "sha256": "f8a992563121ca595f360f5785c2dfd9c021381b7f7e9bff156c27b8ed189977"
     },
     {
-      "fetched_at": "2026-08-11T15:59:56.138397Z",
+      "fetched_at": "2026-08-31T15:19:50.326209224Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27canadacentral%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "e792bd4ded4b997e6c66f92b701d91dfcef7882dff50f10326a03885f914e3e6"
+      "sha256": "2b8da6852f57cfbd9f032d0593960f5cc95860447e44ca45ce45a01e4c5d9a0c"
     },
     {
-      "fetched_at": "2026-08-11T15:59:57.876608Z",
+      "fetched_at": "2026-08-31T15:19:52.936559864Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27canadaeast%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "7520356e7edc7a5ba1c5dad0aa5ddc0ed8b1a7caa0b688327f17b94489932da1"
+      "sha256": "7e89f95957d33f82dfe62511dc1b0bf2128221ff621cbaaddfe52283b36e585e"
     },
     {
-      "fetched_at": "2026-08-11T15:59:59.475863Z",
+      "fetched_at": "2026-08-31T15:19:54.882535844Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27centralindia%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "f5fb5f122cb0b3d2b00ebf095f77ad6f411f4ae73c0c102b2a9bfe7c1158b1a1"
+      "sha256": "b05ec23b818eec1efc8a3bb6b688ea8782ec8386036859330a41a509ceec82ad"
     },
     {
-      "fetched_at": "2026-08-11T16:00:01.390593Z",
+      "fetched_at": "2026-08-31T15:19:57.062951231Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27centralus%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "6d2bb68e7910b4bd20bb1d1324f4b7e91790605c8b9efa36041a10d2924a4e09"
+      "sha256": "2b52c4a3c9308c83edd82093d5e20cd167bb93bdad122db5b0591b2c9f990b11"
     },
     {
-      "fetched_at": "2026-08-11T16:00:03.320612Z",
+      "fetched_at": "2026-08-31T15:19:59.188763458Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27eastasia%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "f8fca6bb2856caa2cea64645d47a89f9595aa294b90de46072a9ccb064ae7224"
+      "sha256": "d6572c24382de33320262ff4c45f9cfd6769b92330fba3931fe21589bb127000"
     },
     {
-      "fetched_at": "2026-08-11T16:00:04.946326Z",
+      "fetched_at": "2026-08-31T15:20:00.818441547Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27eastus%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "999e51ff160c785284c44bc648c32d428283f4550861956927c9d8bb873f154b"
+      "sha256": "cf0efee20d90d59f95d6fd56753331c0c0c30d3228409ec0fedf08aa8f509c3e"
     },
     {
-      "fetched_at": "2026-08-11T16:00:07.062631Z",
+      "fetched_at": "2026-08-31T15:20:02.752506073Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27eastus2%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "196901b1b79dadf16b241dc7997939ecfde0af4bda7aa312ff352032ac6b6f0a"
+      "sha256": "1b616319db3c97578d28fdbd31e73b88a45783d10b0b0167f37b4cd57473f07b"
     },
     {
-      "fetched_at": "2026-08-11T16:00:09.197185Z",
+      "fetched_at": "2026-08-31T15:20:04.674607582Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27francecentral%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "64b94908225ca55bf45c0453de8a7eff856ba7920698903bdf1c7332bafbb21d"
+      "sha256": "668fb140b44714fbe25f8bd7355e3f1817571f5918a5ff18bb429d9d2ff0858e"
     },
     {
-      "fetched_at": "2026-08-11T16:00:11.170327Z",
+      "fetched_at": "2026-08-31T15:20:05.916689421Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27francesouth%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "fa1a495251b58311577139bf6154bdef194e5a66195302b4e12d7c6cb0c781bf"
+      "sha256": "9110b10310d4215b6add60bcf4e968a89ce96ec94046ab7a5c04812477c2730f"
     },
     {
-      "fetched_at": "2026-08-11T16:00:12.644451Z",
+      "fetched_at": "2026-08-31T15:20:07.67100918Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27germanynorth%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "f25ffc9b17ee67880609136c6de7df2f5fb5f2883ed6fd3fc3cae4fdaa27f8c5"
+      "sha256": "cb9a223a44afb9f5afe487f4f31aff06565e4e8e1f27bc82be84427cb5b8e612"
     },
     {
-      "fetched_at": "2026-08-11T16:00:13.773Z",
+      "fetched_at": "2026-08-31T15:20:09.209781118Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27germanywestcentral%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "fddd228e60348024a2909d5f1c7668d2d2ea929d7bfe8f677a7ecba17dbbbb56"
+      "sha256": "acb3d7dcf7a8f25be2608ede983db48c3d1b5d823740e4122622cffbc8001d20"
     },
     {
-      "fetched_at": "2026-08-11T16:00:15.476226Z",
+      "fetched_at": "2026-08-31T15:20:12.031404406Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27indonesiacentral%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "459338bb6981f5a25bbdc2e775a01c7e20136493bf564a30a9f8d0168c758dd7"
+      "sha256": "7e36c295864c0ca9a5e5071af1446dd0697811e1c03452b69bf81175d5d3c42c"
     },
     {
-      "fetched_at": "2026-08-11T16:00:16.51873Z",
+      "fetched_at": "2026-08-31T15:20:13.582374203Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27israelcentral%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "a2aa3b0eca5a80345351c92376c17125f96d98c61800fc9a108a043a8de45cec"
+      "sha256": "0582b520a5dee45459df1c0d26ccb1e6286e6744c8a77b548a65a5310040006d"
     },
     {
-      "fetched_at": "2026-08-11T16:00:18.001796Z",
+      "fetched_at": "2026-08-31T15:20:14.630332072Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27israelnorthwest%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "f632f00af7276558a0be723b4c8370e9d6102819c6411f12f50b31edb47b7af7"
+      "sha256": "e90c62bea59635a2cc838d44771f2b18034997e6c7c0d5e616c898d914defcc8"
     },
     {
-      "fetched_at": "2026-08-11T16:00:18.986705Z",
+      "fetched_at": "2026-08-31T15:20:16.038598023Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27italynorth%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "ca9db7198c4a7d1a637c0826dc0e8f46ef754d34114dfa998b3a3e349931cdaa"
+      "sha256": "f2bf63286594c9d3666886d4091470c2ce2c1208d7d288d22e4f1fa18623f6f5"
     },
     {
-      "fetched_at": "2026-08-11T16:00:20.676109Z",
+      "fetched_at": "2026-08-31T15:20:17.369191998Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27japaneast%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "36d8b46279e164dec8f76177c49314c8ed6b3d9a94330f15d7b1a66bb3a3d0d6"
+      "sha256": "2ef029dcc0f52617a1ae32839ad01ff4576f54880e66847d30cb6cfbdb6f333b"
     },
     {
-      "fetched_at": "2026-08-11T16:00:23.124568Z",
+      "fetched_at": "2026-08-31T15:20:19.453417463Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27japanwest%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "988bf494148da696cbfd0eb5d4e7311e196476d357bce3e080e7715c070eeae7"
+      "sha256": "75c385afda64acd07071e0d68fa87a5f953b1e271da28ca5d429491ea8a3a66b"
     },
     {
-      "fetched_at": "2026-08-11T16:00:24.681632Z",
+      "fetched_at": "2026-08-31T15:20:22.249349233Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27koreacentral%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "f24e8364b755d674fd7faf4af0f094bedd86fd61dbbcac846f631aa96964a3c9"
+      "sha256": "a43e8f6a1c40bba79183cd13f412fa0facffd4eb16b002a083215f1594783e75"
     },
     {
-      "fetched_at": "2026-08-11T16:00:26.123059Z",
+      "fetched_at": "2026-08-31T15:20:23.762334218Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27koreasouth%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "d10a821610efcc1632a17dc53da7ae5264064fd5100a592c7e7a943fcf53f833"
+      "sha256": "290d0ca870adc642c65ee1601e1bb3c1c887c4802b1fd398f3333a94105dd5d2"
     },
     {
-      "fetched_at": "2026-08-11T16:00:27.153914Z",
+      "fetched_at": "2026-08-31T15:20:25.476100984Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27mexicocentral%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "5ce41817782034e4db4581ff4535c3c5e43e6d5b6f7d8367c73fc1ee300ed405"
+      "sha256": "50b7defce4fcb95ee6ca3bd9ff316490044f836fd425c63a24dc56d2763869c3"
     },
     {
-      "fetched_at": "2026-08-11T16:00:28.847574Z",
+      "fetched_at": "2026-08-31T15:20:27.007723806Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27newzealandnorth%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "3ac8b01465c6c67ce4c582a9844b533381a6788f541a3fd53c8412d3712f1d16"
+      "sha256": "994a467fc9a868e49ba64ede1fd35668053e1b46e958d1608bd2a9c56a6075e7"
     },
     {
-      "fetched_at": "2026-08-11T16:00:29.873689Z",
+      "fetched_at": "2026-08-31T15:20:27.787574092Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27northcentralus%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "ab34a314eab39867b6921fa1e6377dfac064bc91b5fbac163bd498d572f29501"
+      "sha256": "6aee3461686c51f29a9691f3ed46e37f9360ebcb8f5f43491dd345f73f3c9fa4"
     },
     {
-      "fetched_at": "2026-08-11T16:00:31.30795Z",
+      "fetched_at": "2026-08-31T15:20:29.686773238Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27northeurope%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "d0485dc04e030a7259831bf35d9d7cc820745b87bea4a6a21f600bc142205280"
+      "sha256": "0f1b1fef4ab156b12a841173e43889d11c3f7dd956bee402f3cf30b8785f9044"
     },
     {
-      "fetched_at": "2026-08-11T16:00:33.23659Z",
+      "fetched_at": "2026-08-31T15:20:32.203129329Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27norwayeast%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "f06a9c696524e0f344085f7954b81493b9d6c29f61dabcb87df33589de843139"
+      "sha256": "066aee11d0c369ecac64383cbf74143f7cffa3b45e0ecf8d5acf3a103780a858"
     },
     {
-      "fetched_at": "2026-08-11T16:00:34.677442Z",
+      "fetched_at": "2026-08-31T15:20:33.42508178Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27norwaywest%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "69be41cc6200f1520706ebc31a34b6694ac21a6a7d05b20d969bd9d930b710cb"
+      "sha256": "8846e9fc22e00ae7966dfc624d5e5cdd53c65af28fd5eb427e9f64bcd7d3a2e4"
     },
     {
-      "fetched_at": "2026-08-11T16:00:36.652853Z",
+      "fetched_at": "2026-08-31T15:20:34.425543487Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27polandcentral%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "3d787a9c4b2a9735c8fff23f6b85c38a3b8cafe3fe3e5b9dffbe222b5d962ecb"
+      "sha256": "e28906a13a3481d6f459130a42618db3eb5651ef85e72e9c8c3db7d95c0d6c2f"
     },
     {
-      "fetched_at": "2026-08-11T16:00:38.495126Z",
+      "fetched_at": "2026-08-31T15:20:35.713271006Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27qatarcentral%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "5d559a49a898c3256362cedbc8ee36d4ba34509cdd6c6b51ed9abb782ee1b18f"
+      "sha256": "3cf150d61bd2f63f8cb532b07fb9f586aafa2505b7470ecde56ad99f47fe7ec2"
     },
     {
-      "fetched_at": "2026-08-11T16:00:39.677818Z",
+      "fetched_at": "2026-08-31T15:20:37.27658883Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27southafricanorth%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "f7ede9d69790cf3253097b503a9cdd2b308da4ba0d1fea316da9fcfa777b9b87"
+      "sha256": "dcbb092585685b1c0930f89e4e45f8461739e97096987139de37911c9d0e0e81"
     },
     {
-      "fetched_at": "2026-08-11T16:00:41.250506Z",
+      "fetched_at": "2026-08-31T15:20:38.827409731Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27southafricawest%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "401ec5bccc43ca1f7ad5d62db0a415b9b4dcc3bc00f81ba0093b830d3de428fe"
+      "sha256": "d10aceeac4da98156d6213c4c41f71a7fa6581c5d093b47ba41da40a9d4c4ef9"
     },
     {
-      "fetched_at": "2026-08-11T16:00:42.421146Z",
+      "fetched_at": "2026-08-31T15:20:40.594392811Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27southcentralus%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "2e8a066617d0c96418c4ab3cd899807206eeded2fbf6eb4be960ff3ca4afdd00"
+      "sha256": "4e711c66c256e5a6fdbe6a1a7f8313b03e4df5b6c640d1ab7006d61f8d0882bd"
     },
     {
-      "fetched_at": "2026-08-11T16:00:44.612876Z",
+      "fetched_at": "2026-08-31T15:20:43.049699069Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27southeastasia%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "343bb61fd504d041d09c695965327ddc1eb7f73c89ef9e432f664c50a9c7c095"
+      "sha256": "83b54e5b8804be90fd61659f13d51764946acd6c2e8f15a392b6bd945afa3849"
     },
     {
-      "fetched_at": "2026-08-11T16:00:46.54034Z",
+      "fetched_at": "2026-08-31T15:20:45.72577275Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27southindia%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "1f2dcf29910975e78aaef5474badbdc78321a93489073c344fdc1c0619cbddb0"
+      "sha256": "48e559be44281e3a8501fa571042c122c410f99e76ea41ca09a36186cc998116"
     },
     {
-      "fetched_at": "2026-08-11T16:00:48.083668Z",
+      "fetched_at": "2026-08-31T15:20:48.910786562Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27spaincentral%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "0b907f0a4df8010f66701d3fe6582a48c635f0d78c6f246c534201e04586c523"
+      "sha256": "8f53dfd55ef8f4a60edc0ceb00023a2b6099c390e67eb4fae8b0b0166d05e3ca"
     },
     {
-      "fetched_at": "2026-08-11T16:00:49.387861Z",
+      "fetched_at": "2026-08-31T15:20:50.868064115Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27swedencentral%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "0ed89ee68b96acb6d1792f2f6d7279b7308b753086166f9e61dc85109ca2adca"
+      "sha256": "6d9fc4b753c2b7e703f6522662ff93740c1cb547aa0bc76ee19e1afd359f4b73"
     },
     {
-      "fetched_at": "2026-08-11T16:00:51.114399Z",
+      "fetched_at": "2026-08-31T15:20:52.670039501Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27swedensouth%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "b88a8dd8313fd1f79d2986df3e1a01e55d3960547c7f502461889b1ad73ea3af"
+      "sha256": "9527e73805deeeff7dfe4d6a2ae1dccabac2ca9a2c9262fce6d5acb233b1af8d"
     },
     {
-      "fetched_at": "2026-08-11T16:00:52.077513Z",
+      "fetched_at": "2026-08-31T15:20:53.72014131Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27switzerlandnorth%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "579c184454b97cd4f646930ce2633c39f8b72f2caadac077fae148251d617733"
+      "sha256": "8d8f2904576959d4a622e59d1356d8b10f6601ff6bb8876708a2e62254969f8a"
     },
     {
-      "fetched_at": "2026-08-11T16:00:53.458299Z",
+      "fetched_at": "2026-08-31T15:20:56.321209301Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27switzerlandwest%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "284c9fcceb954f87878687a4493a424f2ad89ef30109d0975b3ff1fea4f27b93"
+      "sha256": "77f2df29a98324d33ace9b05a723e46468539fac40962f101b1ab777b71f8f9d"
     },
     {
-      "fetched_at": "2026-08-11T16:00:54.508377Z",
+      "fetched_at": "2026-08-31T15:20:57.610144882Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27uaecentral%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "047edca1971c005ff5d12c043497ab500ce39e34169b6682fbd364529f42375b"
+      "sha256": "4b609e854a3f20231b8e36d277358429089084653672902192abb82d6c49784f"
     },
     {
-      "fetched_at": "2026-08-11T16:00:55.888143Z",
+      "fetched_at": "2026-08-31T15:20:58.703110542Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27uaenorth%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "d799998f8a6499dd7f5cc42f6cc0849a89af8843f815b86c8527821f560f9258"
+      "sha256": "a78b3191afdc93d76551ce0cb0942a14f9f6ab6bd8ad67fdc0d70ce590749bdd"
     },
     {
-      "fetched_at": "2026-08-11T16:00:57.431973Z",
+      "fetched_at": "2026-08-31T15:21:00.448865299Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27uksouth%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "9e83015ffa15ada7c04c1734cbd51a6270b71cafea33944198b5f24d687fdb55"
+      "sha256": "5917be2d32474c57a9148d80b81c67c17a357d3f30a679b768614e8d2312c33f"
     },
     {
-      "fetched_at": "2026-08-11T16:00:59.826258Z",
+      "fetched_at": "2026-08-31T15:21:03.053334168Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27ukwest%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "5bcc42b9a4f197a15f91d58911070bfe79336e5e23528850fa6ae35995ef76e4"
+      "sha256": "46983618a6d606294cbde32ea11d177f22c7972f49ef5d4e9092775d5c8011a1"
     },
     {
-      "fetched_at": "2026-08-11T16:01:01.554088Z",
+      "fetched_at": "2026-08-31T15:21:05.184165342Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27westcentralus%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "a58f2ad093c0cb4d4fd18161d9c583b5ad8e2720e65037e6d763a82cd131e39d"
+      "sha256": "b6c28e10dff91d445c563aefd28544e918ae63e40c835a456a2e1b78b74929f9"
     },
     {
-      "fetched_at": "2026-08-11T16:01:03.121436Z",
+      "fetched_at": "2026-08-31T15:21:06.545569194Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27westeurope%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "4aec5218d42569aceface4027c356c7b94abcb3e8853e624b6c4b483238dde8b"
+      "sha256": "b234e6fe3367b0e201066491cb6df626342c0efb803dfdf0eca2b0496eaeed9a"
     },
     {
-      "fetched_at": "2026-08-11T16:01:05.483668Z",
+      "fetched_at": "2026-08-31T15:21:08.499220297Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27westindia%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "e2bf0d3a8cee6fd1ed41310383bb50b54d8fe682be15180def791122be3d60e5"
+      "sha256": "aa2d2780ba536cc44e4381391fc96c9ca75ab3eb1c9e87bed7075d7773c3e4cf"
     },
     {
-      "fetched_at": "2026-08-11T16:01:06.492426Z",
+      "fetched_at": "2026-08-31T15:21:09.787913741Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27westus%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "acab451a2781db0c71d6f2ed24ce3f471bab22abbdfcf0e231dd175c2201eaa5"
+      "sha256": "4093c96a5dc8ea0871735ef76f47f8a5908b9600781cd8d646fea92eee1aca5c"
     },
     {
-      "fetched_at": "2026-08-11T16:01:08.500124Z",
+      "fetched_at": "2026-08-31T15:21:12.468115234Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27westus2%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "a670acd42690f986864484c15d6f12d4513cd87af64f051aecae7e18075f009d"
+      "sha256": "a4e0da1f572301045c726885f8561417fed53b63fc035f835e1fd25aa7e69322"
     },
     {
-      "fetched_at": "2026-08-11T16:01:10.2748Z",
+      "fetched_at": "2026-08-31T15:21:14.081438772Z",
       "observed_at": null,
       "url": "https://prices.azure.com/api/retail/prices?%24filter=serviceName+eq+%27Virtual+Machines%27+and+armRegionName+eq+%27westus3%27+and+priceType+eq+%27Consumption%27\u0026api-version=2023-01-01-preview\u0026currencyCode=USD",
-      "sha256": "9618d64711b031d107387503cdd09ff3844f84246fd8bdaf4fdc7473337bd035"
+      "sha256": "2afbdd0ae69bdeea1109450f62ce80ebfd26e1b80f76080b25a658c436df69a5"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.172854Z",
+      "fetched_at": "2026-08-31T15:19:32.178946493Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/bsv2-series",
-      "sha256": "99b08b24404f395ea73a8708626efba82ae5eca49ca3d3d5263fe6704f59ead8"
+      "sha256": "aff9b942d2c25802b1e894493cfc477fad0d9271daa6f55bf54e28e6384fdd7b"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.312642Z",
+      "fetched_at": "2026-08-31T15:19:32.473358212Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/basv2-series",
-      "sha256": "db9e4dcfaedce8c58f6c3565affddbcd522270bbca9df9b29c0208dd596ac0ac"
+      "sha256": "99693542d7f7c7401da7cc069b4026e4e25f6040bff315721475de7b011c6dd0"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.326248Z",
+      "fetched_at": "2026-08-31T15:19:32.499694191Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/bpsv2-series",
-      "sha256": "be591bb5da44efce2192ae596447d1460f86b0d398069ae705a5defccf20ffb0"
+      "sha256": "e9a1e357476ffb27b94c720176ed3c6feb98ce6fff5c3b4b5795928d09dec3f6"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.339149Z",
+      "fetched_at": "2026-08-31T15:19:32.608329463Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dv5-series",
-      "sha256": "9c842c4b9b68229e8c8dbb49e49beaf3dcb008b855ebb4cd81c6ce77d86f0b53"
+      "sha256": "3d465e9993f05fa639894c27fdbfcb2624e3fcaa0ca89044fadf48448c3bd42a"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.35Z",
+      "fetched_at": "2026-08-31T15:19:32.703041959Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dsv5-series",
-      "sha256": "44a6ff11a9035a206dc73b2703167d968e6694a5e4d795b623de911d2507f19f"
+      "sha256": "81a45649c51a6559df11ce0e9a91ad02231ad272fbba5c18d8d080ba41e63ce8"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.363878Z",
+      "fetched_at": "2026-08-31T15:19:32.819037618Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/ddv5-series",
-      "sha256": "9ed86fc61b4f3baaaa18c538eaa6ff97bec65eb166d0b91c743121ad92e832b7"
+      "sha256": "9a40566ce6b245b35d72c10bc7f67b4befd96dfa465212a497074a14e15da68e"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.374794Z",
+      "fetched_at": "2026-08-31T15:19:32.919446465Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/ddsv5-series",
-      "sha256": "93d2ca66fa14d78b368d51b077ae05ddb127c6a54a99709767edd3147e16e828"
+      "sha256": "bab083fa642178ab6c8c630686c876028be0f507822471fe48e8cd5d127bf8a5"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.387911Z",
+      "fetched_at": "2026-08-31T15:19:33.019746333Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dasv5-series",
-      "sha256": "f9f6e019467a7302039ce135d39386c6bae8961bf5a0b415e9b1255285e8cde6"
+      "sha256": "145e1a6ed0f49a561e3081e8c99f028d10fb1d91ec2f2440398a050a60bd1d77"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.398139Z",
+      "fetched_at": "2026-08-31T15:19:33.066320633Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dadsv5-series",
-      "sha256": "d5ef2cd697ade3bc1300ea6f289c595a313ba4ea9b66c251e1570caea44ad1f2"
+      "sha256": "b5f5043ddce3154ed7344f484bbed00a242a6302daa2d23a002c127bf9038fcb"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.408325Z",
+      "fetched_at": "2026-08-31T15:19:33.163033357Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dpsv5-series",
-      "sha256": "f8a683bc9708730e14d06975f30b2f0b53f1808e2b212d7dd4931c86bc4c2d7c"
+      "sha256": "164ed761262a6c4186645e92fb78dca0c73c5367a845737609dd412a77d6124d"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.419563Z",
+      "fetched_at": "2026-08-31T15:19:33.261794576Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dpdsv5-series",
-      "sha256": "7bc7ea4e7874e16cdced53b74f620e7f2264319162e15a549bc1b4fee20c02fd"
+      "sha256": "2c4e62fdb6204797aa2fd4a3b2dcf13b874c8e864b55c66a8ded45d10a481ae0"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.430979Z",
+      "fetched_at": "2026-08-31T15:19:33.348911598Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dsv6-series",
-      "sha256": "d9cdb3a4880adafd713b17b360af9c337ccc7c09764d21038ea6904fe70dcef0"
+      "sha256": "77198093a2507ca0656ea7d5eb120179777b629ef6a0976a2b013798f778d945"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.443658Z",
+      "fetched_at": "2026-08-31T15:19:33.48132041Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dasv6-series",
-      "sha256": "a19bbb278aa1defb07813cb4890660a8676ec2277cfe1d4ea0e75127ef3560ad"
+      "sha256": "a52da247e055d1983a65a8bc9ce1426bd6d2c177a0e8d76a15cdeadeb2835781"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.453523Z",
+      "fetched_at": "2026-08-31T15:19:33.669081804Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dalsv6-series",
-      "sha256": "663de9e4e169608232abe9fef7bdc8d81c323ed919eb4557fe868ce406328351"
+      "sha256": "7c5a20d08b3c300e399dcb6b1b21a4bf084a11020a0d0ffa822e7f5839e28089"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.465892Z",
+      "fetched_at": "2026-08-31T15:19:33.783504912Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dpsv6-series",
-      "sha256": "43593dd3dac3abca0b276a4741337d416cd8cb18641cd64ea1fb11bbecac9b49"
+      "sha256": "e32fc325835b7d6d93e82f17929bc6670c8b93af871e1889b95c5fa5f40d2889"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.47658Z",
+      "fetched_at": "2026-08-31T15:19:33.896305542Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/compute-optimized/fsv2-series",
-      "sha256": "383e949381cbd724e6cd5c40ec437ee11991c2d4e232459ed3d5571b754c41dc"
+      "sha256": "5711d0f577acf2c896ce04532d77159a2954c359f8f95fe44e84902bd1bbf794"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.486979Z",
+      "fetched_at": "2026-08-31T15:19:33.995470306Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/compute-optimized/fasv6-series",
-      "sha256": "dcbda32b4a17a167fc85380dcd0fda51de3116c09920d1e5688662aeeba3e74e"
+      "sha256": "110a7ba3110170c759b6c66c36e93d05436b0b9e2de65b25de15494da070e9b7"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.497072Z",
+      "fetched_at": "2026-08-31T15:19:34.076903211Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/compute-optimized/falsv6-series",
-      "sha256": "c8f5b069b62b88b771f411133e17820e40772ba4c0166577e6f214fa79f30613"
+      "sha256": "48c9cf437b4d12d69b82048885379a545266f110f83d35b347ec60a5f88f5f23"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.508391Z",
+      "fetched_at": "2026-08-31T15:19:34.191320426Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/ev5-series",
-      "sha256": "27fd785c82fe5f8c14c827d0bc9e6e22d760101b2394eb8461c2f0e79884780d"
+      "sha256": "b4cc08eb10efafd94f9a88db863038e2095006f36ff0dbea1abf234aed89fcca"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.518537Z",
+      "fetched_at": "2026-08-31T15:19:34.339250786Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/esv5-series",
-      "sha256": "7706065220ab55b8e6e9dab4f888ac4b78558ef8208ac79e5020897431f16bba"
+      "sha256": "4523b8bb4dc302344ca04d96cbc3fd0f6cfe26424af7fda209ad3d836bc485ae"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.529478Z",
+      "fetched_at": "2026-08-31T15:19:34.491348367Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/edv5-series",
-      "sha256": "9cad9ac3da2e5a0547519f610396abced2fe4e7358d86f30946e1e8314dd9264"
+      "sha256": "d64351e8938df43a450cff7a150c4b1802d7e0c2fcb169fc0cb5c1a28c19e429"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.541858Z",
+      "fetched_at": "2026-08-31T15:19:34.671167008Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/edsv5-series",
-      "sha256": "4437cc8d5fd313be59e7d97080d660c43ab57df796c680a2c743a60fa1929da5"
+      "sha256": "3d1df1556f682fa9ab5731eedceaa4e2a51d0470e2762e671502cb8ca2c8a328"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.552374Z",
+      "fetched_at": "2026-08-31T15:19:34.792825911Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/easv5-series",
-      "sha256": "5283abd1d6435bb4f39f6187a4ecabd8eefb3ad9976cf095110038ca4ad2575d"
+      "sha256": "817e09a31b698009cf17775e838c2233568d890e6df2db632fad44b3c6b1eaaf"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.564985Z",
+      "fetched_at": "2026-08-31T15:19:34.98869589Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/epsv5-series",
-      "sha256": "7d0775a67a696f0c59c3468e1ab9f43b31529f8d6195822b94c57af4b466c3bd"
+      "sha256": "ae391955483c8a226193cba265bd3b729a66926c8c0aa3d51de40ea7b73b1354"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.576742Z",
+      "fetched_at": "2026-08-31T15:19:35.172661698Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/esv6-series",
-      "sha256": "610d0230f2295fd8d6fd8e15a097ffe3d69e166fb524242a1b7ef2255ae239ce"
+      "sha256": "97e8118e21e897a4dfe2ff00fb6e09a455869433a896437b1385d8f4259f657f"
     },
     {
-      "fetched_at": "2026-08-11T15:59:45.587779Z",
+      "fetched_at": "2026-08-31T15:19:35.257290545Z",
       "observed_at": null,
       "url": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/memory-optimized/easv6-series",
-      "sha256": "444b48dfe4404816d8629afb52128e0267b65004cfac5a4ba7a100a37462a02c"
+      "sha256": "8419f7ca437bb9196a0c1b31d98a961654e5180b8457c99da68bc3d342056132"
     }
   ],
   "min_records": {
