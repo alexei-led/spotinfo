@@ -1,6 +1,6 @@
 module spotinfo
 
-go 1.26
+go 1.26.0
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.43.3
@@ -11,8 +11,8 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v2 v2.27.7
-	golang.org/x/net v0.57.0
-	golang.org/x/oauth2 v0.36.0
+	golang.org/x/net v0.59.0
+	golang.org/x/oauth2 v0.37.0
 )
 
 require (
@@ -45,8 +45,8 @@ require (
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/xrash/smetrics v0.0.0-20250705151800-55b8f293f342 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
-	golang.org/x/time v0.15.0
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/time v0.16.0
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
